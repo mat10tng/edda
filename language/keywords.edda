@@ -1,0 +1,326 @@
+# Edda keyword registry, generated from the language reference
+# (revision 24, 1 Oct 2026). One entry per word. The checker refuses
+# any keyword that is not here. Hover text in the views comes from
+# means and why. A new word is added like a rule, with a because:.
+
+keyword entity <name>
+  section: entities
+  means:   a kind of business object the system keeps
+  why:     the glossary; every sentence is over declared entities
+  since:   v1
+
+keyword role <name>
+  section: entities
+  means:   a kind of person who uses the system
+  why:     permissions and who: name roles; an example makes one person of a role
+  since:   v1
+
+keyword <name>: one <entity>
+  section: entities
+  means:   a property that holds one such entity
+  why:     a relation with a count the checker reads
+  since:   v1
+
+keyword <name>: many <entity>
+  section: entities
+  means:   a property that holds any number
+  why:     lists for comprehension and counts
+  since:   v1
+
+keyword <name>, optional
+  section: entities
+  means:   may be empty
+  why:     is set and is empty can be asked
+  since:   v1
+
+keyword <name>: default <value>
+  section: entities
+  means:   the value when the entity is made
+  why:     the industry word (SQL, JSON Schema, OpenAPI); an example need not state it
+  since:   v1
+
+keyword a |b |c
+  section: entities
+  means:   the only values a property may hold; the union bar of TypeScript and grammar notation; default before one of them marks the starting value
+  why:     a status model the checker can follow; the read view says "one of"
+  since:   v1
+
+keyword may change: a to b
+  section: entities
+  means:   the only allowed status changes
+  why:     an operation that breaks one fails; unreachable statuses are flagged
+  since:   v1
+
+keyword <value>: <role> reads "<text>"
+  section: entities
+  means:   the words a role sees for a value
+  why:     the one piece of screen wording kept; the binding maps it
+  since:   v1
+
+keyword <name>: <expression>
+  section: entities
+  means:   a computed property; the short form of a read operation with no inputs beyond its entity
+  why:     sentences can say the order's units_held
+  since:   v1
+
+keyword part of <entity>
+  section: entities
+  means:   this entity belongs to that one
+  why:     placement: a story about a part lives with its owner; the frame rule reads the owner
+  since:   v1
+
+keyword always <fact>
+  section: entities
+  means:   holds for every entity of this kind, after every operation
+  why:     an invariant the checker tests on the suite
+  since:   v1
+
+keyword while <condition>, <fact>
+  section: entities
+  means:   holds whenever the condition does
+  why:     a state-bound invariant; EARS WHILE
+  since:   v1
+
+keyword may create: <who>
+  section: permissions
+  means:   who may make one
+  why:     the standard CRUD verbs, so the matrix entity x verb x role is mechanical
+  since:   v1
+
+keyword may read: <who>
+  section: permissions
+  means:   who may see one
+  why:     replaces hidden from; a while on it hides in a state
+  since:   v1
+
+keyword may update: <who>
+  section: permissions
+  means:   who may change one
+  why:     the default who: of a changing operation
+  since:   v1
+
+keyword may delete: <who>
+  section: permissions
+  means:   who may remove one for good
+  why:     most entities say nobody; removal is usually an update
+  since:   v1
+
+keyword <role> whose <condition>
+  section: permissions
+  means:   the role, narrowed to people for whom the condition holds
+  why:     ownership: shop_user whose shop is the order's shop
+  since:   v1
+
+keyword , while <condition>
+  section: permissions
+  means:   only while the condition holds on the entity
+  why:     hides a removed order from the workshop
+  since:   v1
+
+keyword nobody
+  section: permissions
+  means:   no one
+  why:     default deny made explicit
+  since:   v1
+
+keyword the actor
+  section: permissions
+  means:   the person asking now
+  why:     refusals, outcomes and whose can name the asker
+  since:   v1
+
+keyword epic <sentence> # <id>
+  section: stories
+  means:   one sentence of intent, no rules; done when its stories are
+  why:     one level above the story, nothing deeper
+  since:   v1
+
+keyword story <sentence> # <id>
+  section: stories
+  means:   who wants what and why; the unit of done, review, version and delivery
+  why:     the todo list and the delivery are lists of stories
+  since:   v1
+
+keyword as a <role>
+  section: stories
+  means:   the role the story serves; must be declared
+  why:     the one checked part of the sentence; the read view groups by role
+  since:   v1
+
+keyword i want <text>
+  section: stories
+  means:   the want, free text
+  why:     stored and shown; nothing runs on it
+  since:   v1
+
+keyword so that <text>
+  section: stories
+  means:   the reason, free text
+  why:     same
+  since:   v1
+
+keyword epic: <id>
+  section: stories
+  means:   which epic this story belongs to
+  why:     grouping; a label, changeable without a new version
+  since:   v1
+
+keyword tags: a, b
+  section: stories
+  means:   any labels
+  why:     grouping and search across epics
+  since:   v1
+
+keyword note: <text>
+  section: stories
+  means:   something the grammar cannot say; the checker ignores it, the read view shows it in grey
+  why:     nothing the customer said is lost; repeated notes are the evidence for a new word
+  since:   v1
+
+keyword question: <text>
+  section: stories
+  means:   something undecided
+  why:     a warning on the story, never a block
+  since:   v1
+
+keyword operation <name>(<inputs>)
+  section: operations
+  means:   one thing an actor can ask for; the anchor the code carries
+  why:     states what right is, is testable, and is where spec and code meet
+  since:   v1
+
+keyword who: <who>
+  section: operations
+  means:   who may ask; optional
+  why:     overrides the entity's may update, may create or may read
+  since:   v1
+
+keyword if <condition>, + refuse: "<reason>"
+  section: operations
+  means:   when asked and the condition holds, nothing changes and this reason is given
+  why:     preconditions with a reason tests can match; EARS IF/THEN
+  since:   v1
+
+keyword when <name> succeeds, ensure: + facts
+  section: operations
+  means:   what is true after; one fact per line
+  why:     postconditions; EARS WHEN/SHALL
+  since:   v1
+
+keyword returns <expression>
+  section: operations
+  means:   what a read operation gives back
+  why:     one word for reads and writes; returns or ensure, never both
+  since:   v1
+
+keyword also changes: <entity's property>
+  section: operations
+  means:   a change the frame rule should allow without an ensure line
+  why:     the frame rule reads everything else as unchanged
+  since:   v1
+
+keyword x is v, x is not v
+  section: conditions and values
+  means:   equal, not equal
+  since:   v1
+
+keyword x is more than v, x is less than v
+  section: conditions and values
+  means:   number or time comparison
+  since:   v1
+
+keyword x is at least v, x is at most v
+  section: conditions and values
+  means:   inclusive comparison
+  since:   v1
+
+keyword x is before v, x is after v
+  section: conditions and values
+  means:   time comparison in words
+  since:   v1
+
+keyword x is longer than N characters
+  section: conditions and values
+  means:   text length
+  since:   v1
+
+keyword x is set, x is empty
+  section: conditions and values
+  means:   an optional property has, or has no, value
+  since:   v1
+
+keyword x in [a, b]
+  section: conditions and values
+  means:   membership, Python order
+  since:   v1
+
+keyword a and b, a or b, not a
+  section: conditions and values
+  means:   combined; not first; brackets when mixed
+  since:   v1
+
+keyword the <entity>'s <property>
+  section: conditions and values
+  means:   reach into an entity; chains allowed: the order's shop's name
+  since:   v1
+
+keyword [x for x in list if condition]
+  section: conditions and values
+  means:   a filtered list, Python order
+  since:   v1
+
+keyword sum(e for x in list), count(list), min, max, any, all
+  section: conditions and values
+  means:   the six list words
+  since:   v1
+
+keyword now, today
+  section: conditions and values
+  means:   the time or day the operation runs, business zone, no offset
+  since:   v1
+
+keyword the actor
+  section: conditions and values
+  means:   the person asking
+  since:   v1
+
+keyword "text", 3, 500 characters, 2026-10-03 10:00
+  section: conditions and values
+  means:   literals
+  since:   v1
+
+keyword example <sentence>
+  section: examples
+  means:   one concrete run; a test
+  why:     the examples are the acceptance criteria that run
+  since:   v1
+
+keyword given <entity> <name> with <property> <value>, ...
+  section: examples
+  means:   make an entity and name it; items align in one column
+  why:     names declared here are used below; no glue is written
+  since:   v1
+
+keyword when <actor> asks <operation>(<args>) [at <time>]
+  section: examples
+  means:   the request; time optional
+  why:     one fixed shape so the checker finds actor and operation
+  since:   v1
+
+keyword then done + facts
+  section: examples
+  means:   the operation succeeded and these facts hold
+  why:     postcondition check, plus the frame rule
+  since:   v1
+
+keyword then refused: "<reason>" + facts
+  section: examples
+  means:   the operation refused with this reason; facts unchanged
+  why:     the same word as the operation's refuse:; tests match the spec's reason; the binding maps app wording
+  since:   v1
+
+keyword several when/then pairs
+  section: examples
+  means:   a flow in one example
+  why:     place, then remove
+  since:   v1
