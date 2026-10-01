@@ -1,0 +1,14 @@
+role agent                        # writes .edda files from the customer's words
+role operator                     # reads the read view, approves, owns level 1
+
+entity keyword                    # one word of the language, from language/keywords.edda
+  word
+  means
+  why
+  since
+
+entity problem                    # one thing the checker found
+  kind: default refused | flagged
+  file
+  line
+  message

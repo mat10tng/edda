@@ -1,0 +1,143 @@
+entity story                      # one story in a spec_file
+  id                              # FUL-005
+  file: one spec_file
+  sentence
+  role_name
+  epic_id, optional
+  text                            # the story as it stands in the file
+  rules_text                      # its operations and examples only, normalised
+  approvals: many approval
+  version: count(approvals)
+  state: approved if count(approvals) is more than 0
+           and rules_text is approvals[-1]'s rules_text
+         else draft
+  may create: agent
+  may read:   agent, operator
+  may update: agent
+  may delete: nobody
+
+entity approval, part of story    # one block in the .edda.vc file
+  version
+  approved_at
+  approved_by
+  because, optional
+  text                            # the whole story as approved
+  rules_text
+
+story a story is a draft until the operator approves it             # EDDA-004
+  as a operator
+  i want a story whose operations or examples differ from its newest
+    approved copy to be a draft, whoever changed it
+  so that nothing the agent writes counts until I have said yes
+  epic: VC
+  tags: version, approval
+
+  operation state_of(story) returns story's state
+    who: agent, operator
+
+  example a new story is a draft
+    given story fresh with id "FUL-010", approvals []
+    when  agent asks state_of(fresh)
+    then  done
+          fresh's state is draft
+
+  example a story that matches its newest approval is approved
+    given approval a1 with version 1, rules_text "R1"
+          story same with id "FUL-005", rules_text "R1", approvals [a1]
+    when  agent asks state_of(same)
+    then  done
+          same's state is approved
+
+  example a changed rule makes a draft again
+    given approval a1 with version 1, rules_text "R1"
+          story changed with id "FUL-005", rules_text "R2", approvals [a1]
+    when  agent asks state_of(changed)
+    then  done
+          changed's state is draft
+
+  example a changed label does not make a draft
+    given approval a1 with version 1, rules_text "R1", text "T1"
+          story relabelled with id "FUL-005", rules_text "R1", text "T2",
+            approvals [a1]
+    when  agent asks state_of(relabelled)
+    then  done
+          relabelled's state is approved
+
+story the operator approves a story and the copy is kept            # EDDA-005
+  as a operator
+  i want my yes to append the whole story as a new version to the
+    .edda.vc file, with the date, my name and one line of because
+  so that every approved version is kept exactly and the agent cannot
+    write it
+  epic: VC
+  tags: version, approval
+
+  operation approve(story, because)
+    who: operator
+    if story's state is approved,
+      refuse: "nothing to approve: the story matches its newest version"
+    if count(check(story's file)) is more than 0
+      and any(p's kind is refused for p in check(story's file)),
+      refuse: "the file does not check"
+    when approve succeeds, ensure:
+      count(story's approvals) is the old count(story's approvals) + 1
+      story's approvals[-1]'s version is story's version
+      story's approvals[-1]'s text is story's text
+      story's approvals[-1]'s rules_text is story's rules_text
+      story's approvals[-1]'s approved_by is the actor
+      story's approvals[-1]'s approved_at is now
+      story's approvals[-1]'s because is because
+      story's state is approved
+
+  example the first approval makes version 1
+    given operator tuan
+          story fresh with id "FUL-010", rules_text "R1", text "T1",
+            approvals [], file good
+          spec_file good with path "fixtures/order.edda", stories [fresh]
+    when  tuan asks approve(fresh, "the shop asked for it") at 2026-10-01 14:00
+    then  done
+          fresh's version is 1
+          fresh's approvals[-1]'s approved_by is tuan
+          fresh's approvals[-1]'s because is "the shop asked for it"
+          fresh's state is approved
+
+  example approving an approved story is refused
+    given operator tuan
+          approval a1 with version 1, rules_text "R1"
+          story same with id "FUL-005", rules_text "R1", approvals [a1],
+            file good
+          spec_file good with path "fixtures/order.edda", stories [same]
+    when  tuan asks approve(same, "")
+    then  refused: "nothing to approve: the story matches its newest version"
+          same's version is 1
+
+  example the agent may not approve
+    given agent bot
+          story fresh with id "FUL-010", rules_text "R1", approvals []
+    when  bot asks approve(fresh, "")
+    then  refused: "agent may not approve"
+
+story the operator sees what changed before saying yes               # EDDA-006
+  as a operator
+  i want the difference between the story in the file and its newest
+    approved copy as added, changed and removed sentences
+  so that I read the change, not the whole story, every time
+  epic: VC
+  tags: version, diff
+
+  operation diff(story) returns
+    [change for change in sentence_changes(story's approvals[-1]'s text, story's text)]
+    who: agent, operator
+    note: sentence_changes is a level 2 helper; a sentence is one line
+      of the story with its indentation removed
+
+  example an added refusal shows as added
+    given approval a1 with version 1,
+            text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
+          story grown with id "FUL-005", approvals [a1],
+            text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\"\n  if the order's units_sent is more than 0,\n    refuse: \"already sent\""
+    when  operator asks diff(grown)
+    then  done
+          count(diff(grown)) is 2
+          diff(grown)[0]'s kind is added
+          diff(grown)[0]'s sentence is "if the order's units_sent is more than 0,"

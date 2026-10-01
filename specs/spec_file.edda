@@ -1,0 +1,120 @@
+entity spec_file                  # one .edda file under specs/
+  path
+  entity_name, optional           # the entity its first entity line declares
+  stories: many story
+  notes: many note
+  may create: agent
+  may read:   agent, operator
+  may update: agent
+  may delete: nobody
+
+entity note, part of spec_file    # one note: line, wherever it sits
+  text
+  story_id, optional
+
+story the checker refuses what it cannot read               # EDDA-001
+  as an agent
+  i want every sentence that is not in the grammar refused with its line
+  so that a file that passes has one reading and nothing hidden in it
+  epic: CHK
+  tags: checker, level-1
+
+  operation check(file) returns
+    [problem for problem in file's problems]
+    who: agent, operator
+
+  example an unknown keyword is refused
+    given spec_file bad with path "fixtures/unknown_keyword.edda"
+    when  agent asks check(bad)
+    then  done
+          count(check(bad)) is 1
+          check(bad)[0]'s kind is refused
+          check(bad)[0]'s line is 3
+          check(bad)[0]'s message is "unknown keyword: ensures"
+
+  example an unknown name is refused
+    given spec_file bad with path "fixtures/unknown_name.edda"
+    when  agent asks check(bad)
+    then  done
+          check(bad)[0]'s kind is refused
+          check(bad)[0]'s message is "unknown name: units_sold"
+
+  example a tab is refused
+    given spec_file bad with path "fixtures/tab.edda"
+    when  agent asks check(bad)
+    then  done
+          check(bad)[0]'s message is "a tab; use two spaces"
+
+  example a step at level 1 is refused
+    given spec_file bad with path "fixtures/step_at_level_1.edda"
+    when  agent asks check(bad)
+    then  done
+          check(bad)[0]'s message is "a step at level 1: set the order's status"
+
+  example returns and ensure on one operation is refused
+    given spec_file bad with path "fixtures/returns_and_ensure.edda"
+    when  agent asks check(bad)
+    then  done
+          check(bad)[0]'s message is "returns and ensure on one operation: open_orders"
+
+  example a status not in its list is refused
+    given spec_file bad with path "fixtures/unknown_status.edda"
+    when  agent asks check(bad)
+    then  done
+          check(bad)[0]'s message is "status not in its list: archived"
+
+  example a story in the wrong file is refused
+    given spec_file bad with path "fixtures/wrong_file.edda"
+    when  agent asks check(bad)
+    then  done
+          check(bad)[0]'s message is "story FUL-005 belongs in order.edda"
+
+  example a clean file has no problems
+    given spec_file good with path "fixtures/order.edda"
+    when  agent asks check(good)
+    then  done
+          check(good) is []
+
+story the checker flags what is allowed but doubtful              # EDDA-002
+  as a operator
+  i want unreachable statuses, stories without an example and open
+    questions on done stories shown as flags, not refusals
+  so that the file still passes and I can decide what to do
+  epic: CHK
+  tags: checker, level-1
+
+  example a status nothing reaches is flagged
+    given spec_file odd with path "fixtures/unreachable_status.edda"
+    when  agent asks check(odd)
+    then  done
+          check(odd)[0]'s kind is flagged
+          check(odd)[0]'s message is "no change reaches status: archived"
+
+  example a story with no example is flagged
+    given spec_file odd with path "fixtures/no_example.edda"
+    when  agent asks check(odd)
+    then  done
+          check(odd)[0]'s kind is flagged
+          check(odd)[0]'s message is "story FUL-009 has no example"
+
+story every note is collected in one place                          # EDDA-003
+  as a operator
+  i want every note: line across all files listed together, grouped by
+    wording
+  so that a kind of note that keeps coming back shows itself
+  epic: CHK
+  tags: checker, backlog
+  question: should two notes with the same words but different stories
+    count as one kind or two?
+
+  operation notes(files) returns
+    [note for file in files for note in file's notes]
+    who: agent, operator
+
+  example notes from two files are listed together
+    given spec_file a with path "fixtures/notes_a.edda"
+          spec_file b with path "fixtures/notes_b.edda"
+    when  operator asks notes([a, b])
+    then  done
+          count(notes([a, b])) is 3
+          notes([a, b])[0]'s text is "the stock feed is refreshed every night"
