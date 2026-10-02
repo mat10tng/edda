@@ -22,6 +22,7 @@ stories:
     so_that: "the list is clean"
     operations:
       remove:
+        # frees the held stock
         is: "takes an unsent order off the list"
         inputs: {order: order}
         who: ["shop_user"]
@@ -30,7 +31,6 @@ stories:
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
-        returns: "order"
         ensure:
           - "order.status = removed"
     examples:

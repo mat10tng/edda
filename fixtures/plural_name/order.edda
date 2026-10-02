@@ -5,11 +5,17 @@ roles:
     is: "a person at a shop"
 
 entities:
+  line:
+    is: "one row of an order"
+    properties:
+      units: DEFAULT 0
+
   order:
     is: "what a workshop buys"
     properties:
       status: DEFAULT incoming | removed
       units_sent: DEFAULT 0
+      line: MANY line
     may_change: {status: {incoming: [removed]}}
     may_update: ["shop_user"]
 
@@ -30,7 +36,6 @@ stories:
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
-        returns: "order"
         ensure:
           - "order.status = removed"
     examples:

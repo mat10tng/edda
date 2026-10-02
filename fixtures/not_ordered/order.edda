@@ -5,11 +5,17 @@ roles:
     is: "a person at a shop"
 
 entities:
+  line:
+    is: "one row of an order"
+    properties:
+      units: DEFAULT 0
+
   order:
     is: "what a workshop buys"
     properties:
       status: DEFAULT incoming | removed
       units_sent: DEFAULT 0
+      lines: MANY line
     may_change: {status: {incoming: [removed]}}
     may_update: ["shop_user"]
 
@@ -30,9 +36,13 @@ stories:
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
-        returns: "order"
         ensure:
           - "order.status = removed"
+      open_lines:
+        is: "lists the rows of an order"
+        inputs: {order: order}
+        who: ["shop_user"]
+        returns: "order.lines"
     examples:
       "a fresh order is removed":
         given:
@@ -63,3 +73,14 @@ stories:
             then: [DONE]
           - when: {actor: erik, call: "remove(purchase)"}
             then: [{refused: "already removed"}, "purchase.status = removed"]
+      "the first row is read":
+        given:
+          - actor: erik
+            with: {roles: [shop_user]}
+          - line: row
+            with: {units: 0}
+          - order: purchase
+            with: {status: incoming, lines: [row]}
+        steps:
+          - when: {actor: erik, call: "open_lines(purchase)"}
+            then: [DONE, "RESULT[0].units = 0"]

@@ -23,14 +23,13 @@ stories:
     operations:
       remove:
         is: "takes an unsent order off the list"
-        inputs: {order: order}
+        inputs: [order]
         who: ["shop_user"]
         refuse:
           - when: "order.status = removed"
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
-        returns: "order"
         ensure:
           - "order.status = removed"
     examples:

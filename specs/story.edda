@@ -2,593 +2,629 @@ entities:
   story:
     is: "one story in a spec_file"
     properties:
-      id: text                          # FUL-005
-      file: one spec_file
-      about: text                       # the entity it is about
-      sentence: text
-      role_name: text
-      epic_id: text, optional
-      text: text                        # the story as it stands in the file
-      rules_text: text                  # its operations and examples as parsed:
-                                        #   comments, blank lines, trailing
-                                        #   spaces, notes and questions removed;
-                                        #   string contents and nesting kept
-      entities: many entity_block       # every entity block the story names
-      versions: many version, in order  # oldest first; the newest is versions[-1]
-      version: {computed: "count(versions)"}
-      approved: {computed: "count(versions) is more than 0
-                            and rules_text is versions[-1]'s rules_text"}
-      changes: many change, in order    # between versions[-1]'s text and text:
-                                        #   every line outside the longest common
-                                        #   sequence of lines is a change, removed
-                                        #   if in the old text, added if in the
-                                        #   new; by line; never approved: all added
-      sentences: many sentence, in order  # the read view of text, one per rule
+      file: spec_file
+      id: TEXT, DERIVED
+      about: TEXT, DERIVED
+      as_a: TEXT, DERIVED
+      sentence: TEXT, DERIVED
+      epic: TEXT, OPTIONAL, DERIVED
+      text: TEXT, DERIVED
+      rules_text: TEXT, DERIVED
+      blocks: MANY block, IN ORDER, DERIVED
+      versions: MANY version, IN ORDER, DERIVED
+      version: {computed: "COUNT(versions)"}
+      approved: {computed: "COUNT(versions) > 0 AND rules_text = versions[-1].rules_text"}
+      pins_stale: {computed: "COUNT(versions) > 0 AND ANY(p.number < p.block.version FOR p IN versions[-1].pins)"}
+      changes: MANY change, IN ORDER, DERIVED
+      sentences: MANY sentence, IN ORDER, DERIVED
     may_create: ["agent"]
     may_read: ["agent", "operator"]
-    may_update: ["agent"]
-    may_delete: ["nobody"]
+    may_update: ["agent", "operator"]
+    may_delete: ["NOBODY"]
+
+  block:
+    is: "the definition of one entity or role in a spec_file, versioned like a story"
+    properties:
+      file: spec_file
+      kind: entity | role, DERIVED
+      name: TEXT, DERIVED
+      text: TEXT, DERIVED
+      versions: MANY version, IN ORDER, DERIVED
+      version: {computed: "COUNT(versions)"}
+      approved: {computed: "COUNT(versions) > 0 AND text = versions[-1].text"}
+    may_create: ["agent"]
+    may_read: ["agent", "operator"]
+    may_update: ["agent", "operator"]
+    may_delete: ["NOBODY"]
 
   version:
-    is: "one entry in the .edda.vc file: a story or entity block as approved"
+    is: "one entry in a history: a story or a block as approved"
+    part_of: history
     properties:
-      number: number
-      approved_at: time
-      approved_by: text
-      because: text, optional
-      text: text                        # the whole block as approved
-      rules_text: text
-      against: many pin                 # for a story: the entity versions it
-                                        #   was approved against
+      number: NUMBER
+      approved_at: TIME
+      approved_by: TEXT
+      because: TEXT, OPTIONAL
+      text: TEXT
+      rules_text: TEXT, DERIVED
+      pins: MANY pin, IN ORDER
+      sentences: MANY sentence, IN ORDER, DERIVED
 
   pin:
-    is: "one entity version a story was approved against"
+    is: "one block version a story was approved against"
     part_of: version
     properties:
-      entity_block: one entity_block
-      number: number
-
-  entity_block:
-    is: "the definition of one entity in a spec_file, versioned like a story"
-    properties:
-      name: text
-      file: one spec_file
-      text: text
-      versions: many version, in order
-      version: {computed: "count(versions)"}
-      approved: {computed: "count(versions) is more than 0
-                            and text is versions[-1]'s text"}
+      kind: entity | role
+      name: TEXT
+      number: NUMBER
+      block: block, DERIVED
 
   sentence:
     is: "one line of the read view"
     properties:
-      kind: story | permission | refusal | outcome | invariant | note | question | example
-      text: text
+      kind: story | note | question | operation | permission | refusal | outcome | read | invariant | example | given | when | then
+      text: TEXT
+      line: NUMBER
+      shade: plain | grey | warning
 
   change:
     is: "one difference between two versions of a story"
     properties:
       kind: added | removed
-      line: number                      # in the newer text; for removed, where it sat
-      sentence: text                    # the line with its indentation, comment removed
+      line: NUMBER
+      sentence: TEXT
 
 stories:
   EDDA-004:
     story: "a story is a draft until the operator approves it"
     about: story
     as_a: operator
-    i_want: "a story whose operations or examples differ from its newest
-      approved copy to be a draft, whoever changed it"
+    i_want: "a story whose rules differ from its newest approved copy to be a draft, whoever changed it, and a rule whose wording moved away from its meaning flagged"
     so_that: "nothing the agent writes counts until I have said yes"
     epic: VC
     tags: [version, approval]
+    notes:
+      - "every story here comes from a fixture folder with its history, so the normalised text and rules_text are computed from the source, never supplied"
     examples:
       "a new story is a draft":
         given:
-          - story: fresh
-            id: "FUL-010"
-            versions: []
+          - spec_file: fresh
+            with: {fixture: order}
         steps:
-          - then: ["fresh is not approved", "fresh's version is 0"]
+          - then: ["NOT fresh.stories[0].approved", "fresh.stories[0].version = 0"]
       "a story that matches its newest version is approved":
         given:
-          - version: v1
-            number: 1
-            rules_text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "already removed"
-          - story: same
-            id: "FUL-005"
-            versions: [v1]
-            rules_text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "already removed"
+          - spec_file: same
+            with: {fixture: approved}
         steps:
-          - then: ["same is approved", "same's version is 1"]
-      "a changed refusal makes a draft again":
+          - then: ["same.stories[0].approved", "same.stories[0].version = 1"]
+      "a changed reason makes a draft again":
         given:
-          - version: v1
-            number: 1
-            rules_text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "already removed"
-          - story: changed
-            id: "FUL-005"
-            versions: [v1]
-            rules_text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "the order is already removed"
+          - spec_file: changed
+            with: {fixture: reason_changed}
         steps:
-          - then: ["changed is not approved"]
-      "a changed example makes a draft again":
+          - then: ["NOT changed.stories[0].approved", "changed.stories[0].version = 1"]
+      "an added refusal and example make a draft again":
         given:
-          - version: v1
-            number: 1
-            rules_text: |
-              examples:
-                "a":
-                  given:
-                    - order: o
-                      status: incoming
-                  steps:
-                    - then: ["o's status is incoming"]
-          - story: changed
-            id: "FUL-005"
-            versions: [v1]
-            rules_text: |
-              examples:
-                "a":
-                  given:
-                    - order: o
-                      status: removed
-                  steps:
-                    - then: ["o's status is removed"]
+          - spec_file: grown
+            with: {fixture: story_grown}
         steps:
-          - then: ["changed is not approved"]
-      "a changed label, note, comment or blank line does not make a draft":
+          - then: ["NOT grown.stories[0].approved"]
+      "two swapped refusals make a draft again":
         given:
-          - version: v1
-            number: 1
-            text: |
-              story: "remove orders"
-              tags: [shop]
-              operations:
-                remove:
-                  # frees the stock
-                  ensure:
-                    - "the order's status is removed"
-            rules_text: |
-              operations:
-                remove:
-                  ensure:
-                    - "the order's status is removed"
-          - story: relabelled
-            id: "FUL-005"
-            versions: [v1]
-            text: |
-              story: "remove orders"
-              tags: [shop, ordering]
-              notes: ["the shop asked for undo"]
-
-              operations:
-                remove:
-                  # frees the held stock
-                  ensure:
-                    - "the order's status is removed"
-            rules_text: |
-              operations:
-                remove:
-                  ensure:
-                    - "the order's status is removed"
+          - spec_file: swapped
+            with: {fixture: swapped}
         steps:
-          - then: ["relabelled is approved"]
+          - then: ["NOT swapped.stories[0].approved"]
+      "a changed tag, note, comment or blank line does not make a draft":
+        given:
+          - spec_file: relabelled
+            with: {fixture: relabelled}
+        steps:
+          - then: ["relabelled.stories[0].approved"]
+      "a comment alone does not make a draft":
+        given:
+          - spec_file: commented
+            with: {fixture: comment_changed}
+        steps:
+          - then: ["commented.stories[0].approved"]
+      "a changed reason under an unchanged when is flagged as wording drift":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: changed
+            with: {fixture: reason_changed}
+        steps:
+          - when: {actor: bot, call: "check(changed)"}
+            then:
+              - DONE
+              - "COUNT(RESULT) = 1"
+              - "RESULT[0].kind = flagged"
+              - "RESULT[0].rule = wording_drift"
+              - "RESULT[0].line = 32"
+              - "RESULT[0].message = \"FIX-001 remove: reason changed, when did not\""
+      "approval clears the drift":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: changed
+            with: {fixture: reason_changed}
+        steps:
+          - when: {actor: tuan, call: "approve(changed.stories[0], \"the shop wanted the longer wording\")"}
+            then: [DONE, "changed.stories[0].approved"]
+          - when: {actor: bot, call: "check(changed)"}
+            then: [DONE, "RESULT = []"]
 
   EDDA-005:
     story: "the operator approves a story and the copy is kept"
     about: story
     as_a: operator
-    i_want: "my yes to append the whole story as the next version to the
-      .edda.vc file, with the date, my name, one line of because, and the
-      version of every entity it names"
-    so_that: "every approved version is kept exactly, in order, and the agent
-      cannot write it"
+    i_want: "my yes to append the whole story as the next version to the history, with the date, my name, one line of because, and a pin on every entity and role it names"
+    so_that: "every approved version is kept exactly, in order, and the agent cannot write it"
     epic: VC
     tags: [version, approval]
     notes:
-      - "the agent is kept out of .edda.vc by a repository guard outside the
-        language; that guard is level 2 and is tested there"
-      - "the frame rule reads stored properties; computed ones follow"
+      - "the agent is kept out of the history by a repository guard outside the language; that guard, and the history surviving a re-read, are level 2 and are tested there"
     operations:
       approve:
-        inputs: {story: story, because: "text, optional"}
+        is: "records the operator's yes to a story as its next version"
+        inputs: {story: story, because: "TEXT, OPTIONAL"}
         who: ["operator"]
         refuse:
-          - when: "story is approved"
-            reason: "nothing to approve: the story matches its newest version"
-          - when: "any(p's kind is refused for p in check(story's file))"
+          - when: "ANY(p.kind = refused FOR p IN check(story.file))"
             reason: "the file does not check"
+          - when: "ANY(b.version = 0 FOR b IN story.blocks)"
+            reason: "approve its blocks first"
+          - when: "story.approved AND NOT story.pins_stale"
+            reason: "nothing to approve: the story matches its newest version and its pins are current"
         ensure:
-          - "story's versions is old(story's versions) + [story's versions[-1]]"
-          - "story's versions[-1]'s number is old(story's version) + 1"
-          - "story's versions[-1]'s text is story's text"
-          - "story's versions[-1]'s rules_text is story's rules_text"
-          - "story's versions[-1]'s approved_by is actor"
-          - "story's versions[-1]'s approved_at is now"
-          - "story's versions[-1]'s because is because"
-          - "count(story's versions[-1]'s against) is count(story's entities)"
-          - "all(pin's number is pin's entity_block's version
-              for pin in story's versions[-1]'s against)"
-          - "story is approved"
+          - fact: "story.file.history.text STARTS WITH OLD(story.file.history.text)"
+            means: "the earlier entries are kept untouched"
+          - fact: "COUNT(story.versions) = OLD(COUNT(story.versions)) + 1"
+            means: "one new version is added at the end"
+          - "story.versions[-1].number = COUNT(story.versions)"
+          - "story.versions[-1].text = story.text"
+          - "story.versions[-1].approved_by = ACTOR.name"
+          - "story.versions[-1].approved_at = NOW"
+          - "story.versions[-1].because = because"
+          - fact: "COUNT(story.versions[-1].pins) = COUNT(story.blocks)"
+            means: "one pin for every entity and role the story names, no extras"
+          - "ALL(ANY(p.block = b FOR p IN story.versions[-1].pins) FOR b IN story.blocks)"
+          - "ALL(p.number = p.block.version FOR p IN story.versions[-1].pins)"
+          - "story.approved"
+          - "NOT story.pins_stale"
     examples:
-      "the first approval makes version 1":
+      "the first approval makes version 1 and pins the blocks":
         given:
           - actor: tuan
-            roles: [operator]
+            with: {roles: [operator]}
           - spec_file: good
-            fixture: order
+            with: {fixture: blocks_approved}
         steps:
           - when:
               actor: tuan
-              call: "approve(good's stories[0], \"the shop asked for it\")"
+              call: "approve(good.stories[0], \"the shop asked for it\")"
               at: "2026-10-02 09:00"
             then:
-              - done
-              - "good's stories[0]'s version is 1"
-              - "good's stories[0]'s versions[0]'s approved_by is tuan"
-              - "good's stories[0]'s versions[0]'s approved_at is 2026-10-02 09:00"
-              - "good's stories[0]'s versions[0]'s because is \"the shop asked for it\""
-              - "good's stories[0]'s versions[0]'s against[0]'s entity_block's name is \"order\""
-              - "good's stories[0] is approved"
+              - DONE
+              - "good.stories[0].version = 1"
+              - "good.stories[0].versions[0].number = 1"
+              - "good.stories[0].versions[0].approved_by = \"tuan\""
+              - "good.stories[0].versions[0].approved_at = 2026-10-02 09:00"
+              - "good.stories[0].versions[0].because = \"the shop asked for it\""
+              - "good.stories[0].versions[0].text = good.stories[0].text"
+              - "COUNT(good.stories[0].versions[0].pins) = 2"
+              - "good.stories[0].versions[0].pins[0].kind = role"
+              - "good.stories[0].versions[0].pins[0].name = \"shop_user\""
+              - "good.stories[0].versions[0].pins[1].name = \"order\""
+              - "good.stories[0].versions[0].pins[1].number = 1"
+              - "good.stories[0].approved"
+              - "NOT good.stories[0].pins_stale"
       "a second approval keeps the first and adds version 2":
         given:
           - actor: tuan
-            roles: [operator]
-          - spec_file: good
-            fixture: order
-          - version: v1
-            number: 1
-            approved_at: "2026-10-01 14:00"
-            rules_text: "R1"
-            text: "T1"
-          - story: grown
-            id: "FUL-005"
-            file: good
-            versions: [v1]
-            rules_text: "R2"
-            text: "T2"
+            with: {roles: [operator]}
+          - spec_file: grown
+            with: {fixture: reason_changed}
         steps:
-          - when: {actor: tuan, call: "approve(grown)", at: "2026-10-02 09:00"}
+          - when: {actor: tuan, call: "approve(grown.stories[0])", at: "2026-10-02 09:00"}
             then:
-              - done
-              - "grown's version is 2"
-              - "grown's versions[0] is v1"
-              - "grown's versions[1]'s number is 2"
-              - "grown's versions[1]'s rules_text is \"R2\""
-              - "grown's versions[1]'s because is empty"
-              - "grown is approved"
-      "approving an approved story is refused":
+              - DONE
+              - "grown.stories[0].version = 2"
+              - "grown.stories[0].versions[0].number = 1"
+              - "grown.stories[0].versions[0].approved_at = 2026-09-28 10:05"
+              - "grown.stories[0].versions[1].number = 2"
+              - "grown.stories[0].versions[1].text = grown.stories[0].text"
+              - "grown.stories[0].versions[1].because IS EMPTY"
+              - "grown.stories[0].approved"
+      "approving an approved story with current pins is refused":
         given:
           - actor: tuan
-            roles: [operator]
-          - spec_file: good
-            fixture: order
-          - version: v1
-            number: 1
-            rules_text: "R1"
-          - story: same
-            id: "FUL-005"
-            file: good
-            versions: [v1]
-            rules_text: "R1"
+            with: {roles: [operator]}
+          - spec_file: same
+            with: {fixture: approved}
         steps:
-          - when: {actor: tuan, call: "approve(same)"}
+          - when: {actor: tuan, call: "approve(same.stories[0])"}
             then:
-              - refused: "nothing to approve: the story matches its newest version"
-              - "same's version is 1"
+              - refused: "nothing to approve: the story matches its newest version and its pins are current"
+              - "same.stories[0].version = 1"
+      "a story whose blocks have no version is refused":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: fresh
+            with: {fixture: order}
+        steps:
+          - when: {actor: tuan, call: "approve(fresh.stories[0])"}
+            then:
+              - refused: "approve its blocks first"
+              - "fresh.stories[0].version = 0"
       "a story in a file that does not check is refused":
         given:
           - actor: tuan
-            roles: [operator]
+            with: {roles: [operator]}
           - spec_file: bad
-            fixture: unknown_key
+            with: {fixture: unknown_key}
         steps:
-          - when: {actor: tuan, call: "approve(bad's stories[0])"}
+          - when: {actor: tuan, call: "approve(bad.stories[0])"}
             then:
               - refused: "the file does not check"
-              - "bad's stories[0]'s version is 0"
+              - "bad.stories[0].version = 0"
       "the agent may not approve":
         given:
           - actor: bot
-            roles: [agent]
+            with: {roles: [agent]}
           - spec_file: good
-            fixture: order
+            with: {fixture: blocks_approved}
         steps:
-          - when: {actor: bot, call: "approve(good's stories[0])"}
+          - when: {actor: bot, call: "approve(good.stories[0])"}
             then:
               - refused: "approve is not allowed for agent"
-              - "good's stories[0]'s version is 0"
+              - "good.stories[0].version = 0"
 
   EDDA-006:
     story: "the operator sees what changed before saying yes"
     about: story
     as_a: operator
-    i_want: "the difference between the story in the file and its newest
-      approved copy as added and removed lines, in order, so that a moved
-      rule shows too"
+    i_want: "the difference between the story in the file and its newest approved copy as added and removed lines, in order, so that a moved rule shows too"
     so_that: "I read the change, not the whole story, every time"
     epic: VC
     tags: [version, diff]
     operations:
       diff:
+        is: "lists the lines added and removed since the newest version"
         inputs: {story: story}
-        returns: "story's changes"
         who: ["agent", "operator"]
+        returns: "story.changes"
     examples:
-      "an added refusal shows as added":
+      "an added refusal and example show as added lines":
         given:
-          - version: v1
-            number: 1
-            text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "already removed"
-          - story: grown
-            id: "FUL-005"
-            versions: [v1]
-            text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "already removed"
-                    - when: "the order's units_sent is more than 0"
-                      reason: "already sent"
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: grown
+            with: {fixture: story_grown}
         steps:
-          - when: {actor: operator, call: "diff(grown)"}
+          - when: {actor: tuan, call: "diff(grown.stories[0])"}
             then:
-              - done
-              - "count(result) is 2"
-              - "result[0]'s kind is added"
-              - "result[0]'s line is 6"
-              - "result[0]'s sentence is \"      - when: \\\"the order's units_sent is more than 0\\\"\""
-              - "result[1]'s kind is added"
-              - "result[1]'s line is 7"
-      "a changed reason shows as one removed and one added":
+              - DONE
+              - "COUNT(RESULT) = 13"
+              - "ALL(c.kind = added FOR c IN RESULT)"
+              - "RESULT[0].line = 13"
+              - "RESULT[0].sentence = \"        - when: \\\"order.status = removed\\\"\""
+              - "RESULT[1].line = 14"
+              - "RESULT[2].line = 38"
+              - "RESULT[2].sentence = \"    \\\"a removed order is not removed again\\\":\""
+      "a changed reason shows as one removed and one added at the same place":
         given:
-          - version: v1
-            number: 1
-            text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "already removed"
-          - story: reworded
-            id: "FUL-005"
-            versions: [v1]
-            text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "the order is already removed"
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: reworded
+            with: {fixture: reason_changed}
         steps:
-          - when: {actor: operator, call: "diff(reworded)"}
+          - when: {actor: tuan, call: "diff(reworded.stories[0])"}
             then:
-              - done
-              - "count(result) is 2"
-              - "result[0]'s kind is removed"
-              - "result[0]'s sentence is \"        reason: \\\"already removed\\\"\""
-              - "result[1]'s kind is added"
-              - "result[1]'s sentence is \"        reason: \\\"the order is already removed\\\"\""
+              - DONE
+              - "COUNT(RESULT) = 2"
+              - "RESULT[0].kind = removed"
+              - "RESULT[0].line = 16"
+              - "RESULT[0].sentence = \"          reason: \\\"already sent\\\"\""
+              - "RESULT[1].kind = added"
+              - "RESULT[1].line = 16"
+              - "RESULT[1].sentence = \"          reason: \\\"the order has already been sent\\\"\""
       "a comment-only edit shows nothing":
         given:
-          - version: v1
-            number: 1
-            text: |
-              operations:
-                remove:   # frees stock
-                  ensure:
-                    - "the order's status is removed"
-          - story: commented
-            id: "FUL-005"
-            versions: [v1]
-            text: |
-              operations:
-                remove:   # frees the held stock
-                  ensure:
-                    - "the order's status is removed"
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: commented
+            with: {fixture: comment_changed}
         steps:
-          - when: {actor: operator, call: "diff(commented)"}
-            then: [done, "result is []"]
+          - when: {actor: tuan, call: "diff(commented.stories[0])"}
+            then: [DONE, "RESULT = []"]
+      "a tag and a note show in the diff and keep the approval":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: relabelled
+            with: {fixture: relabelled}
+        steps:
+          - when: {actor: tuan, call: "diff(relabelled.stories[0])"}
+            then:
+              - DONE
+              - "COUNT(RESULT) = 2"
+              - "RESULT[0].sentence = \"  tags: [shop]\""
+              - "RESULT[1].sentence = \"  notes: [\\\"the shop asked for undo\\\"]\""
+              - "relabelled.stories[0].approved"
       "two swapped refusals show as a removed pair and an added pair":
         given:
-          - version: v1
-            number: 1
-            text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's status is removed"
-                      reason: "already removed"
-                    - when: "the order's units_sent is more than 0"
-                      reason: "already sent"
-          - story: swapped
-            id: "FUL-005"
-            versions: [v1]
-            text: |
-              operations:
-                remove:
-                  refuse:
-                    - when: "the order's units_sent is more than 0"
-                      reason: "already sent"
-                    - when: "the order's status is removed"
-                      reason: "already removed"
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: swapped
+            with: {fixture: swapped}
         steps:
-          - when: {actor: operator, call: "diff(swapped)"}
+          - when: {actor: tuan, call: "diff(swapped.stories[0])"}
             then:
-              - done
-              - "count(result) is 4"
-              - "count([c for c in result if c's kind is removed]) is 2"
-              - "count([c for c in result if c's kind is added]) is 2"
+              - DONE
+              - "COUNT(RESULT) = 4"
+              - "COUNT([c FOR c IN RESULT IF c.kind = removed]) = 2"
+              - "COUNT([c FOR c IN RESULT IF c.kind = added]) = 2"
+              - "RESULT[0].kind = removed"
+              - "RESULT[0].line = 13"
+              - "RESULT[2].kind = added"
+              - "RESULT[2].line = 15"
       "a story never approved shows every line as added":
         given:
-          - story: fresh
-            id: "FUL-010"
-            versions: []
-            text: |
-              operations:
-                remove:
-                  ensure:
-                    - "the order's status is removed"
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: fresh
+            with: {fixture: order}
         steps:
-          - when: {actor: operator, call: "diff(fresh)"}
+          - when: {actor: tuan, call: "diff(fresh.stories[0])"}
             then:
-              - done
-              - "count(result) is 4"
-              - "all(c's kind is added for c in result)"
+              - DONE
+              - "COUNT(RESULT) = 48"
+              - "ALL(c.kind = added FOR c IN RESULT)"
+              - "RESULT[0].sentence = \"FIX-001:\""
 
   EDDA-007:
     story: "the operator reads a story as sentences"
     about: story
     as_a: operator
-    i_want: "a story shown as plain sentences in its own order, one per rule,
-      with the ids hidden and the notes in grey"
+    i_want: "a story shown as plain sentences in its own order, one per rule, with the ids hidden, the notes in grey and the questions marked"
     so_that: "I read the business meaning, never the syntax"
     epic: VIEW
     tags: [read_view]
     notes:
-      - "a name reads as words: units_sent reads \"units sent\""
+      - "a name reads as words: units_sent reads \"units sent\"; the templates are reference section 12"
     operations:
       view:
+        is: "renders the story in the file as sentences"
         inputs: {story: story}
-        returns: "story's sentences"
         who: ["agent", "operator"]
+        returns: "story.sentences"
       view_at:
-        inputs: {story: story, number: number}
-        returns: "the sentences of story's versions[number - 1]'s text"
+        is: "renders one approved version of the story as sentences"
+        inputs: {story: story, number: NUMBER}
         who: ["agent", "operator"]
         refuse:
-          - when: "number is not a whole number or number is less than 1
-                   or number is more than story's version"
+          - when: "number < 1 OR number > story.version"
             reason: "no such version"
+        returns: "story.versions[number - 1].sentences"
     examples:
-      "the clean fixture reads as eight sentences":
+      "the clean fixture reads as twenty sentences":
         given:
+          - actor: tuan
+            with: {roles: [operator]}
           - spec_file: good
-            fixture: order
+            with: {fixture: order}
         steps:
-          - when: {actor: operator, call: "view(good's stories[0])"}
+          - when: {actor: tuan, call: "view(good.stories[0])"}
             then:
-              - done
-              - "count(result) is 8"
-              - "result[0]'s kind is story"
-              - "result[0]'s text is \"Remove an order. As a shop user, I want to remove an order, so that the list is clean.\""
-              - "result[1]'s kind is permission"
-              - "result[1]'s text is \"A shop user may remove an order.\""
-              - "result[2]'s kind is refusal"
-              - "result[2]'s text is \"If remove is asked for an order whose units sent is more than 0, then the system shall refuse it: already sent.\""
-              - "result[3]'s kind is outcome"
-              - "result[3]'s text is \"When remove succeeds, the system shall leave the order with status removed.\""
-              - "result[4]'s kind is example"
-              - "result[4]'s text is \"Example: a fresh order is removed.\""
-              - "result[5]'s text is \"Given erik, a shop user, and purchase, an order with status incoming and units sent 0.\""
-              - "result[6]'s text is \"When erik asks to remove purchase.\""
-              - "result[7]'s text is \"Then it is done and purchase's status is removed.\""
-      "a note reads in its place and a question after it":
+              - DONE
+              - "COUNT(RESULT) = 20"
+              - "RESULT[0].kind = story"
+              - "RESULT[0].text = \"Remove an order. As a shop user, I want to remove an order, so that the list is clean.\""
+              - "RESULT[0].line = 17"
+              - "RESULT[1].kind = operation"
+              - "RESULT[1].text = \"Remove takes an unsent order off the list.\""
+              - "RESULT[2].kind = permission"
+              - "RESULT[2].text = \"A shop user may remove an order.\""
+              - "RESULT[3].kind = refusal"
+              - "RESULT[3].text = \"If remove is asked for an order whose status is removed, then the system shall refuse it: already removed.\""
+              - "RESULT[4].text = \"If remove is asked for an order whose units sent is more than 0, then the system shall refuse it: already sent.\""
+              - "RESULT[5].kind = outcome"
+              - "RESULT[5].text = \"When remove succeeds, the order's status is removed.\""
+              - "RESULT[6].kind = example"
+              - "RESULT[6].text = \"Example: a fresh order is removed.\""
+              - "RESULT[7].kind = given"
+              - "RESULT[7].text = \"Given erik, a shop user, and purchase, an order with status incoming and units sent 0.\""
+              - "RESULT[8].kind = when"
+              - "RESULT[8].text = \"When erik asks to remove purchase.\""
+              - "RESULT[9].kind = then"
+              - "RESULT[9].text = \"Then it is done and purchase's status is removed.\""
+              - "RESULT[13].text = \"Then it is refused: already sent, and shipped's status is incoming.\""
+              - "RESULT[17].text = \"Then it is done.\""
+              - "RESULT[19].text = \"Then it is refused: already removed, and purchase's status is removed.\""
+              - "ALL(s.shade = plain FOR s IN RESULT)"
+      "a note reads in its place, grey, and a question after it, marked":
         given:
+          - actor: tuan
+            with: {roles: [operator]}
           - spec_file: a
-            fixture: notes_a
+            with: {fixture: notes_a}
         steps:
-          - when: {actor: operator, call: "view(a's stories[0])"}
+          - when: {actor: tuan, call: "view(a.stories[0])"}
             then:
-              - done
-              - "result[1]'s kind is note"
-              - "result[1]'s text is \"the stock feed is refreshed every night\""
-              - "result[2]'s kind is question"
-              - "result[2]'s text is \"does the shop want to see the refresh time?\""
+              - DONE
+              - "RESULT[1].kind = note"
+              - "RESULT[1].text = \"the stock feed is refreshed every night\""
+              - "RESULT[1].shade = grey"
+              - "RESULT[1].line = 23"
+              - "RESULT[2].kind = question"
+              - "RESULT[2].text = \"does the shop want to see the refresh time?\""
+              - "RESULT[2].shade = warning"
+              - "RESULT[3].kind = operation"
+              - "RESULT[8].kind = note"
+              - "RESULT[8].text = \"a removed order keeps its history\""
       "no sentence shows an id":
         given:
+          - actor: tuan
+            with: {roles: [operator]}
           - spec_file: good
-            fixture: order
+            with: {fixture: order}
         steps:
-          - when: {actor: operator, call: "view(good's stories[0])"}
-            then: [done, "not any(\"FIX-001\" in s's text for s in result)"]
+          - when: {actor: tuan, call: "view(good.stories[0])"}
+            then: [DONE, "NOT ANY(s.text CONTAINS \"FIX-001\" FOR s IN RESULT)"]
       "an older version reads from its approved copy":
         given:
-          - spec_file: pinned
-            fixture: pinned_old
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: grown
+            with: {fixture: story_grown}
         steps:
-          - when: {actor: operator, call: "view_at(pinned's stories[0], 1)"}
-            then: [done, "not any(s's kind is refusal for s in result)"]
+          - when: {actor: tuan, call: "view_at(grown.stories[0], 1)"}
+            then: [DONE, "NOT ANY(s.text CONTAINS \"already removed\" FOR s IN RESULT)"]
+          - when: {actor: tuan, call: "view(grown.stories[0])"}
+            then: [DONE, "ANY(s.text CONTAINS \"already removed\" FOR s IN RESULT)"]
       "a version that does not exist is refused":
         given:
+          - actor: tuan
+            with: {roles: [operator]}
           - spec_file: good
-            fixture: order
+            with: {fixture: order}
         steps:
-          - when: {actor: operator, call: "view_at(good's stories[0], 0)"}
-            then: [refused: "no such version"]
+          - when: {actor: tuan, call: "view_at(good.stories[0], 0)"}
+            then: [{refused: "no such version"}]
 
   EDDA-008:
-    story: "an entity block has versions, and a story is pinned to them"
-    about: story
+    story: "an entity or role block has versions, and a story is pinned to them"
+    about: block
     as_a: operator
-    i_want: "the entity block approved like a story, each story approval to
-      record the entity versions it was approved against, and a story
-      approved against an older entity version flagged"
-    so_that: "a permission cannot change under an approved story unnoticed"
+    i_want: "each entity and role block approved like a story, each story approval to pin the block versions it was approved against, and a story approved against an older block flagged until I approve it again"
+    so_that: "a permission or a property cannot change under an approved story unnoticed"
     epic: VC
     tags: [version, approval]
     operations:
-      approve_entity:
-        inputs: {block: entity_block, because: "text, optional"}
+      approve_block:
+        is: "records the operator's yes to an entity or role block as its next version"
+        inputs: {block: block, because: "TEXT, OPTIONAL"}
         who: ["operator"]
         refuse:
-          - when: "block is approved"
-            reason: "nothing to approve: the entity matches its newest version"
+          - when: "ANY(p.kind = refused FOR p IN check(block.file))"
+            reason: "the file does not check"
+          - when: "block.approved"
+            reason: "nothing to approve: the block matches its newest version"
         ensure:
-          - "block's versions is old(block's versions) + [block's versions[-1]]"
-          - "block's versions[-1]'s number is old(block's version) + 1"
-          - "block's versions[-1]'s text is block's text"
-          - "block is approved"
+          - fact: "block.file.history.text STARTS WITH OLD(block.file.history.text)"
+            means: "the earlier entries are kept untouched"
+          - fact: "COUNT(block.versions) = OLD(COUNT(block.versions)) + 1"
+            means: "one new version is added at the end"
+          - "block.versions[-1].number = COUNT(block.versions)"
+          - "block.versions[-1].text = block.text"
+          - "block.versions[-1].approved_by = ACTOR.name"
+          - "block.versions[-1].approved_at = NOW"
+          - "block.versions[-1].because = because"
+          - "block.versions[-1].pins = []"
+          - "block.approved"
     examples:
-      "a story approved against an older entity version is flagged":
-        given:
-          - spec_file: pinned
-            fixture: pinned_old
-        steps:
-          - when: {actor: agent, call: "check(pinned)"}
-            then:
-              - done
-              - "count(result) is 1"
-              - "result[0]'s kind is flagged"
-              - "result[0]'s rule is approved_against_older"
-              - "result[0]'s message is \"FIX-001 approved against order v1, order is now v2\""
-      "approving the entity again clears nothing by itself; the story must be approved again":
+      "the first approval of an entity block makes version 1":
         given:
           - actor: tuan
-            roles: [operator]
-          - spec_file: pinned
-            fixture: pinned_old
+            with: {roles: [operator]}
+          - spec_file: good
+            with: {fixture: order}
         steps:
-          - when: {actor: tuan, call: "approve(pinned's stories[0])", at: "2026-10-02 10:00"}
+          - when: {actor: tuan, call: "approve_block(good.blocks[1], \"first cut\")", at: "2026-10-02 09:00"}
             then:
-              - done
-              - "pinned's stories[0]'s version is 2"
-              - "pinned's stories[0]'s versions[1]'s against[0]'s number is 2"
-          - when: {actor: agent, call: "check(pinned)"}
-            then: [done, "result is []"]
+              - DONE
+              - "good.blocks[1].kind = entity"
+              - "good.blocks[1].name = \"order\""
+              - "good.blocks[1].version = 1"
+              - "good.blocks[1].versions[0].number = 1"
+              - "good.blocks[1].versions[0].approved_by = \"tuan\""
+              - "good.blocks[1].versions[0].because = \"first cut\""
+              - "good.blocks[1].versions[0].text = good.blocks[1].text"
+              - "good.blocks[1].approved"
+              - "good.blocks[0].version = 0"
+      "a role block is approved the same way":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: good
+            with: {fixture: order}
+        steps:
+          - when: {actor: tuan, call: "approve_block(good.blocks[0])"}
+            then:
+              - DONE
+              - "good.blocks[0].kind = role"
+              - "good.blocks[0].name = \"shop_user\""
+              - "good.blocks[0].version = 1"
+              - "good.blocks[0].approved"
+      "approving an approved block is refused":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: same
+            with: {fixture: approved}
+        steps:
+          - when: {actor: tuan, call: "approve_block(same.blocks[1])"}
+            then:
+              - refused: "nothing to approve: the block matches its newest version"
+              - "same.blocks[1].version = 1"
+      "a block in a file that does not check is refused":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: bad
+            with: {fixture: unknown_key}
+        steps:
+          - when: {actor: tuan, call: "approve_block(bad.blocks[1])"}
+            then:
+              - refused: "the file does not check"
+              - "bad.blocks[1].version = 0"
+      "the agent may not approve a block":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: good
+            with: {fixture: order}
+        steps:
+          - when: {actor: bot, call: "approve_block(good.blocks[1])"}
+            then:
+              - refused: "approve_block is not allowed for agent"
+              - "good.blocks[1].version = 0"
+      "a story approved against an older block version is flagged":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: pinned
+            with: {fixture: pinned_old}
+        steps:
+          - when: {actor: bot, call: "check(pinned)"}
+            then:
+              - DONE
+              - "COUNT(RESULT) = 1"
+              - "RESULT[0].kind = flagged"
+              - "RESULT[0].rule = approved_against_older"
+              - "RESULT[0].line = 17"
+              - "RESULT[0].message = \"FIX-001 approved against entity order v1, order is now v2\""
+              - "pinned.stories[0].approved"
+              - "pinned.stories[0].pins_stale"
+      "approving the story again refreshes its pins and clears the flag":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: pinned
+            with: {fixture: pinned_old}
+        steps:
+          - when: {actor: tuan, call: "approve(pinned.stories[0])", at: "2026-10-02 10:00"}
+            then:
+              - DONE
+              - "pinned.stories[0].version = 2"
+              - "ANY(p.name = \"order\" AND p.number = 2 FOR p IN pinned.stories[0].versions[1].pins)"
+              - "NOT pinned.stories[0].pins_stale"
+          - when: {actor: bot, call: "check(pinned)"}
+            then: [DONE, "RESULT = []"]

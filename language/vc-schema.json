@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edda.local/schema/vc/v26",
+  "title": "Edda .edda.vc file (revision 26)",
+  "description": "Append-only, oldest first: one entry per approved version of a story, an entity block or a role block. Only the operator's approve command writes it.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["number", "approved_at", "approved_by", "text"],
+    "properties": {
+      "story": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+      "entity": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+      "role": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+      "number": {"type": "integer", "minimum": 1},
+      "approved_at": {"type": "string"},
+      "approved_by": {"type": "string"},
+      "because": {"type": "string"},
+      "pins": {
+        "type": "array",
+        "items": {
+          "type": "object", "additionalProperties": false, "required": ["number"],
+          "properties": {
+            "entity": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+            "role": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+            "number": {"type": "integer", "minimum": 1}
+          },
+          "oneOf": [{"required": ["entity"]}, {"required": ["role"]}]
+        }
+      },
+      "text": {"type": "string", "description": "the whole block as approved, normalised: comments, blank lines and trailing spaces removed, relative indentation kept"}
+    },
+    "oneOf": [
+      {"required": ["story", "pins"], "not": {"anyOf": [{"required": ["entity"]}, {"required": ["role"]}]}},
+      {"required": ["entity"], "not": {"anyOf": [{"required": ["story"]}, {"required": ["role"]}, {"required": ["pins"]}]}},
+      {"required": ["role"], "not": {"anyOf": [{"required": ["story"]}, {"required": ["entity"]}, {"required": ["pins"]}]}}
+    ]
+  }
+}

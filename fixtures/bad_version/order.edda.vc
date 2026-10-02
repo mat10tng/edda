@@ -1,0 +1,19 @@
+- role: shop_user
+  number: 1
+  approved_at: "2026-09-28 10:00"
+  approved_by: tuan
+  text: |
+    shop_user:
+      is: "a person at a shop"
+- entity: order
+  number: 2
+  approved_at: "2026-09-28 10:00"
+  approved_by: tuan
+  text: |
+    order:
+      is: "what a workshop buys"
+      properties:
+        status: DEFAULT incoming | removed
+        units_sent: DEFAULT 0
+      may_change: {status: {incoming: [removed]}}
+      may_update: ["shop_user"]

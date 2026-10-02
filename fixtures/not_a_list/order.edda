@@ -30,9 +30,7 @@ stories:
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
-        returns: "order"
-        ensure:
-          - "order.status = removed"
+        ensure: "order.status = removed"
     examples:
       "a fresh order is removed":
         given:

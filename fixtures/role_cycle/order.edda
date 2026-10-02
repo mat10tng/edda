@@ -3,6 +3,10 @@
 roles:
   shop_user:
     is: "a person at a shop"
+    includes: [admin]
+  admin:
+    is: "a person who runs the shop"
+    includes: [shop_user]
 
 entities:
   order:
@@ -30,7 +34,6 @@ stories:
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
-        returns: "order"
         ensure:
           - "order.status = removed"
     examples:

@@ -8,8 +8,8 @@ entities:
   order:
     is: "what a workshop buys"
     properties:
-      status: default incoming | removed
-      units_sent: default 0
+      status: DEFAULT incoming | removed
+      units_sent: DEFAULT 0
     may_change: {status: {incoming: [removed]}}
     may_update: ["shop_user"]
 
@@ -22,9 +22,13 @@ stories:
     so_that: "the list is clean"
     operations:
       remove:
+        is: "takes an unsent order off the list"
         inputs: {order: order}
+        who: ["shop_user"]
         refuse:
-          - when: "the order's units_sent is more than 0"
+          - when: "order.status = removed"
+            reason: "already removed"
+          - when: "order.units_sent > 0"
             reason: "already sent"
         ensure:
-          - "the order's status is removed"
+          - "order.status = removed"

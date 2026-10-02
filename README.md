@@ -25,19 +25,30 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 25
-            schema.json     the keys, JSON Schema 2020-12
-            keywords.edda   the registry: every key and expression form,
-                            with what it means, why, and where it is from
+language/   reference.md    the language reference, revision 26
+            schema.json     the keys of .edda, JSON Schema 2020-12
+            vc-schema.json  the keys of .edda.vc
+            keywords.edda   the registry: every key, expression form,
+                            language word, checker rule and sentence
+                            kind, with what it means, why, and where
+                            it is from
 specs/      *.edda          Edda's own stories, YAML, one file per entity
             *.edda.vc       approved versions, append-only (none yet)
 fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
                             under its own file name, one deliberate
-                            problem each; the examples name the folder
+                            problem or one history each; the examples
+                            name the folder
+            <name>/*.edda.vc  the fixture's history, when it has one
+tools/      gen_fixtures.py the fixtures, generated from one clean spec;
+                            prints the lines and counts the stories assert
+            gen_keywords.py the registry, generated from the reference
+            validate.py     every file against the schemas and the subset
 ```
 
-A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic in
-quoted expressions borrowed from Ruby and Python. Tell your editor the
-extension is YAML and point it at `language/schema.json`.
+A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
+in quoted expressions borrowed from SQL and Python, language words in
+UPPERCASE, names in snake_case. Tell your editor the extension is YAML
+and point it at `language/schema.json`.
 
-Nothing is built yet.
+Nothing is built yet. `python3 tools/validate.py` needs PyYAML and
+jsonschema.

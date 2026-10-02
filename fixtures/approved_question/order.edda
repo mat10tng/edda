@@ -20,6 +20,7 @@ stories:
     as_a: shop_user
     i_want: "to remove an order"
     so_that: "the list is clean"
+    questions: ["may a removed order be restored?"]
     operations:
       remove:
         is: "takes an unsent order off the list"
@@ -30,7 +31,6 @@ stories:
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
-        returns: "order"
         ensure:
           - "order.status = removed"
     examples:

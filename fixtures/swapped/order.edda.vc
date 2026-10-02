@@ -35,10 +35,10 @@
           inputs: {order: order}
           who: ["shop_user"]
           refuse:
-            - when: "order.status = removed"
-              reason: "already removed"
             - when: "order.units_sent > 0"
               reason: "already sent"
+            - when: "order.status = removed"
+              reason: "already removed"
           ensure:
             - "order.status = removed"
       examples:
@@ -71,17 +71,3 @@
               then: [DONE]
             - when: {actor: erik, call: "remove(purchase)"}
               then: [{refused: "already removed"}, "purchase.status = removed"]
-- entity: order
-  number: 2
-  approved_at: "2026-10-01 09:00"
-  approved_by: tuan
-  because: "nobody may delete an order"
-  text: |
-    order:
-      is: "what a workshop buys"
-      properties:
-        status: DEFAULT incoming | removed
-        units_sent: DEFAULT 0
-      may_change: {status: {incoming: [removed]}}
-      may_update: ["shop_user"]
-      may_delete: ["NOBODY"]
