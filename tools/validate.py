@@ -1010,9 +1010,24 @@ class Expr:
             return all(self.fits(v, self.types.get(id(v)), expected, optional) for v in node.values)
         return compatible(t, expected, optional, node)
 
+    def index_leaf(self, node):
+        """the (node, type) pairs of the element a constant index picks out of a
+        list with known positions, or None"""
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+            i = int_lit(node.slice)
+            P = self.positions(node.value)
+            P = typed_positions(self.types.get(id(node.value))) if P is None else P
+            if i is not None and P is not None and -len(P) <= i < len(P):
+                return P[i]
+        return None
+
     def leaves(self, node, t):
         """the (node, type) pairs a value may be: each branch of a conditional,
-        each operand of and/or, each alternative; None compares with anything"""
+        each operand of and/or, each alternative, the element a constant index
+        picks; None compares with anything"""
+        L = self.index_leaf(node)
+        if L is not None:
+            return [(n, a) for n, x in L for a in alts(x) if a != "NONE"] if any(x is not None for _, x in L) else L
         if isinstance(node, ast.IfExp):
             return sum((self.leaves(b, self.types.get(id(b))) for b in (node.body, node.orelse)), [])
         if isinstance(node, ast.BoolOp):
@@ -1039,6 +1054,9 @@ class Expr:
             return self.elts(node.body, T(node.body)) + self.elts(node.orelse, T(node.orelse))
         if isinstance(node, ast.BoolOp):
             return sum((self.elts(v, T(v)) for v in node.values), [])
+        L = self.index_leaf(node)
+        if L is not None and len(L) == 1 and L[0][0] is not None:
+            return self.elts(L[0][0], T(L[0][0]))
         return [(None, t[1] if is_list(t) else None)]
 
     def positions(self, node):
@@ -1052,6 +1070,9 @@ class Expr:
             return A + B if A is not None and B is not None else None
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OLD" and len(node.args) == 1:
             return self.positions(node.args[0])
+        L = self.index_leaf(node)
+        if L is not None and len(L) == 1 and L[0][0] is not None:
+            return self.positions(L[0][0])
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
             sl = node.slice
             if all(b is None or int_lit(b) is not None for b in (sl.lower, sl.upper)):
@@ -1524,7 +1545,7 @@ def walk_meaning(data, stem, P, source):
             yield from fact(w.get("holds"), ("entities", ename, "while", i, "holds"), own)
         for key in ("may_create", "may_read", "may_update", "may_delete"):
             for i, w in enumerate(listing(ent.get(key))):
-                yield from role_ok(w.get("role"), ("entities", ename, key, i))
+                yield from role_ok(w.get("role"), ("entities", ename, key, i, "role"))
                 if "when" in w:
                     scope = {ename: ("entity", ename), "ACTOR": one_of([w.get("role")])}
                     yield from ex(w["when"], ("entities", ename, key, i, "when"), scope)
@@ -1556,7 +1577,7 @@ def walk_meaning(data, stem, P, source):
             body = dict(inputs, ACTOR=one_of(who_roles))
             for i, w in enumerate(listing(op.get("who"))):
                 r = w.get("role")
-                yield from role_ok(r, where + ("who", i))
+                yield from role_ok(r, where + ("who", i, "role"))
                 if admitted is not None and r in P.roles and r not in admitted:
                     yield "wider_than_entity", where + ("who", i), f"{oname} admits {r}, which {about} does not"
                 if "when" in w:
