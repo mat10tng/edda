@@ -453,7 +453,10 @@ def shape_extra(data):
                             out.append(("declared_twice", gw, f"declared twice: {v}", True))
                         seen.add(v)
                 if "actor" in g:
-                    for j, r in enumerate(listing(mapping(g.get("with")).get("roles"))):
+                    rs = mapping(g.get("with")).get("roles")
+                    if rs is not None and not isinstance(rs, list):
+                        out.append(("not_a_list", gw + ("with", "roles"), "roles must be a list, one role per line", True))
+                    for j, r in enumerate(listing(rs)):
                         if not (isinstance(r, str) and re.fullmatch(NAME, r) and r not in PY_KEYWORDS):
                             out.append(("bad_name", gw + ("with", "roles", j), f"not a name: {r}", False))
     return out
@@ -598,8 +601,12 @@ def unify(a, b):
         return "NUMBER"
     if is_list(a) and is_list(b):
         o = ordered(a) and ordered(b)
+        if a[1] is None or b[1] is None:
+            return ("list", None, o) if a[1] is None and b[1] is None else None
         e = unify(a[1], b[1])
-        return ("list", e, o) if e is not None or (a[1] is None and b[1] is None) else None
+        if e == a[1] or e == b[1]:
+            return ("list", e, o)      # one element type covers the other
+        return ("either", frozenset({a, b}))
     if is_choice(a) and is_choice(b):
         if a[1] is None or b[1] is None:
             return ("choice", None)
@@ -686,9 +693,16 @@ def words(t):
 # --- the project: declarations across the files of one folder ---------------
 
 class Project:
-    def __init__(self, files):
-        """files: list of (stem, data) for every .edda that passed the shape layer"""
+    def __init__(self, files, histories=()):
+        """files: list of (stem, data) for every .edda that passed the shape layer;
+        histories: the entries of every .edda.vc that did"""
         self.entities, self.roles, self.operations, self.epics, self.stories = {}, {}, {}, set(), set()
+        self.versions = {}        # (kind, name) -> the version numbers its histories hold
+        for entries in histories:
+            for e in listing(entries):
+                if isinstance(e, dict):
+                    kind = "story" if "story" in e else "entity" if "entity" in e else "role"
+                    self.versions.setdefault((kind, e.get(kind)), set()).add(e.get("number"))
         self.files = {stem for stem, _ in files}
         self.dups = {}            # stem -> [(path, name)]: a name declared twice across the project
         self.role_order = []
@@ -950,12 +964,43 @@ class Expr:
             return all(self.fits(v, self.types.get(id(v)), expected, optional) for v in node.values)
         return compatible(t, expected, optional, node)
 
-    def comparable(self, ln, lt, rn, rt):
-        """may two values be compared for equality: None aside, one fits the other"""
-        a, b = no_none(lt), no_none(rt)
-        if a is None or b is None:
+    def leaves(self, node, t):
+        """the (node, type) pairs a value may be: each branch of a conditional,
+        each operand of and/or, each alternative; None compares with anything"""
+        if isinstance(node, ast.IfExp):
+            return sum((self.leaves(b, self.types.get(id(b))) for b in (node.body, node.orelse)), [])
+        if isinstance(node, ast.BoolOp):
+            return sum((self.leaves(v, self.types.get(id(v))) for v in node.values), [])
+        return [(node, a) for a in alts(t) if a != "NONE"] if t is not None else [(node, None)]
+
+    def elts(self, node, t):
+        """the (node, type) pairs a list's elements may be: each literal element, else the element type"""
+        if isinstance(node, ast.List):
+            return sum((self.leaves(e, self.types.get(id(e))) for e in node.elts), [])
+        return [(None, t[1] if is_list(t) else None)]
+
+    def pair(self, a, an, b, bn):
+        """may two single values be compared for equality: one kind, a time literal
+        beside a TIME, two lists by their elements in any order"""
+        if a is None or b is None or "ANY" in (a, b) or a == b:
             return True
-        return self.fits(ln, a, b, True) or self.fits(rn, b, a, True)
+        if is_either(a) or is_either(b):
+            return all(self.pair(x, an, y, bn) for x in alts(a) for y in alts(b) if x != "NONE" and y != "NONE")
+        if {a, b} == {"INTEGER", "NUMBER"}:
+            return True
+        if (a, b) == ("TIME", "TEXT") and is_time_literal(bn) or (a, b) == ("TEXT", "TIME") and is_time_literal(an):
+            return True
+        if is_choice(a) and is_choice(b):
+            return a[1] is None or b[1] is None or set(a[1]) <= set(b[1]) or set(b[1]) <= set(a[1])
+        if is_actor(a) and is_actor(b):
+            return True
+        if is_list(a) and is_list(b):
+            return all(self.pair(x, xn, y, yn) for xn, x in self.elts(an, a) for yn, y in self.elts(bn, b))
+        return False
+
+    def eq_ok(self, L, R):
+        """every value one side may be compares with every value the other may be"""
+        return not L or not R or all(self.pair(a, an, b, bn) for an, a in L for bn, b in R)
 
     def visit(self, n, scope):
         t = self.typed(n, scope)
@@ -1067,9 +1112,6 @@ class Expr:
                 return isinstance(b, ast.Name) and b.id not in scope and b.id not in P.operations \
                     and b.id not in FIXED and re.fullmatch(NAME, b.id)
 
-            def bare_list(b):
-                return isinstance(b, ast.List) and b.elts and all(bare(e) for e in b.elts)
-
             equality = isinstance(op, (ast.Eq, ast.NotEq))
             # x[:n] == "t" where "t" has n characters, x a text: a second way, found before its slice is typed
             prefix = isinstance(left, ast.Subscript) and isinstance(left.slice, ast.Slice) and left.slice.lower is None \
@@ -1087,30 +1129,35 @@ class Expr:
             elif equality and bare(left) and not bare(right):
                 rt = self.visit(right, scope)
                 lt = self.status(left, rt, scope)
-            elif isinstance(op, (ast.In, ast.NotIn)) and bare_list(right):
+            elif isinstance(op, (ast.In, ast.NotIn)) and isinstance(right, ast.List) and any(bare(e) for e in right.elts):
                 lt = self.visit(left, scope)
-                rt = ("list", unify_all([self.status(e, lt, scope) for e in right.elts]), True)
+                ets = []
+                for e in right.elts:        # a bare name in the list is a status of the compared property
+                    et = self.status(e, lt, scope) if bare(e) else self.visit(e, scope)
+                    self.types[id(e)] = et
+                    ets.append(et)
+                rt = ("list", unify_all(ets), True)
             else:
                 lt, rt = self.visit(left, scope), self.visit(right, scope)
             neg = isinstance(op, ast.NotEq)
             # the operands must compare: one kind for == and !=, an element for in, numbers, texts or times for <
             if isinstance(op, (ast.In, ast.NotIn)):
-                rl = as_list(no_none(rt))
+                r = no_none(rt)
+                rl = as_list(r)
                 if rl is not None:
-                    if not self.comparable(left, lt, None, rl[1] if rl[1] != "ANY" else None):
+                    if not self.eq_ok(self.leaves(left, lt), self.elts(right, rl)):
                         self.problem("type_mismatch", f"in expects an element of the list: {src}")
-                elif no_none(rt) == "TEXT":
+                elif r == "TEXT":
                     if not self.fits(left, lt, "TEXT", True):
                         self.problem("type_mismatch", f"in expects a text in a text: {src}")
                 elif rt is not None:
                     self.problem("type_mismatch", f"in expects a list or a text: {src}")
             elif equality:
-                if not self.comparable(left, lt, right, rt):
+                if not self.eq_ok(self.leaves(left, lt), self.leaves(right, rt)):
                     self.problem("type_mismatch", f"{'!=' if neg else '=='} expects two values of one kind: {src}")
             elif type(op) in CMP_WORD:
-                a, b = no_none(lt), no_none(rt)
-                if a is not None and b is not None and not any(
-                        self.fits(left, a, k, True) and self.fits(right, b, k, True) for k in ("NUMBER", "TEXT", "TIME")):
+                L = self.leaves(left, lt) + self.leaves(right, rt)
+                if L and not any(all(compatible(a, k, True, an) for an, a in L) for k in ("NUMBER", "TEXT", "TIME")):
                     self.problem("type_mismatch", f"{CMP_WORD[type(op)]} expects two numbers, two texts or two times: {src}")
             # len(x) == 0, len(x) != 0, len(x) > 0, only for a list
             if isinstance(left, ast.Call) and isinstance(left.func, ast.Name) and left.func.id == "len" \
@@ -1162,8 +1209,7 @@ class Expr:
                     self.problem("type_mismatch", f"+ expects two lists or two numbers: {src}")
                     return None
                 if ll and rl:
-                    u = unify(ll, rl)
-                    return ("list", u[1], ordered(ll) and ordered(rl)) if u else None
+                    return as_list(unify(ll, rl))
                 return ll or rl
             for t in (lt, rt):
                 if not all_alts(t, lambda a: a in ("INTEGER", "NUMBER")):
@@ -1465,10 +1511,7 @@ def walk_meaning(data, stem, P, source):
                             yield "unknown_name", pw, f"unknown name: {v}"
                         continue
                     if p == "roles" and k == "actor":
-                        if not isinstance(v, list):
-                            yield "type_mismatch", pw, f"roles expects a list of roles: {v}"
-                            continue
-                        for j, r in enumerate(v):
+                        for j, r in enumerate(listing(v)):
                             yield from role_ok(r, pw + (j,))
                         continue
                     if p == "name" and k == "actor":
@@ -1564,23 +1607,85 @@ def given_value(v, t, p, pw, givens, names, source):
 
 # --- the history layer ----------------------------------------------------------
 
+def normalise(text):
+    """a block's text normalised (section 10): from its key line to the last
+    line indented deeper, comments, blank lines and trailing spaces removed
+    outside quoted text, quoting tracked across wrapped lines, re-indented so
+    the key line starts at column 0"""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines:
+        return ""
+    indent = len(lines[0]) - len(lines[0].lstrip(" "))
+    out, q = [], False
+    for n, s in enumerate(lines):
+        if not q:
+            if s.strip() == "" or s.lstrip().startswith("#"):
+                continue
+            if n > 0 and len(s) - len(s.lstrip(" ")) <= indent:
+                break
+        kept = []
+        for i, c in enumerate(s):
+            if c == '"':
+                k = i - 1
+                while k >= 0 and s[k] == "\\":
+                    k -= 1
+                if (i - 1 - k) % 2 == 0:
+                    q = not q
+            if c == "#" and not q and (i == 0 or s[i - 1] == " "):
+                break
+            kept.append(c)
+        t = "".join(kept) if q else "".join(kept).rstrip()
+        out.append(t[indent:] if t.startswith(" " * indent) else t)
+    return "\n".join(out) + "\n"
+
+
 def history_problems(entries, P, source):
-    """bad_version: the entries of a .edda.vc numbered 1, 2, 3 per block, in file order"""
+    """the history layer: bad_version (the entries of a .edda.vc numbered
+    1, 2, 3 per block, in file order), bad_pin (pins on a story entry only,
+    each to a version that exists, no block twice) and bad_snapshot (a text
+    already normalised that names the entry's block)"""
     out, count = [], {}
+    kinds = {"story": P.stories, "entity": P.entities, "role": P.roles}
     for i, e in enumerate(listing(entries)):
         if not isinstance(e, dict):
             continue
         kind = "story" if "story" in e else "entity" if "entity" in e else "role"
         name, n = e.get(kind), e.get("number")
         line = source.line((i, "number"))
-        known = {"story": P.stories, "entity": P.entities, "role": P.roles}[kind]
-        if name not in known:
+        if name not in kinds[kind]:
             out.append(("bad_version", line, f"{kind} {name} version {n}: no such {kind}"))
             continue
         expected = count.get((kind, name), 0) + 1
         if n != expected:
             out.append(("bad_version", line, f"{kind} {name} version {n} out of sequence; expected {expected}"))
         count[(kind, name)] = n if isinstance(n, int) else expected
+        pins = e.get("pins")
+        if kind == "story":
+            if not pins:
+                out.append(("bad_pin", line, f"story {name} version {n}: no pins"))
+            seen = set()
+            for j, pin in enumerate(listing(pins)):
+                if not isinstance(pin, dict):
+                    continue
+                pk = "entity" if "entity" in pin else "role"
+                pname, pn = pin.get(pk), pin.get("number")
+                pl = source.line((i, "pins", j), key=False)
+                if pname not in kinds[pk]:
+                    out.append(("bad_pin", pl, f"pin {pk} {pname} v{pn}: no such {pk}"))
+                elif pn not in P.versions.get((pk, pname), ()):
+                    out.append(("bad_pin", pl, f"pin {pk} {pname} v{pn}: no such version"))
+                if (pk, pname) in seen:
+                    out.append(("bad_pin", pl, f"pin {pk} {pname} v{pn}: pinned twice"))
+                seen.add((pk, pname))
+        elif "pins" in e:
+            out.append(("bad_pin", source.line((i, "pins")), f"{kind} {name} version {n}: a block entry has no pins"))
+        text = e.get("text")
+        if isinstance(text, str):
+            norm = normalise(text)
+            if norm != text or norm.split("\n")[0] != f"{name}:":
+                out.append(("bad_snapshot", line, f"text of {kind} {name} v{n} is not a normalised block"))
     return out
 
 
@@ -1632,12 +1737,16 @@ def check(path, P):
 
 
 def project_of(folder):
-    files = []
+    files, histories = [], []
     for path in sorted(glob.glob(f"{folder}/*.edda")):
         source, data = load(path)
         if isinstance(data, dict) and not schema_problems(V, SCHEMA, data, source) and not shape_extra(data):
             files.append((os.path.basename(path)[:-5], data))
-    return Project(files)
+    for path in sorted(glob.glob(f"{folder}/*.edda.vc")):
+        source, data = load(path)
+        if isinstance(data, list) and not schema_problems(VC, VC_SCHEMA, data, source):
+            histories.append(data)
+    return Project(files, histories)
 
 
 if __name__ == "__main__":

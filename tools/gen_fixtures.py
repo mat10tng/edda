@@ -286,6 +286,22 @@ vc += vc_entry("entity", "order", 2, AT, "tuan", ORDER_V1)
 write("bad_version", "order.edda.vc", vc)
 EXPECT["bad_version"] = {"line": vc.splitlines().index("  number: 2") + 1}
 
+# bad_pin: the story entry pins an entity version that does not exist
+edit("bad_pin", lambda ls: None)
+bp = (vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1) + vc_entry("entity", "order", 1, AT, "tuan", ORDER_V1)
+      + vc_entry("story", "FIX-001", 1, "2026-09-28 10:05", "tuan", STORY_V1, pins=[("role", "shop_user", 1), ("entity", "order", 99)]))
+write("bad_pin", "order.edda.vc", bp)
+EXPECT["bad_pin"] = {"line": bp.splitlines().index("  pins: [{role: shop_user, number: 1}, {entity: order, number: 99}]") + 1}
+
+# bad_snapshot: the story entry's text carries a comment, so it is not normalised
+edit("bad_snapshot", lambda ls: None)
+bs_text = list(STORY_V1)
+bs_text.insert(1, "  # the shop calls this Ta bort")
+bs = (vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1) + vc_entry("entity", "order", 1, AT, "tuan", ORDER_V1)
+      + vc_entry("story", "FIX-001", 1, "2026-09-28 10:05", "tuan", bs_text, pins=[("role", "shop_user", 1), ("entity", "order", 1)]))
+write("bad_snapshot", "order.edda.vc", bs)
+EXPECT["bad_snapshot"] = {"line": bs.splitlines().index("- story: FIX-001") + 2}
+
 # --- flags ---------------------------------------------------------------
 
 def unreachable_status(ls):

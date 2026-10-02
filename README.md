@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 33
+language/   reference.md    the language reference, revision 34
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -60,5 +60,5 @@ snake_case. Tell your editor the extension is YAML and point it at
 `language/schema.json`.
 
 Nothing is built beyond the validator, which is a partial checker:
-pins and snapshots (`bad_pin`, `bad_snapshot`), the flags and the
+the flags and the
 running of the examples are not there yet. `python3 tools/validate.py` needs PyYAML and jsonschema.

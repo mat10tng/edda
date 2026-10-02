@@ -69,7 +69,7 @@ stories:
     story: "the checker refuses what it cannot read"
     about: spec_file
     as_a: agent
-    i_want: "every key the schema does not allow, every string Python or the whitelist does not allow and every history out of sequence refused, with its file, line and one plain message"
+    i_want: "every key the schema does not allow, every string Python or the whitelist does not allow, every history out of sequence, every pin to a version that does not exist and every snapshot that is not a normalised block refused, with its file, line and one plain message"
     so_that: "a file that passes has one reading and nothing hidden in it"
     epic: CHK
     tags: [checker, static]
@@ -320,6 +320,36 @@ stories:
               - "RESULT[0].file == \"order.edda.vc\""
               - "RESULT[0].line == 9"
               - "RESULT[0].message == \"entity order version 2 out of sequence; expected 1\""
+      "a pin to a version that does not exist is refused in the history file":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_pin}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_pin"
+              - "RESULT[0].file == \"order.edda.vc\""
+              - "RESULT[0].line == 24"
+              - "RESULT[0].message == \"pin entity order v99: no such version\""
+      "a snapshot that is not a normalised block is refused in the history file":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_snapshot}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_snapshot"
+              - "RESULT[0].file == \"order.edda.vc\""
+              - "RESULT[0].line == 21"
+              - "RESULT[0].message == \"text of story FIX-001 v1 is not a normalised block\""
 
   EDDA-002:
     story: "the checker flags what is allowed but doubtful"
