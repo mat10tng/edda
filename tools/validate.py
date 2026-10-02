@@ -1025,12 +1025,26 @@ class Expr:
         own, and an element a constant index picks is checked as written"""
         L = self.index_leaf(node)
         if L is not None:
+            if "NONE" in alts(t) and not compatible("NONE", expected, optional):
+                return False
             return all(compatible(a, expected, optional, n) for n, a in L)
         if isinstance(node, ast.IfExp):
             return all(self.fits(b, self.types.get(id(b)), expected, optional) for b in (node.body, node.orelse))
         if isinstance(node, ast.BoolOp):
             return all(self.fits(v, self.types.get(id(v)), expected, optional) for v in node.values)
         return compatible(t, expected, optional, node)
+
+    def lit_type(self, node, t):
+        """a position's type: LIT for a text literal, each branch of a conditional
+        and each operand of and/or on its own, else the type"""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return LIT
+        if isinstance(node, ast.IfExp):
+            return unify(self.lit_type(node.body, self.types.get(id(node.body))),
+                         self.lit_type(node.orelse, self.types.get(id(node.orelse))))
+        if isinstance(node, ast.BoolOp):
+            return unify_all([self.lit_type(v, self.types.get(id(v))) for v in node.values])
+        return t
 
     def index_leaf(self, node):
         """the (node, type) pairs of the element a constant index picks out of a
@@ -1376,7 +1390,7 @@ class Expr:
             return unify(self.visit(n.body, scope), self.visit(n.orelse, scope))
         if isinstance(n, ast.List):
             types = [self.visit(e, scope) for e in n.elts]
-            ps = tuple(LIT if isinstance(e, ast.Constant) and isinstance(e.value, str) else t for e, t in zip(n.elts, types))
+            ps = tuple(self.lit_type(e, t) for e, t in zip(n.elts, types))
             return ("list", unify_all(types) if n.elts else "ANY", True, ps)
         if isinstance(n, ast.ListComp):
             inner, o = self.comprehension(n.generators, scope)
