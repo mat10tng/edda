@@ -20,9 +20,6 @@ stories:
     as_a: shop_user
     i_want: "to remove an order"
     so_that: "the list is clean"
-    notes:
-      - "the stock feed is refreshed every night"
-      - "a workshop sees stock as of the last refresh"
     operations:
       remove:
         inputs: {order: order}
@@ -31,6 +28,7 @@ stories:
             reason: "already sent"
         ensure:
           - "the order's status is removed"
+          - "set the order's status to removed"
     examples:
       "a fresh order is removed":
         given:

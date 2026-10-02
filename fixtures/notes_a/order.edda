@@ -1,31 +1,46 @@
-role shop_user                   # a fixture is one whole spec in one file
-epic fixtures                                            # FIX
+# A fixture is one whole spec in one file. Line numbers matter: the
+# examples in specs/spec_file.edda name them.
+roles:
+  shop_user:
+    is: "a person at a shop"
 
-entity order
-  status: default incoming | removed
-    may change: incoming to removed
-  units_sent: default 0
-  may update: shop_user
+entities:
+  order:
+    is: "what a workshop buys"
+    properties:
+      status: default incoming | removed
+      units_sent: default 0
+    may_change: {status: {incoming: [removed]}}
+    may_update: ["shop_user"]
 
-story remove an order                                    # FIX-001
-  as a shop_user
-  i want to remove an order
-  so that the list is clean
-  note: the stock feed is refreshed every night
-  question: does the shop want to see the refresh time?
-  epic: FIX
-
-  operation remove(order: order)
-    if the order's units_sent is more than 0,
-      refuse: "already sent"
-    when remove succeeds, ensure:
-      the order's status is removed
-
-      note: a removed order keeps its history
-  example a fresh order is removed
-    given shop_user erik
-          order purchase with status incoming, units_sent 0
-    when  erik asks remove(purchase)
-    then  done
-          purchase's status is removed
-
+stories:
+  FIX-001:
+    story: "remove an order"
+    about: order
+    as_a: shop_user
+    i_want: "to remove an order"
+    so_that: "the list is clean"
+    notes:
+      - "the stock feed is refreshed every night"
+    questions:
+      - "does the shop want to see the refresh time?"
+    operations:
+      remove:
+        inputs: {order: order}
+        refuse:
+          - when: "the order's units_sent is more than 0"
+            reason: "already sent"
+        ensure:
+          - "the order's status is removed"
+        notes: ["a removed order keeps its history"]
+    examples:
+      "a fresh order is removed":
+        given:
+          - actor: erik
+            roles: [shop_user]
+          - order: purchase
+            status: incoming
+            units_sent: 0
+        steps:
+          - when: {actor: erik, call: "remove(purchase)"}
+            then: [done, "purchase's status is removed"]

@@ -1,174 +1,262 @@
-entity spec_file                  # one .edda file; a fixture is one whole spec in one file
-  name                            # order, for order.edda
-  stories: many story, in order
-  notes: many note, in order
-  problems: many problem, in order      # every refusal and flag the rules of the reference,
-                                        #   section 12, find in this file; ordered by line, then rule
-  may create: agent
-  may read:   agent, operator
-  may update: agent
-  may delete: nobody
+entities:
+  spec_file:
+    is: "one .edda file; a fixture is one whole spec in one folder"
+    properties:
+      name: text                        # order, for order.edda
+      stories: many story, in order
+      notes: many note, in order
+      problems: many problem, in order  # every refusal and flag the static
+                                        #   rules of the reference find in
+                                        #   this file, by line, then rule
+    may_create: ["agent"]
+    may_read: ["agent", "operator"]
+    may_update: ["agent"]
+    may_delete: ["nobody"]
 
-entity note, part of spec_file    # one note: line, at any depth under a story
-  file: one spec_file
-  text
-  story_id
-  line
+  note:
+    is: "one note entry, at any depth under a story"
+    part_of: spec_file
+    properties:
+      file: one spec_file
+      story_id: text
+      line: number
+      text: text
 
-story the checker refuses what it cannot read               # EDDA-001
-  as an agent
-  i want every line the grammar does not allow refused, with its line
-    number and one plain message
-  so that a file that passes has one reading and nothing hidden in it
-  epic: CHK
-  tags: checker, static
-  note: EDDA-001 and EDDA-002 are the static checks of build step 1;
-    links, versions, examples run, rules wrapped and done are later stories
+  problem:
+    is: "one thing the checker found in a file"
+    properties:
+      kind: refused | flagged
+      rule: unknown_key | unknown_name | not_an_expression | declared_twice |
+            unknown_status | returns_and_ensure | wrong_file | not_a_sequence |
+            unquoted_text | yaml_feature | unreachable_status | no_example |
+            approved_against_older
+      line: number                      # 1-based, in the file checked
+      message: text
 
-  operation check(file: spec_file) returns file's problems
-    who: agent, operator
+stories:
+  EDDA-001:
+    story: "the checker refuses what it cannot read"
+    about: spec_file
+    as_a: agent
+    i_want: "every key the schema does not allow and every expression the
+      grammar does not allow refused, with its line number and one plain
+      message"
+    so_that: "a file that passes has one reading and nothing hidden in it"
+    epic: CHK
+    tags: [checker, static]
+    notes:
+      - "EDDA-001 and EDDA-002 are the static checks of build step 1; links,
+        versions, examples run, rules wrapped and done are later stories"
+      - "the YAML skeleton is parsed first (strict; no anchors, aliases,
+        the << key, tags or extra documents), then the schema, then every
+        expression inside a string; the first layer that fails reports"
+    operations:
+      check:
+        inputs: {file: spec_file}
+        returns: "file's problems"
+        who: ["agent", "operator"]
+    examples:
+      "a clean file has no problems":
+        given:
+          - spec_file: good
+            fixture: order
+        steps:
+          - when: {actor: agent, call: "check(good)"}
+            then: [done, "result is []"]
+      "an unknown key is refused":
+        given:
+          - spec_file: bad
+            fixture: unknown_key
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s kind is refused"
+              - "result[0]'s rule is unknown_key"
+              - "result[0]'s line is 29"
+              - "result[0]'s message is \"unknown key: ensures\""
+      "an unknown name is refused":
+        given:
+          - spec_file: bad
+            fixture: unknown_name
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is unknown_name"
+              - "result[0]'s line is 27"
+              - "result[0]'s message is \"unknown name: units_sold\""
+      "a string that is not an expression is refused":
+        given:
+          - spec_file: bad
+            fixture: not_an_expression
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is not_an_expression"
+              - "result[0]'s line is 31"
+              - "result[0]'s message is \"not an expression: set the order's status to removed\""
+      "a name declared twice is refused":
+        given:
+          - spec_file: bad
+            fixture: declared_twice
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is declared_twice"
+              - "result[0]'s line is 13"
+              - "result[0]'s message is \"declared twice: units_sent\""
+      "a status not in its list is refused":
+        given:
+          - spec_file: bad
+            fixture: unknown_status
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is unknown_status"
+              - "result[0]'s line is 30"
+              - "result[0]'s message is \"status not in its list: archived\""
+      "returns and ensure on one operation is refused":
+        given:
+          - spec_file: bad
+            fixture: returns_and_ensure
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is returns_and_ensure"
+              - "result[0]'s line is 24"
+              - "result[0]'s message is \"returns and ensure on one operation: remove\""
+      "a story in the wrong file is refused":
+        given:
+          - spec_file: bad
+            fixture: wrong_file
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is wrong_file"
+              - "result[0]'s line is 17"
+              - "result[0]'s message is \"story FIX-001 is about order and belongs in order.edda\""
+      "a repeated thing written as a mapping is refused":
+        given:
+          - spec_file: bad
+            fixture: not_a_sequence
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is not_a_sequence"
+              - "result[0]'s line is 29"
+              - "result[0]'s message is \"ensure must be a list, one fact per line\""
+      "unquoted free text is refused":
+        given:
+          - spec_file: bad
+            fixture: unquoted_text
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is unquoted_text"
+              - "result[0]'s line is 28"
+              - "result[0]'s message is \"quote the reason; an unquoted # drops the rest of the line\""
+      "a YAML anchor is refused":
+        given:
+          - spec_file: bad
+            fixture: yaml_feature
+        steps:
+          - when: {actor: agent, call: "check(bad)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s rule is yaml_feature"
+              - "result[0]'s line is 37"
+              - "result[0]'s message is \"anchors and aliases are not allowed\""
 
-  example a clean file has no problems
-    given spec_file good from fixture order
-    when  agent asks check(good) as found
-    then  done
-          found is []
+  EDDA-002:
+    story: "the checker flags what is allowed but doubtful"
+    about: spec_file
+    as_a: operator
+    i_want: "a status nothing reaches and a story with no example shown as
+      flags, not refusals"
+    so_that: "the file still passes and I decide what to do"
+    epic: CHK
+    tags: [checker, static]
+    notes:
+      - "a question on a done story and a story approved against an older
+        entity version are also flags; they need versions and links, which
+        come in EDDA-005 and later stories"
+    examples:
+      "a status nothing reaches is flagged":
+        given:
+          - spec_file: odd
+            fixture: unreachable_status
+        steps:
+          - when: {actor: agent, call: "check(odd)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s kind is flagged"
+              - "result[0]'s rule is unreachable_status"
+              - "result[0]'s line is 11"
+              - "result[0]'s message is \"no change reaches status: delivered\""
+      "a story with no example is flagged":
+        given:
+          - spec_file: odd
+            fixture: no_example
+        steps:
+          - when: {actor: agent, call: "check(odd)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s kind is flagged"
+              - "result[0]'s rule is no_example"
+              - "result[0]'s line is 17"
+              - "result[0]'s message is \"story FIX-001 has no example\""
 
-  example an unknown keyword is refused
-    given spec_file bad from fixture unknown_keyword
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s kind is refused
-          found[0]'s rule is unknown_keyword
-          found[0]'s line is 19
-          found[0]'s message is "unknown keyword: ensures"
-
-  example an unknown name is refused
-    given spec_file bad from fixture unknown_name
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is unknown_name
-          found[0]'s line is 17
-          found[0]'s message is "unknown name: units_sold"
-
-  example a tab is refused
-    given spec_file bad from fixture tab
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is tab
-          found[0]'s line is 17
-          found[0]'s message is "a tab; use two spaces"
-
-  example an indent that is not two spaces is refused
-    given spec_file bad from fixture odd_indent
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is odd_indent
-          found[0]'s line is 17
-          found[0]'s message is "indent of 3 spaces; use a multiple of two"
-
-  example a line that is not a sentence of the language is refused
-    given spec_file bad from fixture not_a_sentence
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is not_a_sentence
-          found[0]'s line is 20
-          found[0]'s message is "not a sentence of the language: set the order's status to removed"
-
-  example a name declared twice is refused
-    given spec_file bad from fixture declared_twice
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is declared_twice
-          found[0]'s line is 8
-          found[0]'s message is "declared twice: units_sent"
-
-  example a status not in its list is refused
-    given spec_file bad from fixture unknown_status
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is unknown_status
-          found[0]'s line is 20
-          found[0]'s message is "status not in its list: archived"
-
-  example returns and ensure on one operation is refused
-    given spec_file bad from fixture returns_and_ensure
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is returns_and_ensure
-          found[0]'s line is 16
-          found[0]'s message is "returns and ensure on one operation: remove"
-
-  example a story in the wrong file is refused
-    given spec_file bad from fixture stock
-    when  agent asks check(bad) as found
-    then  done
-          count(found) is 1
-          found[0]'s rule is wrong_file
-          found[0]'s line is 10
-          found[0]'s message is "story FIX-001 belongs in order.edda"
-
-story the checker flags what is allowed but doubtful        # EDDA-002
-  as an operator
-  i want a status nothing reaches and a story with no example shown as
-    flags, not refusals
-  so that the file still passes and I decide what to do
-  epic: CHK
-  tags: checker, static
-  note: a question: on a done story is also a flag; it needs done, which
-    needs links (a later story)
-
-  example a status nothing reaches is flagged
-    given spec_file odd from fixture unreachable_status
-    when  agent asks check(odd) as found
-    then  done
-          count(found) is 1
-          found[0]'s kind is flagged
-          found[0]'s rule is unreachable_status
-          found[0]'s line is 5
-          found[0]'s message is "no change reaches status: delivered"
-
-  example a story with no example is flagged
-    given spec_file odd from fixture no_example
-    when  agent asks check(odd) as found
-    then  done
-          count(found) is 1
-          found[0]'s kind is flagged
-          found[0]'s rule is no_example
-          found[0]'s line is 10
-          found[0]'s message is "story FIX-001 has no example"
-
-story every note is collected in one place                  # EDDA-003
-  as an operator
-  i want every note: line across all files listed together, the same
-    wording side by side
-  so that a kind of note that keeps coming back shows itself
-  epic: CHK
-  tags: checker, backlog
-
-  operation notes(files: many spec_file) returns
-    [note for file in files for note in file's notes]
-    ordered by text, then file's name, then line
-    who: agent, operator
-
-  example notes from two files are listed with the same wording side by side
-    given spec_file a from fixture notes_a
-          spec_file b from fixture notes_b
-    when  operator asks notes([a, b]) as all
-    then  done
-          count(all) is 4
-          all[0]'s text is "a removed order keeps its history"
-          all[1]'s text is "a workshop sees stock as of the last refresh"
-          all[2]'s text is "the stock feed is refreshed every night"
-          all[3]'s text is "the stock feed is refreshed every night"
-          all[2]'s story_id is "FIX-001"
-          all[2]'s line is 14
-          all[3]'s line is 14
+  EDDA-003:
+    story: "every note is collected in one place"
+    about: spec_file
+    as_a: operator
+    i_want: "every note across all files listed together, the same wording
+      side by side"
+    so_that: "a kind of note that keeps coming back shows itself"
+    epic: CHK
+    tags: [checker, backlog]
+    operations:
+      notes:
+        inputs: {files: many spec_file}
+        returns: "[note for file in files for note in file's notes]"
+        ordered_by: ["text", "file's name", "line"]
+        who: ["agent", "operator"]
+    examples:
+      "notes from two files are listed with the same wording side by side":
+        given:
+          - spec_file: a
+            fixture: notes_a
+          - spec_file: b
+            fixture: notes_b
+        steps:
+          - when: {actor: operator, call: "notes([a, b])"}
+            then:
+              - done
+              - "count(result) is 4"
+              - "result[0]'s text is \"a removed order keeps its history\""
+              - "result[1]'s text is \"a workshop sees stock as of the last refresh\""
+              - "result[2]'s text is \"the stock feed is refreshed every night\""
+              - "result[3]'s text is \"the stock feed is refreshed every night\""
+              - "result[2]'s story_id is \"FIX-001\""
+              - "result[2]'s line is 24"
+              - "result[3]'s line is 24"

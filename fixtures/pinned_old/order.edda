@@ -12,6 +12,7 @@ entities:
       units_sent: default 0
     may_change: {status: {incoming: [removed]}}
     may_update: ["shop_user"]
+    may_delete: ["nobody"]
 
 stories:
   FIX-001:
@@ -20,9 +21,6 @@ stories:
     as_a: shop_user
     i_want: "to remove an order"
     so_that: "the list is clean"
-    notes:
-      - "the stock feed is refreshed every night"
-      - "a workshop sees stock as of the last refresh"
     operations:
       remove:
         inputs: {order: order}

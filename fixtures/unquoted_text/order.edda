@@ -20,15 +20,12 @@ stories:
     as_a: shop_user
     i_want: "to remove an order"
     so_that: "the list is clean"
-    notes:
-      - "the stock feed is refreshed every night"
-      - "a workshop sees stock as of the last refresh"
     operations:
       remove:
         inputs: {order: order}
         refuse:
           - when: "the order's units_sent is more than 0"
-            reason: "already sent"
+            reason: already sent # the shop said so
         ensure:
           - "the order's status is removed"
     examples:

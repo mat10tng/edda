@@ -20,9 +20,6 @@ stories:
     as_a: shop_user
     i_want: "to remove an order"
     so_that: "the list is clean"
-    notes:
-      - "the stock feed is refreshed every night"
-      - "a workshop sees stock as of the last refresh"
     operations:
       remove:
         inputs: {order: order}
@@ -37,7 +34,7 @@ stories:
           - actor: erik
             roles: [shop_user]
           - order: purchase
-            status: incoming
+            status: &s incoming
             units_sent: 0
         steps:
           - when: {actor: erik, call: "remove(purchase)"}

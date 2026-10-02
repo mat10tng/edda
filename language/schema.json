@@ -1,0 +1,449 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edda.local/schema/v25",
+  "title": "Edda spec file (revision 25)",
+  "description": "The keys of a .edda file. Strings that carry logic are expressions (reference section 7) and are checked by the sentence parser, not here. The YAML subset (quoting, sequences, no anchors) is checked at the source, before this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "roles": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "is"
+        ],
+        "properties": {
+          "is": {
+            "type": "string"
+          },
+          "has": {
+            "$ref": "#/$defs/properties"
+          },
+          "includes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/name"
+            }
+          }
+        }
+      }
+    },
+    "epics": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/epicId"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "entities": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "is"
+        ],
+        "properties": {
+          "is": {
+            "type": "string"
+          },
+          "part_of": {
+            "$ref": "#/$defs/name"
+          },
+          "properties": {
+            "$ref": "#/$defs/properties"
+          },
+          "may_change": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/name"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/name"
+              },
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/name"
+                }
+              }
+            }
+          },
+          "wording": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/name"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/name"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "propertyNames": {
+                  "$ref": "#/$defs/name"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "always": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/expression"
+            }
+          },
+          "while": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "when",
+                "holds"
+              ],
+              "properties": {
+                "when": {
+                  "$ref": "#/$defs/expression"
+                },
+                "holds": {
+                  "$ref": "#/$defs/expression"
+                }
+              }
+            }
+          },
+          "may_create": {
+            "$ref": "#/$defs/whoList"
+          },
+          "may_read": {
+            "$ref": "#/$defs/whoList"
+          },
+          "may_update": {
+            "$ref": "#/$defs/whoList"
+          },
+          "may_delete": {
+            "$ref": "#/$defs/whoList"
+          },
+          "notes": {
+            "$ref": "#/$defs/textList"
+          }
+        }
+      }
+    },
+    "stories": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/storyId"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "story",
+          "about",
+          "as_a",
+          "i_want",
+          "so_that"
+        ],
+        "properties": {
+          "story": {
+            "type": "string"
+          },
+          "about": {
+            "$ref": "#/$defs/name"
+          },
+          "as_a": {
+            "$ref": "#/$defs/name"
+          },
+          "i_want": {
+            "type": "string"
+          },
+          "so_that": {
+            "type": "string"
+          },
+          "epic": {
+            "$ref": "#/$defs/epicId"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/name"
+            }
+          },
+          "notes": {
+            "$ref": "#/$defs/textList"
+          },
+          "questions": {
+            "$ref": "#/$defs/textList"
+          },
+          "operations": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/name"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/operation"
+            }
+          },
+          "examples": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "$ref": "#/$defs/example"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "epicId": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*$"
+    },
+    "storyId": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"
+    },
+    "expression": {
+      "type": "string",
+      "minLength": 1,
+      "description": "one expression of reference section 7, on one physical line",
+      "not": {
+        "const": "done"
+      }
+    },
+    "typePhrase": {
+      "type": "string",
+      "minLength": 1,
+      "description": "text | number | time | yes_no | one <entity> | many <entity>[, in order] | a | b | c, with optional 'default <value>' in front and ', optional' after"
+    },
+    "computed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "computed"
+      ],
+      "properties": {
+        "computed": {
+          "$ref": "#/$defs/expression"
+        }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/typePhrase"
+          },
+          {
+            "$ref": "#/$defs/computed"
+          }
+        ]
+      }
+    },
+    "who": {
+      "type": "string",
+      "minLength": 1,
+      "description": "<role> | <role> whose <condition> [while <condition>] | nobody"
+    },
+    "whoList": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/who"
+      }
+    },
+    "textList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/typePhrase"
+          }
+        },
+        "who": {
+          "$ref": "#/$defs/whoList"
+        },
+        "refuse": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "when",
+              "reason"
+            ],
+            "properties": {
+              "when": {
+                "$ref": "#/$defs/expression"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "ensure": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expression"
+          }
+        },
+        "returns": {
+          "$ref": "#/$defs/expression"
+        },
+        "ordered_by": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/expression"
+          }
+        },
+        "also_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expression"
+          }
+        },
+        "notes": {
+          "$ref": "#/$defs/textList"
+        }
+      },
+      "not": {
+        "required": [
+          "returns",
+          "ensure"
+        ]
+      },
+      "dependentRequired": {
+        "ordered_by": [
+          "returns"
+        ]
+      }
+    },
+    "givenItem": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "description": "the first key is the entity (or 'actor') and its value the name; the other keys are properties, 'roles' for an actor, 'fixture' for a spec_file",
+      "additionalProperties": true
+    },
+    "thenItem": {
+      "anyOf": [
+        {
+          "const": "done"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "refused"
+          ],
+          "properties": {
+            "refused": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/expression"
+        }
+      ]
+    },
+    "example": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "given",
+        "steps"
+      ],
+      "properties": {
+        "given": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/givenItem"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "then"
+            ],
+            "properties": {
+              "when": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "actor",
+                  "call"
+                ],
+                "properties": {
+                  "actor": {
+                    "$ref": "#/$defs/name"
+                  },
+                  "call": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "at": {
+                    "type": "string"
+                  }
+                }
+              },
+              "then": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/thenItem"
+                }
+              }
+            }
+          }
+        },
+        "notes": {
+          "$ref": "#/$defs/textList"
+        }
+      }
+    }
+  }
+}

@@ -1,29 +1,42 @@
-role shop_user                   # a fixture is one whole spec in one file
-epic fixtures                                            # FIX
+# A fixture is one whole spec in one file. Line numbers matter: the
+# examples in specs/spec_file.edda name them.
+roles:
+  shop_user:
+    is: "a person at a shop"
 
-entity order
-  status: default incoming | removed
-    may change: incoming to removed
-  units_sent: default 0
-  units_sent: default 0
-  may update: shop_user
+entities:
+  order:
+    is: "what a workshop buys"
+    properties:
+      status: default incoming | removed
+      units_sent: default 0
+      units_sent: default 0
+    may_change: {status: {incoming: [removed]}}
+    may_update: ["shop_user"]
 
-story remove an order                                    # FIX-001
-  as a shop_user
-  i want to remove an order
-  so that the list is clean
-  epic: FIX
-
-  operation remove(order: order)
-    if the order's units_sent is more than 0,
-      refuse: "already sent"
-    when remove succeeds, ensure:
-      the order's status is removed
-
-  example a fresh order is removed
-    given shop_user erik
-          order purchase with status incoming, units_sent 0
-    when  erik asks remove(purchase)
-    then  done
-          purchase's status is removed
-
+stories:
+  FIX-001:
+    story: "remove an order"
+    about: order
+    as_a: shop_user
+    i_want: "to remove an order"
+    so_that: "the list is clean"
+    operations:
+      remove:
+        inputs: {order: order}
+        refuse:
+          - when: "the order's units_sent is more than 0"
+            reason: "already sent"
+        ensure:
+          - "the order's status is removed"
+    examples:
+      "a fresh order is removed":
+        given:
+          - actor: erik
+            roles: [shop_user]
+          - order: purchase
+            status: incoming
+            units_sent: 0
+        steps:
+          - when: {actor: erik, call: "remove(purchase)"}
+            then: [done, "purchase's status is removed"]

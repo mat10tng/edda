@@ -25,13 +25,19 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 24
-            keywords.edda   the vocabulary, one entry per keyword
-specs/      *.edda          Edda's own stories, one file per entity
-            *.edda.vc       approved copies, append-only (none yet)
+language/   reference.md    the language reference, revision 25
+            schema.json     the keys, JSON Schema 2020-12
+            keywords.edda   the registry: every key and expression form,
+                            with what it means, why, and where it is from
+specs/      *.edda          Edda's own stories, YAML, one file per entity
+            *.edda.vc       approved versions, append-only (none yet)
 fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
                             under its own file name, one deliberate
                             problem each; the examples name the folder
 ```
+
+A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic in
+quoted expressions borrowed from Ruby and Python. Tell your editor the
+extension is YAML and point it at `language/schema.json`.
 
 Nothing is built yet.

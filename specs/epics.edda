@@ -1,3 +1,4 @@
-epic the checker reads a file and says what is wrong        # CHK
-epic a story has versions and only the operator moves them  # VC
-epic the operator reads stories as sentences                # VIEW
+epics:
+  CHK: "the checker reads a file and says what is wrong"
+  VC: "a story has versions and only the operator moves them"
+  VIEW: "the operator reads stories as sentences"

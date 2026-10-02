@@ -1,269 +1,594 @@
-entity story                      # one story in a spec_file
-  id                              # FUL-005
-  file: one spec_file
-  sentence
-  role_name
-  epic_id, optional
-  text                            # the story as it stands in the file, every line
-  rules_text                      # its operations and examples only, as parsed: comments,
-                                  #   blank lines, trailing spaces, note: and question: lines
-                                  #   removed; string contents and indentation kept
-  approvals: many approval, in order    # oldest first; the newest is approvals[-1]
-  version: count(approvals)
-  changes: many change, in order  # between approvals[-1]'s text and text; every line
-                                  #   outside the longest common sequence of lines is a
-                                  #   change: removed if in the old text, added if in the new;
-                                  #   ordered by line; a never-approved story is all added
-  sentences: many sentence, in order    # the read view of text, one per rule, in story order
-  is approved: count(approvals) is more than 0
-    and rules_text is approvals[-1]'s rules_text
-  may create: agent
-  may read:   agent, operator
-  may update: agent
-  may delete: nobody
+entities:
+  story:
+    is: "one story in a spec_file"
+    properties:
+      id: text                          # FUL-005
+      file: one spec_file
+      about: text                       # the entity it is about
+      sentence: text
+      role_name: text
+      epic_id: text, optional
+      text: text                        # the story as it stands in the file
+      rules_text: text                  # its operations and examples as parsed:
+                                        #   comments, blank lines, trailing
+                                        #   spaces, notes and questions removed;
+                                        #   string contents and nesting kept
+      entities: many entity_block       # every entity block the story names
+      versions: many version, in order  # oldest first; the newest is versions[-1]
+      version: {computed: "count(versions)"}
+      approved: {computed: "count(versions) is more than 0
+                            and rules_text is versions[-1]'s rules_text"}
+      changes: many change, in order    # between versions[-1]'s text and text:
+                                        #   every line outside the longest common
+                                        #   sequence of lines is a change, removed
+                                        #   if in the old text, added if in the
+                                        #   new; by line; never approved: all added
+      sentences: many sentence, in order  # the read view of text, one per rule
+    may_create: ["agent"]
+    may_read: ["agent", "operator"]
+    may_update: ["agent"]
+    may_delete: ["nobody"]
 
-entity approval, part of story    # one block in the .edda.vc file
-  version
-  approved_at
-  approved_by
-  because, optional
-  text                            # the whole story as approved
-  rules_text                      # its operations and examples, normalised as above
+  version:
+    is: "one entry in the .edda.vc file: a story or entity block as approved"
+    properties:
+      number: number
+      approved_at: time
+      approved_by: text
+      because: text, optional
+      text: text                        # the whole block as approved
+      rules_text: text
+      against: many pin                 # for a story: the entity versions it
+                                        #   was approved against
 
-story a story is a draft until the operator approves it     # EDDA-004
-  as an operator
-  i want a story whose operations or examples differ from its newest
-    approved copy to be a draft, whoever changed it
-  so that nothing the agent writes counts until I have said yes
-  epic: VC
-  tags: version, approval
+  pin:
+    is: "one entity version a story was approved against"
+    part_of: version
+    properties:
+      entity_block: one entity_block
+      number: number
 
-  example a new story is a draft
-    given story fresh with id "FUL-010", approvals []
-    then  fresh is not approved
+  entity_block:
+    is: "the definition of one entity in a spec_file, versioned like a story"
+    properties:
+      name: text
+      file: one spec_file
+      text: text
+      versions: many version, in order
+      version: {computed: "count(versions)"}
+      approved: {computed: "count(versions) is more than 0
+                            and text is versions[-1]'s text"}
 
-  example a story that matches its newest approval is approved
-    given approval a1 with version 1, rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
-          story same with id "FUL-005", approvals [a1],
-            rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
-    then  same is approved
+  sentence:
+    is: "one line of the read view"
+    properties:
+      kind: story | permission | refusal | outcome | invariant | note | question | example
+      text: text
 
-  example a changed refusal makes a draft again
-    given approval a1 with version 1, rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
-          story changed with id "FUL-005", approvals [a1],
-            rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"the order is already removed\""
-    then  changed is not approved
+  change:
+    is: "one difference between two versions of a story"
+    properties:
+      kind: added | removed
+      line: number                      # in the newer text; for removed, where it sat
+      sentence: text                    # the line with its indentation, comment removed
 
-  example a changed example makes a draft again
-    given approval a1 with version 1, rules_text "example a\n  given order o with status incoming\n  then  o's status is incoming"
-          story changed with id "FUL-005", approvals [a1],
-            rules_text "example a\n  given order o with status removed\n  then  o's status is removed"
-    then  changed is not approved
+stories:
+  EDDA-004:
+    story: "a story is a draft until the operator approves it"
+    about: story
+    as_a: operator
+    i_want: "a story whose operations or examples differ from its newest
+      approved copy to be a draft, whoever changed it"
+    so_that: "nothing the agent writes counts until I have said yes"
+    epic: VC
+    tags: [version, approval]
+    examples:
+      "a new story is a draft":
+        given:
+          - story: fresh
+            id: "FUL-010"
+            versions: []
+        steps:
+          - then: ["fresh is not approved", "fresh's version is 0"]
+      "a story that matches its newest version is approved":
+        given:
+          - version: v1
+            number: 1
+            rules_text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+          - story: same
+            id: "FUL-005"
+            versions: [v1]
+            rules_text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+        steps:
+          - then: ["same is approved", "same's version is 1"]
+      "a changed refusal makes a draft again":
+        given:
+          - version: v1
+            number: 1
+            rules_text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+          - story: changed
+            id: "FUL-005"
+            versions: [v1]
+            rules_text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "the order is already removed"
+        steps:
+          - then: ["changed is not approved"]
+      "a changed example makes a draft again":
+        given:
+          - version: v1
+            number: 1
+            rules_text: |
+              examples:
+                "a":
+                  given:
+                    - order: o
+                      status: incoming
+                  steps:
+                    - then: ["o's status is incoming"]
+          - story: changed
+            id: "FUL-005"
+            versions: [v1]
+            rules_text: |
+              examples:
+                "a":
+                  given:
+                    - order: o
+                      status: removed
+                  steps:
+                    - then: ["o's status is removed"]
+        steps:
+          - then: ["changed is not approved"]
+      "a changed label, note, comment or blank line does not make a draft":
+        given:
+          - version: v1
+            number: 1
+            text: |
+              story: "remove orders"
+              tags: [shop]
+              operations:
+                remove:
+                  # frees the stock
+                  ensure:
+                    - "the order's status is removed"
+            rules_text: |
+              operations:
+                remove:
+                  ensure:
+                    - "the order's status is removed"
+          - story: relabelled
+            id: "FUL-005"
+            versions: [v1]
+            text: |
+              story: "remove orders"
+              tags: [shop, ordering]
+              notes: ["the shop asked for undo"]
 
-  example a changed label, comment or blank line does not make a draft
-    given approval a1 with version 1, text "story remove orders            # FUL-005\n  tags: shop\n  operation remove(order)\n    # frees the stock\n    when remove succeeds, ensure:\n      the order's status is removed",
-            rules_text "operation remove(order)\n  when remove succeeds, ensure:\n    the order's status is removed"
-          story relabelled with id "FUL-005", approvals [a1],
-            text "story remove orders            # FUL-005\n  tags: shop, ordering\n\n  operation remove(order)\n    # frees the held stock\n    when remove succeeds, ensure:\n      the order's status is removed  ",
-            rules_text "operation remove(order)\n  when remove succeeds, ensure:\n    the order's status is removed"
-    then  relabelled is approved
+              operations:
+                remove:
+                  # frees the held stock
+                  ensure:
+                    - "the order's status is removed"
+            rules_text: |
+              operations:
+                remove:
+                  ensure:
+                    - "the order's status is removed"
+        steps:
+          - then: ["relabelled is approved"]
 
-story the operator approves a story and the copy is kept    # EDDA-005
-  as an operator
-  i want my yes to append the whole story as the next version to the
-    .edda.vc file, with the date, my name and one line of because
-  so that every approved version is kept exactly, in order, and the
-    agent cannot write it
-  epic: VC
-  tags: version, approval
-  note: the agent is kept out of .edda.vc by a repository guard outside
-    the language; that guard is level 2 and is tested there
+  EDDA-005:
+    story: "the operator approves a story and the copy is kept"
+    about: story
+    as_a: operator
+    i_want: "my yes to append the whole story as the next version to the
+      .edda.vc file, with the date, my name, one line of because, and the
+      version of every entity it names"
+    so_that: "every approved version is kept exactly, in order, and the agent
+      cannot write it"
+    epic: VC
+    tags: [version, approval]
+    notes:
+      - "the agent is kept out of .edda.vc by a repository guard outside the
+        language; that guard is level 2 and is tested there"
+      - "the frame rule reads stored properties; computed ones follow"
+    operations:
+      approve:
+        inputs: {story: story, because: "text, optional"}
+        who: ["operator"]
+        refuse:
+          - when: "story is approved"
+            reason: "nothing to approve: the story matches its newest version"
+          - when: "any(p's kind is refused for p in check(story's file))"
+            reason: "the file does not check"
+        ensure:
+          - "story's versions is old(story's versions) + [story's versions[-1]]"
+          - "story's versions[-1]'s number is old(story's version) + 1"
+          - "story's versions[-1]'s text is story's text"
+          - "story's versions[-1]'s rules_text is story's rules_text"
+          - "story's versions[-1]'s approved_by is actor"
+          - "story's versions[-1]'s approved_at is now"
+          - "story's versions[-1]'s because is because"
+          - "count(story's versions[-1]'s against) is count(story's entities)"
+          - "all(pin's number is pin's entity_block's version
+              for pin in story's versions[-1]'s against)"
+          - "story is approved"
+    examples:
+      "the first approval makes version 1":
+        given:
+          - actor: tuan
+            roles: [operator]
+          - spec_file: good
+            fixture: order
+        steps:
+          - when:
+              actor: tuan
+              call: "approve(good's stories[0], \"the shop asked for it\")"
+              at: "2026-10-02 09:00"
+            then:
+              - done
+              - "good's stories[0]'s version is 1"
+              - "good's stories[0]'s versions[0]'s approved_by is tuan"
+              - "good's stories[0]'s versions[0]'s approved_at is 2026-10-02 09:00"
+              - "good's stories[0]'s versions[0]'s because is \"the shop asked for it\""
+              - "good's stories[0]'s versions[0]'s against[0]'s entity_block's name is \"order\""
+              - "good's stories[0] is approved"
+      "a second approval keeps the first and adds version 2":
+        given:
+          - actor: tuan
+            roles: [operator]
+          - spec_file: good
+            fixture: order
+          - version: v1
+            number: 1
+            approved_at: "2026-10-01 14:00"
+            rules_text: "R1"
+            text: "T1"
+          - story: grown
+            id: "FUL-005"
+            file: good
+            versions: [v1]
+            rules_text: "R2"
+            text: "T2"
+        steps:
+          - when: {actor: tuan, call: "approve(grown)", at: "2026-10-02 09:00"}
+            then:
+              - done
+              - "grown's version is 2"
+              - "grown's versions[0] is v1"
+              - "grown's versions[1]'s number is 2"
+              - "grown's versions[1]'s rules_text is \"R2\""
+              - "grown's versions[1]'s because is empty"
+              - "grown is approved"
+      "approving an approved story is refused":
+        given:
+          - actor: tuan
+            roles: [operator]
+          - spec_file: good
+            fixture: order
+          - version: v1
+            number: 1
+            rules_text: "R1"
+          - story: same
+            id: "FUL-005"
+            file: good
+            versions: [v1]
+            rules_text: "R1"
+        steps:
+          - when: {actor: tuan, call: "approve(same)"}
+            then:
+              - refused: "nothing to approve: the story matches its newest version"
+              - "same's version is 1"
+      "a story in a file that does not check is refused":
+        given:
+          - actor: tuan
+            roles: [operator]
+          - spec_file: bad
+            fixture: unknown_key
+        steps:
+          - when: {actor: tuan, call: "approve(bad's stories[0])"}
+            then:
+              - refused: "the file does not check"
+              - "bad's stories[0]'s version is 0"
+      "the agent may not approve":
+        given:
+          - actor: bot
+            roles: [agent]
+          - spec_file: good
+            fixture: order
+        steps:
+          - when: {actor: bot, call: "approve(good's stories[0])"}
+            then:
+              - refused: "approve is not allowed for agent"
+              - "good's stories[0]'s version is 0"
 
-  operation approve(story: story, because optional)
-    who: operator
-    if the story is approved,
-      refuse: "nothing to approve: the story matches its newest version"
-    if any(p's kind is refused for p in check(story's file)),
-      refuse: "the file does not check"
-    when approve succeeds, ensure:
-      story's approvals is the old story's approvals + [story's approvals[-1]]
-      story's approvals[-1]'s version is the old story's version + 1
-      story's approvals[-1]'s text is story's text
-      story's approvals[-1]'s rules_text is story's rules_text
-      story's approvals[-1]'s approved_by is the actor
-      story's approvals[-1]'s approved_at is now
-      story's approvals[-1]'s because is because
-      the story is approved
+  EDDA-006:
+    story: "the operator sees what changed before saying yes"
+    about: story
+    as_a: operator
+    i_want: "the difference between the story in the file and its newest
+      approved copy as added and removed lines, in order, so that a moved
+      rule shows too"
+    so_that: "I read the change, not the whole story, every time"
+    epic: VC
+    tags: [version, diff]
+    operations:
+      diff:
+        inputs: {story: story}
+        returns: "story's changes"
+        who: ["agent", "operator"]
+    examples:
+      "an added refusal shows as added":
+        given:
+          - version: v1
+            number: 1
+            text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+          - story: grown
+            id: "FUL-005"
+            versions: [v1]
+            text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+                    - when: "the order's units_sent is more than 0"
+                      reason: "already sent"
+        steps:
+          - when: {actor: operator, call: "diff(grown)"}
+            then:
+              - done
+              - "count(result) is 2"
+              - "result[0]'s kind is added"
+              - "result[0]'s line is 6"
+              - "result[0]'s sentence is \"      - when: \\\"the order's units_sent is more than 0\\\"\""
+              - "result[1]'s kind is added"
+              - "result[1]'s line is 7"
+      "a changed reason shows as one removed and one added":
+        given:
+          - version: v1
+            number: 1
+            text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+          - story: reworded
+            id: "FUL-005"
+            versions: [v1]
+            text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "the order is already removed"
+        steps:
+          - when: {actor: operator, call: "diff(reworded)"}
+            then:
+              - done
+              - "count(result) is 2"
+              - "result[0]'s kind is removed"
+              - "result[0]'s sentence is \"        reason: \\\"already removed\\\"\""
+              - "result[1]'s kind is added"
+              - "result[1]'s sentence is \"        reason: \\\"the order is already removed\\\"\""
+      "a comment-only edit shows nothing":
+        given:
+          - version: v1
+            number: 1
+            text: |
+              operations:
+                remove:   # frees stock
+                  ensure:
+                    - "the order's status is removed"
+          - story: commented
+            id: "FUL-005"
+            versions: [v1]
+            text: |
+              operations:
+                remove:   # frees the held stock
+                  ensure:
+                    - "the order's status is removed"
+        steps:
+          - when: {actor: operator, call: "diff(commented)"}
+            then: [done, "result is []"]
+      "two swapped refusals show as a removed pair and an added pair":
+        given:
+          - version: v1
+            number: 1
+            text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+                    - when: "the order's units_sent is more than 0"
+                      reason: "already sent"
+          - story: swapped
+            id: "FUL-005"
+            versions: [v1]
+            text: |
+              operations:
+                remove:
+                  refuse:
+                    - when: "the order's units_sent is more than 0"
+                      reason: "already sent"
+                    - when: "the order's status is removed"
+                      reason: "already removed"
+        steps:
+          - when: {actor: operator, call: "diff(swapped)"}
+            then:
+              - done
+              - "count(result) is 4"
+              - "count([c for c in result if c's kind is removed]) is 2"
+              - "count([c for c in result if c's kind is added]) is 2"
+      "a story never approved shows every line as added":
+        given:
+          - story: fresh
+            id: "FUL-010"
+            versions: []
+            text: |
+              operations:
+                remove:
+                  ensure:
+                    - "the order's status is removed"
+        steps:
+          - when: {actor: operator, call: "diff(fresh)"}
+            then:
+              - done
+              - "count(result) is 4"
+              - "all(c's kind is added for c in result)"
 
-  example the first approval makes version 1
-    given operator tuan
-          spec_file good from fixture order
-    when  tuan asks approve(good's stories[0], "the shop asked for it") at 2026-10-02 09:00
-    then  done
-          good's stories[0]'s version is 1
-          good's stories[0]'s approvals[0]'s approved_by is tuan
-          good's stories[0]'s approvals[0]'s approved_at is 2026-10-02 09:00
-          good's stories[0]'s approvals[0]'s because is "the shop asked for it"
-          good's stories[0] is approved
+  EDDA-007:
+    story: "the operator reads a story as sentences"
+    about: story
+    as_a: operator
+    i_want: "a story shown as plain sentences in its own order, one per rule,
+      with the ids hidden and the notes in grey"
+    so_that: "I read the business meaning, never the syntax"
+    epic: VIEW
+    tags: [read_view]
+    notes:
+      - "a name reads as words: units_sent reads \"units sent\""
+    operations:
+      view:
+        inputs: {story: story}
+        returns: "story's sentences"
+        who: ["agent", "operator"]
+      view_at:
+        inputs: {story: story, number: number}
+        returns: "the sentences of story's versions[number - 1]'s text"
+        who: ["agent", "operator"]
+        refuse:
+          - when: "number is not a whole number or number is less than 1
+                   or number is more than story's version"
+            reason: "no such version"
+    examples:
+      "the clean fixture reads as eight sentences":
+        given:
+          - spec_file: good
+            fixture: order
+        steps:
+          - when: {actor: operator, call: "view(good's stories[0])"}
+            then:
+              - done
+              - "count(result) is 8"
+              - "result[0]'s kind is story"
+              - "result[0]'s text is \"Remove an order. As a shop user, I want to remove an order, so that the list is clean.\""
+              - "result[1]'s kind is permission"
+              - "result[1]'s text is \"A shop user may remove an order.\""
+              - "result[2]'s kind is refusal"
+              - "result[2]'s text is \"If remove is asked for an order whose units sent is more than 0, then the system shall refuse it: already sent.\""
+              - "result[3]'s kind is outcome"
+              - "result[3]'s text is \"When remove succeeds, the system shall leave the order with status removed.\""
+              - "result[4]'s kind is example"
+              - "result[4]'s text is \"Example: a fresh order is removed.\""
+              - "result[5]'s text is \"Given erik, a shop user, and purchase, an order with status incoming and units sent 0.\""
+              - "result[6]'s text is \"When erik asks to remove purchase.\""
+              - "result[7]'s text is \"Then it is done and purchase's status is removed.\""
+      "a note reads in its place and a question after it":
+        given:
+          - spec_file: a
+            fixture: notes_a
+        steps:
+          - when: {actor: operator, call: "view(a's stories[0])"}
+            then:
+              - done
+              - "result[1]'s kind is note"
+              - "result[1]'s text is \"the stock feed is refreshed every night\""
+              - "result[2]'s kind is question"
+              - "result[2]'s text is \"does the shop want to see the refresh time?\""
+      "no sentence shows an id":
+        given:
+          - spec_file: good
+            fixture: order
+        steps:
+          - when: {actor: operator, call: "view(good's stories[0])"}
+            then: [done, "not any(\"FIX-001\" in s's text for s in result)"]
+      "an older version reads from its approved copy":
+        given:
+          - spec_file: pinned
+            fixture: pinned_old
+        steps:
+          - when: {actor: operator, call: "view_at(pinned's stories[0], 1)"}
+            then: [done, "not any(s's kind is refusal for s in result)"]
+      "a version that does not exist is refused":
+        given:
+          - spec_file: good
+            fixture: order
+        steps:
+          - when: {actor: operator, call: "view_at(good's stories[0], 0)"}
+            then: [refused: "no such version"]
 
-  example a second approval keeps the first and adds version 2
-    given operator tuan
-          approval a1 with version 1, approved_at 2026-10-01 14:00, rules_text "R1", text "T1"
-          story grown with id "FUL-005", approvals [a1], rules_text "R2", text "T2", file good
-          spec_file good from fixture order
-    when  tuan asks approve(grown) at 2026-10-02 09:00
-    then  done
-          grown's version is 2
-          grown's approvals[0] is a1
-          grown's approvals[1]'s version is 2
-          grown's approvals[1]'s rules_text is "R2"
-          grown's approvals[1]'s because is empty
-          grown is approved
-
-  example approving an approved story is refused
-    given operator tuan
-          approval a1 with version 1, rules_text "R1"
-          story same with id "FUL-005", approvals [a1], rules_text "R1", file good
-          spec_file good from fixture order
-    when  tuan asks approve(same)
-    then  refused: "nothing to approve: the story matches its newest version"
-          same's version is 1
-
-  example a story in a file that does not check is refused
-    given operator tuan
-          spec_file bad from fixture unknown_keyword
-    when  tuan asks approve(bad's stories[0])
-    then  refused: "the file does not check"
-          bad's stories[0]'s version is 0
-
-  example the agent may not approve
-    given agent bot
-          spec_file good from fixture order
-    when  bot asks approve(good's stories[0])
-    then  refused: "agent may not approve"
-          good's stories[0]'s version is 0
-
-story the operator sees what changed before saying yes      # EDDA-006
-  as an operator
-  i want the difference between the story in the file and its newest
-    approved copy as added and removed lines, in order, so that a moved
-    rule shows too
-  so that I read the change, not the whole story, every time
-  epic: VC
-  tags: version, diff
-
-  operation diff(story: story) returns story's changes
-    who: agent, operator
-
-  example an added refusal shows as added
-    given approval a1 with version 1, text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
-          story grown with id "FUL-005", approvals [a1],
-            text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\"\n  if the order's units_sent is more than 0,\n    refuse: \"already sent\""
-    when  operator asks diff(grown) as d
-    then  done
-          count(d) is 2
-          d[0]'s kind is added
-          d[0]'s line is 4
-          d[0]'s sentence is "  if the order's units_sent is more than 0,"
-          d[1]'s kind is added
-          d[1]'s sentence is "    refuse: \"already sent\""
-
-  example a changed reason shows as one removed and one added
-    given approval a1 with version 1, text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
-          story reworded with id "FUL-005", approvals [a1],
-            text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"the order is already removed\""
-    when  operator asks diff(reworded) as d
-    then  done
-          count(d) is 2
-          d[0]'s kind is removed
-          d[0]'s sentence is "    refuse: \"already removed\""
-          d[1]'s kind is added
-          d[1]'s sentence is "    refuse: \"the order is already removed\""
-
-  example a comment-only edit shows nothing
-    given approval a1 with version 1, text "operation remove(order)   # frees stock\n  when remove succeeds, ensure:\n    the order's status is removed"
-          story commented with id "FUL-005", approvals [a1],
-            text "operation remove(order)   # frees the held stock\n  when remove succeeds, ensure:\n    the order's status is removed"
-    when  operator asks diff(commented) as d
-    then  done
-          d is []
-
-  example two swapped refusals show as a removed pair and an added pair
-    given approval a1 with version 1, text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\"\n  if the order's units_sent is more than 0,\n    refuse: \"already sent\""
-          story swapped with id "FUL-005", approvals [a1],
-            text "operation remove(order)\n  if the order's units_sent is more than 0,\n    refuse: \"already sent\"\n  if the order's status is removed,\n    refuse: \"already removed\""
-    when  operator asks diff(swapped) as d
-    then  done
-          count(d) is 4
-          count([c for c in d if c's kind is removed]) is 2
-          count([c for c in d if c's kind is added]) is 2
-
-  example a story never approved shows every line as added
-    given story fresh with id "FUL-010", approvals [],
-            text "operation remove(order)\n  when remove succeeds, ensure:\n    the order's status is removed"
-    when  operator asks diff(fresh) as d
-    then  done
-          count(d) is 3
-          all(c's kind is added for c in d)
-
-story the operator reads a story as sentences               # EDDA-007
-  as an operator
-  i want a story shown as plain sentences in its own order, one per
-    rule, with the ids hidden and the notes in grey
-  so that I read the business meaning, never the syntax
-  epic: VIEW
-  tags: read-view
-
-  operation view(story: story) returns story's sentences
-    who: agent, operator
-    note: a name reads as words: units_sent reads "units sent"
-
-  operation view_at(story: story, version) returns
-    the sentences of story's approvals[version - 1]'s text
-    who: agent, operator
-    if version is not a whole number or version is less than 1
-      or version is more than story's version,
-      refuse: "no such version"
-
-  example the clean fixture reads as eight sentences
-    given spec_file good from fixture order
-    when  operator asks view(good's stories[0]) as v
-    then  done
-          count(v) is 8
-          v[0]'s kind is story
-          v[0]'s text is "Remove an order. As a shop user, I want to remove an order, so that the list is clean."
-          v[1]'s kind is permission
-          v[1]'s text is "A shop user may remove an order."
-          v[2]'s kind is refusal
-          v[2]'s text is "If remove is asked for an order whose units sent is more than 0, then the system shall refuse it: already sent."
-          v[3]'s kind is outcome
-          v[3]'s text is "When remove succeeds, the system shall leave the order with status removed."
-          v[4]'s kind is example
-          v[4]'s text is "Example: a fresh order is removed."
-          v[5]'s kind is example
-          v[5]'s text is "Given erik, a shop user, and purchase, an order with status incoming and units sent 0."
-          v[6]'s text is "When erik asks to remove purchase."
-          v[7]'s text is "Then it is done and purchase's status is removed."
-
-  example a note reads in its place and a question after it
-    given spec_file a from fixture notes_a
-    when  operator asks view(a's stories[0]) as v
-    then  done
-          v[1]'s kind is note
-          v[1]'s text is "the stock feed is refreshed every night"
-          v[2]'s kind is question
-          v[2]'s text is "does the shop want to see the refresh time?"
-
-  example no sentence shows an id
-    given spec_file good from fixture order
-    when  operator asks view(good's stories[0]) as v
-    then  done
-          not any("FIX-001" in s's text for s in v)
-
-  example an older version reads from its approved copy
-    given approval a1 with version 1, text "story remove an order   # FIX-001\n  as a shop_user\n  i want to remove an order\n  so that the list is clean\n  operation remove(order: order)\n    when remove succeeds, ensure:\n      the order's status is removed"
-          story grown with id "FIX-001", approvals [a1],
-            text "story remove an order   # FIX-001\n  as a shop_user\n  i want to remove an order\n  so that the list is clean\n  operation remove(order: order)\n    if the order's units_sent is more than 0,\n      refuse: \"already sent\"\n    when remove succeeds, ensure:\n      the order's status is removed"
-    when  operator asks view_at(grown, 1) as v
-    then  done
-          not any(s's kind is refusal for s in v)
+  EDDA-008:
+    story: "an entity block has versions, and a story is pinned to them"
+    about: story
+    as_a: operator
+    i_want: "the entity block approved like a story, each story approval to
+      record the entity versions it was approved against, and a story
+      approved against an older entity version flagged"
+    so_that: "a permission cannot change under an approved story unnoticed"
+    epic: VC
+    tags: [version, approval]
+    operations:
+      approve_entity:
+        inputs: {block: entity_block, because: "text, optional"}
+        who: ["operator"]
+        refuse:
+          - when: "block is approved"
+            reason: "nothing to approve: the entity matches its newest version"
+        ensure:
+          - "block's versions is old(block's versions) + [block's versions[-1]]"
+          - "block's versions[-1]'s number is old(block's version) + 1"
+          - "block's versions[-1]'s text is block's text"
+          - "block is approved"
+    examples:
+      "a story approved against an older entity version is flagged":
+        given:
+          - spec_file: pinned
+            fixture: pinned_old
+        steps:
+          - when: {actor: agent, call: "check(pinned)"}
+            then:
+              - done
+              - "count(result) is 1"
+              - "result[0]'s kind is flagged"
+              - "result[0]'s rule is approved_against_older"
+              - "result[0]'s message is \"FIX-001 approved against order v1, order is now v2\""
+      "approving the entity again clears nothing by itself; the story must be approved again":
+        given:
+          - actor: tuan
+            roles: [operator]
+          - spec_file: pinned
+            fixture: pinned_old
+        steps:
+          - when: {actor: tuan, call: "approve(pinned's stories[0])", at: "2026-10-02 10:00"}
+            then:
+              - done
+              - "pinned's stories[0]'s version is 2"
+              - "pinned's stories[0]'s versions[1]'s against[0]'s number is 2"
+          - when: {actor: agent, call: "check(pinned)"}
+            then: [done, "result is []"]
