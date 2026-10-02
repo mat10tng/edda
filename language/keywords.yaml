@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 36).
+# Edda keyword registry, generated from language/reference.md (revision 37).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -281,7 +281,7 @@ forms:
     means: 'reach into an entity or a list element; chains allowed'
     from: 'Python'
   - form: 'x == v, x != v, x < v, x > v, x <= v, x >= v'
-    means: 'compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; == and != take two values of one kind, every value one side may be against every value the other may be (None beside anything; a time literal beside a TIME, inside a list too; two lists by their elements, whatever their order), < and the rest two numbers, two texts or two times (type_mismatch otherwise)'
+    means: 'compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; == and != take two values of one kind, every value one side may be against every value the other may be (None beside anything; a time literal beside a TIME, inside a list too; two written-out lists position by position, any other pair of lists every element against every element, an IN ORDER list beside an unordered one), < and the rest two numbers, two texts or two times (type_mismatch otherwise)'
     from: 'Python syntax, Edda type rule'
   - form: 'a and b, a or b, not a'
     means: 'logic; not binds tightest, then and, then or; short-circuit; and and or give one of their operands, as in Python, so [1] or [] is a list'
@@ -449,7 +449,7 @@ refusals:
     when: 'a type phrase outside the grammar'
     message: 'not a type phrase: <text>; with a reason, not a type phrase (<reason>): <text>'
   - rule: 'not_an_expression'
-    when: 'a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a call that is not a call of an operation, RESULT before any call'
+    when: 'a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a call that is not a call of an operation, RESULT outside a then item after a call (a call itself never sees it)'
     message: 'not an expression: <text>; with a reason, not an expression (<reason>): <text>'
   - rule: 'second_way'
     when: 'a form 7.2 spells another way'

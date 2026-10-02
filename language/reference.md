@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 36, 2 Oct 2026. Replaces revision 35 (kb:9378934). Decisions
+Revision 37, 2 Oct 2026. Replaces revision 36 (kb:9378935). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 13. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 14. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -373,7 +373,7 @@ form are Python's.
 | form | means | from |
 |---|---|---|
 | `order.status`, `order.shop.name`, `story.versions[-1].text` | reach into an entity or a list element; chains allowed | Python |
-| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; `==` and `!=` take two values of one kind, every value one side may be against every value the other may be (`None` beside anything; a time literal beside a TIME, inside a list too; two lists by their elements, whatever their order), `<` and the rest two numbers, two texts or two times (`type_mismatch` otherwise) | Python syntax, Edda type rule |
+| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; `==` and `!=` take two values of one kind, every value one side may be against every value the other may be (`None` beside anything; a time literal beside a TIME, inside a list too; two written-out lists position by position, any other pair of lists every element against every element, an `IN ORDER` list beside an unordered one), `<` and the rest two numbers, two texts or two times (`type_mismatch` otherwise) | Python syntax, Edda type rule |
 | `a and b`, `a or b`, `not a` | logic; `not` binds tightest, then `and`, then `or`; short-circuit; `and` and `or` give one of their operands, as in Python, so `[1] or []` is a list | Python |
 | `x is None`, `x is not None` | an optional value has no value, has a value | Python |
 | `x in list`, `x not in list` | membership in a list; every value `x` may be is of the kind of every element (`type_mismatch` otherwise); a bare status in a literal list belongs to the compared property, the other elements are typed as usual | Python syntax, Edda type rule |
@@ -688,7 +688,7 @@ the pin's line for every other `bad_pin`.
 | `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status compared with a choice property | `unknown name: <name>` |
 | `unknown_status` | a status value not in its property's list: in a comparison, `may_change`, `wording` or a given | `status not in its list: <value>` |
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>` |
-| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation, `RESULT` before any call | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
+| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation, `RESULT` outside a `then` item after a call (a `call` itself never sees it) | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
 | `second_way` | a form 7.2 spells another way | `write <one way> (not <other>)` |
 | `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, an index or slice on a text, a comparison of two values of different kinds (`==`), of a non-element with a list (`in`) or of anything but two numbers, texts or times (`<`), a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, `may_change` or `wording` on a property that is no choice, a given value of another type than its property or fitting none of its possible types | `<what> expects <kind>: <text>`; for a comparison `== expects two values of one kind: <text>`, `in expects an element of the list: <text>`, `in expects a text in a text: <text>`, `in expects a list or a text: <text>`, `< expects two numbers, two texts or two times: <text>`; `may_change expects a choice property: <property>` |
 | `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `returns and also_changes on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
@@ -833,7 +833,18 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 35
+## 14. Changes from revision 36
+
+- From Astra's round 14: a snapshot's quoting and names are checked
+  too, so an unquoted text or a quoted name in a snapshot is
+  `bad_snapshot`; a step's `call` never sees `RESULT`, which belongs
+  to the `then` items after a call; two written-out lists compare
+  position by position, so `[id, approved] == ["FIX-001", False]`
+  stands; `None` is no text for `in`; a key that fits no allowed
+  name form is one `bad_name`, and the outcome message belongs to
+  `then` alone.
+
+## 15. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -846,7 +857,7 @@ are build step 4 and get their own stories then.
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 15. Changes from revision 34
+## 16. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -859,7 +870,7 @@ are build step 4 and get their own stories then.
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 16. Changes from revision 33
+## 17. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -875,7 +886,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 17. Changes from revision 32
+## 18. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -893,7 +904,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 18. Changes from revision 31
+## 19. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -912,7 +923,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 19. Changes from revision 30
+## 20. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -933,7 +944,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 20. Changes from revision 29
+## 21. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -954,7 +965,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 21. Changes from revision 28
+## 22. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -971,7 +982,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 22. Changes from revision 27
+## 23. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -993,7 +1004,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 23. Changes from revision 26
+## 24. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

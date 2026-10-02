@@ -343,6 +343,9 @@ def schema_problems(validator, root, data, source):
         v = err.validator
         key = key_name(path)
         if v in ("anyOf", "oneOf"):
+            if "propertyNames" in err.schema_path:        # a key failed every allowed name form
+                add("bad_name", path + (err.instance,), f"not a name: {err.instance}")
+                return
             branches = [resolve(b, root) for b in err.validator_value]
             kinds = [b.get("type") or (yaml_kind(b["const"]) if "const" in b else None) for b in branches]
             if all(k is None for k in kinds):
@@ -392,7 +395,10 @@ def schema_problems(validator, root, data, source):
             add("wrong_type", path, f"{key} expects a text, nothing was given", key=False)
             return
         if v == "const":
-            add("wrong_type", path, f"{key} must start with DONE or refused", key=False)
+            if err.validator_value == "DONE":
+                add("wrong_type", path, f"{key} must start with DONE or refused", key=False)
+            else:
+                add("wrong_type", path, f"{key} must be {err.validator_value}", key=False)
             return
         if v == "not":
             add("wrong_type", path, f"{key} expects an expression, not DONE", key=False)
@@ -1005,6 +1011,19 @@ class Expr:
             return sum((self.elts(v, T(v)) for v in node.values), [])
         return [(None, t[1] if is_list(t) else None)]
 
+    def positions(self, node):
+        """the elements of a written-out list by position, each the (node, type)
+        pairs it may be, through a + and OLD; None when the positions are not known"""
+        T = lambda n: self.types.get(id(n))
+        if isinstance(node, ast.List):
+            return [self.leaves(e, T(e)) for e in node.elts]
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            A, B = self.positions(node.left), self.positions(node.right)
+            return A + B if A is not None and B is not None else None
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OLD" and len(node.args) == 1:
+            return self.positions(node.args[0])
+        return None
+
     def pair(self, a, an, b, bn):
         """may two single values be compared for equality: one kind, a time literal
         beside a TIME, two lists by their elements in any order"""
@@ -1013,6 +1032,9 @@ class Expr:
         if is_either(a) or is_either(b):
             return all(self.pair(x, an, y, bn) for x in alts(a) for y in alts(b))
         if is_list(a) and is_list(b):
+            A, B = self.positions(an), self.positions(bn)
+            if A is not None and B is not None:     # both written out: position by position
+                return all(self.pair(x, xn, y, yn) for pa, pb in zip(A, B) for xn, x in pa for yn, y in pb)
             return all(self.pair(x, xn, y, yn) for xn, x in self.elts(an, a) for yn, y in self.elts(bn, b))
         if a == b or {a, b} == {"INTEGER", "NUMBER"}:
             return True
@@ -1181,7 +1203,7 @@ class Expr:
                         if not self.eq_ok(L, self.elts(rn, r)):
                             self.problem("type_mismatch", f"in expects an element of the list: {src}")
                     elif r == "TEXT":
-                        if not all(compatible(a, "TEXT", True, an) for an, a in L):
+                        if (lt is not None and not L) or not all(compatible(a, "TEXT", True, an) for an, a in L):
                             self.problem("type_mismatch", f"in expects a text in a text: {src}")
                     else:
                         self.problem("type_mismatch", f"in expects a list or a text: {src}")
@@ -1571,7 +1593,7 @@ def walk_meaning(data, stem, P, source):
                         yield "unknown_name", sw + ("when", "actor"), f"unknown name: {actor}"
                     else:
                         scope["ACTOR"] = givens[actor]
-                    c = Expr(P, scope)
+                    c = Expr(P, {k: v for k, v in scope.items() if k not in ("RESULT", "RESULT_OP")})
                     rt = c.run(w["call"], call_slot=True) if isinstance(w.get("call"), str) else None
                     for rule, p in c.out:
                         yield rule, sw + ("when", "call"), p
@@ -1689,7 +1711,8 @@ def snapshot_ok(text, kind, name):
         return False
     wrapped = SECTION[kind] + ":\n" + "".join("  " + l + "\n" for l in text.split("\n")[:-1])
     try:
-        if Source(wrapped, False).src:
+        src = Source(wrapped, False)
+        if src.src or src.style:
             return False
         DUPLICATES.clear()
         data = yaml.load(wrapped, Loader=Core)
