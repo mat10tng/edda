@@ -123,18 +123,19 @@ def strip_comment(s):
 
 def block(lines, key_line_text):
     """lines of the block whose key line contains key_line_text, from the
-    key line to the last line indented deeper than it; normalised: comments,
+    key line to the last line indented deeper than it, a flow mapping or list
+    left open at a line's end keeping the block open until it closes; normalised: comments,
     blank lines and trailing spaces removed outside quoted text, quoting
     tracked across wrapped lines, re-indented to the key line."""
     start = find(lines, key_line_text)
     indent = len(lines[start]) - len(lines[start].lstrip())
-    out, q = [], False
+    out, q, depth = [], False, 0       # depth: flow mappings and lists left open
     for n, s in enumerate(lines[start:]):
         if not q:
             if s.strip() == "" or s.lstrip().startswith("#"):
                 continue        # a comment or blank line never ends the block
             ind = len(s) - len(s.lstrip())
-            if n > 0 and ind <= indent:
+            if n > 0 and depth == 0 and ind <= indent:
                 break
         kept, i, close = [], 0, -2
         while i < len(s):
@@ -149,6 +150,10 @@ def block(lines, key_line_text):
                         close = i
             if c == "#" and not q and (i == 0 or s[i - 1] == " " or close == i - 1):
                 break
+            if not q and c in "[{":
+                depth += 1
+            elif not q and c in "]}" and depth:
+                depth -= 1
             kept.append(c)
             i += 1
         t = "".join(kept) if q else "".join(kept).rstrip()

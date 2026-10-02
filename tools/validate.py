@@ -572,6 +572,17 @@ def positions_of(t):
     return t[3] if is_list(t) and len(t) > 3 else None
 
 
+def repeat_of(t):
+    """the type every element of a list of unknown length has, when it is known
+    to be a text literal (LIT) in some alternative; else None"""
+    return t[4] if is_list(t) and len(t) > 4 else None
+
+
+def rep_leaf(r):
+    """repeat_of as (node, type) leaves, as typed_positions gives one position"""
+    return [(LIT_NODE if a == LIT else None, unlit(a)) for a in alts(r) if a != "NONE"] or [(None, "NONE")]
+
+
 def typed_positions(t):
     """positions_of as (node, type) leaves per position, for pair() and fits();
     a literal position keeps a literal node"""
@@ -646,7 +657,7 @@ def sliced(lt, lo, hi):
     """a constant slice of one list type: only the positions it keeps, when known"""
     ps = positions_of(lt)
     if ps is None:
-        return ("list", lt[1], ordered(lt))
+        return ("list", lt[1], ordered(lt)) + ((None, repeat_of(lt)) if repeat_of(lt) is not None else ())
     ps = ps[lo:hi]
     return ("list", unify_all([unlit(x) for x in ps]) if ps else "ANY", ordered(lt), ps)
 
@@ -691,12 +702,15 @@ def unify(a, b):
         e = unify(a[1], b[1])
         if e == a[1] or e == b[1]:     # one element type covers the other
             pa, pb = positions_of(a), positions_of(b)
-            if pa is None and pb is None:
+            ra, rb = repeat_of(a), repeat_of(b)
+            if pa is None and pb is None and ra is None and rb is None:
                 return ("list", e, o)
             if pa is not None and pb is not None and len(pa) == len(pb):
                 ps = tuple(unify(x, y) for x, y in zip(pa, pb))
                 if all(x is not None for x in ps):
                     return ("list", e, o, ps)
+            if ra is not None and rb is not None and unify(ra, rb) is not None:
+                return ("list", e, o, None, unify(ra, rb))
         return ("either", frozenset({a, b}))   # each keeps its own positions
     if is_choice(a) and is_choice(b):
         if a[1] is None or b[1] is None:
@@ -1100,12 +1114,19 @@ class Expr:
             P = typed_positions(t) if P is None else P
             if i is not None and P is not None and -len(P) <= i < len(P):
                 return P[i]
-            if i is not None and P is None and is_either(t) and all(is_list(a) for a in alts(t)):
-                Ps = [typed_positions(a) for a in alts(t)]
-                if all(x is not None for x in Ps):
-                    picked = [x[i] for x in Ps if -len(x) <= i < len(x)]
-                    if picked:
-                        return sum(picked, [])
+            if i is not None and P is None and list_alts(t):
+                picked = []
+                for a in list_alts(t):          # each alternative on its own
+                    tp = typed_positions(a)
+                    if tp is not None:
+                        if -len(tp) <= i < len(tp):
+                            picked.append(tp[i])
+                    elif repeat_of(a) is not None:
+                        picked.append(rep_leaf(repeat_of(a)))
+                    else:
+                        return None
+                if picked:
+                    return sum(picked, [])
         return None
 
     def leaves(self, node, t):
@@ -1159,6 +1180,8 @@ class Expr:
         tp = typed_positions(t)
         if tp is not None:
             return sum(tp, [])
+        if repeat_of(t) is not None:
+            return rep_leaf(repeat_of(t))
         if is_either(t) and all(is_list(a) for a in alts(t)):
             return sum((self.typed_elts(a) for a in alts(t)), [])
         return [(None, t[1] if is_list(t) else None)]
@@ -1462,7 +1485,9 @@ class Expr:
             return ("list", unify_all(types) if n.elts else "ANY", True, ps)
         if isinstance(n, ast.ListComp):
             inner, o = self.comprehension(n.generators, scope)
-            return ("list", self.visit(n.elt, inner), o)
+            elem = self.visit(n.elt, inner)
+            rep = self.lit_type(n.elt, elem)
+            return ("list", elem, o, None, rep) if LIT in alts(rep) else ("list", elem, o)
         if isinstance(n, ast.GeneratorExp):
             self.problem("not_an_expression", f"not an expression (a generator only inside {', '.join(sorted(GEN_ONLY))}): {src}")
             return None
@@ -1843,21 +1868,22 @@ def given_value(v, t, p, pw, givens, names, source):
 
 def normalise(text):
     """a block's text normalised (section 10): from its key line to the last
-    line indented deeper, comments, blank lines and trailing spaces removed
-    outside quoted text, quoting tracked across wrapped lines, re-indented so
-    the key line starts at column 0"""
+    line indented deeper, a flow mapping or list left open at a line's end
+    keeping the block open until it closes; comments, blank lines and trailing
+    spaces removed outside quoted text, quoting tracked across wrapped lines,
+    re-indented so the key line starts at column 0"""
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
     if not lines:
         return ""
     indent = len(lines[0]) - len(lines[0].lstrip(" "))
-    out, q = [], False
+    out, q, depth = [], False, 0       # depth: flow mappings and lists left open
     for n, s in enumerate(lines):
         if not q:
             if s.strip() == "" or s.lstrip().startswith("#"):
                 continue
-            if n > 0 and len(s) - len(s.lstrip(" ")) <= indent:
+            if n > 0 and depth == 0 and len(s) - len(s.lstrip(" ")) <= indent:
                 break
         kept, close = [], -2
         for i, c in enumerate(s):
@@ -1871,6 +1897,10 @@ def normalise(text):
                         close = i
             if c == "#" and not q and (i == 0 or s[i - 1] == " " or close == i - 1):
                 break
+            if not q and c in "[{":
+                depth += 1
+            elif not q and c in "]}" and depth:
+                depth -= 1
             kept.append(c)
         t = "".join(kept) if q else "".join(kept).rstrip()
         out.append(t[indent:] if t.startswith(" " * indent) else t)
