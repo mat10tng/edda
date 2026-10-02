@@ -657,12 +657,13 @@ def unify(a, b):
         e = unify(a[1], b[1])
         if e == a[1] or e == b[1]:     # one element type covers the other
             pa, pb = positions_of(a), positions_of(b)
+            if pa is None and pb is None:
+                return ("list", e, o)
             if pa is not None and pb is not None and len(pa) == len(pb):
                 ps = tuple(unify(x, y) for x, y in zip(pa, pb))
                 if all(x is not None for x in ps):
                     return ("list", e, o, ps)
-            return ("list", e, o)
-        return ("either", frozenset({a, b}))
+        return ("either", frozenset({a, b}))   # each keeps its own positions
     if is_choice(a) and is_choice(b):
         if a[1] is None or b[1] is None:
             return ("choice", None)
@@ -1044,6 +1045,10 @@ class Expr:
                          self.lit_type(node.orelse, self.types.get(id(node.orelse))))
         if isinstance(node, ast.BoolOp):
             return unify_all([self.lit_type(v, self.types.get(id(v))) for v in node.values])
+        L = self.index_leaf(node)
+        if L:
+            r = unify_all([LIT if isinstance(n, ast.Constant) and isinstance(n.value, str) and a == "TEXT" else a for n, a in L])
+            return unify(r, "NONE") if t is not None and "NONE" in alts(t) else r
         return t
 
     def index_leaf(self, node):
@@ -1052,9 +1057,16 @@ class Expr:
         if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
             i = int_lit(node.slice)
             P = self.positions(node.value)
-            P = typed_positions(self.types.get(id(node.value))) if P is None else P
+            t = self.types.get(id(node.value))
+            P = typed_positions(t) if P is None else P
             if i is not None and P is not None and -len(P) <= i < len(P):
                 return P[i]
+            if i is not None and P is None and is_either(t) and all(is_list(a) for a in alts(t)):
+                Ps = [typed_positions(a) for a in alts(t)]
+                if all(x is not None for x in Ps):
+                    picked = [x[i] for x in Ps if -len(x) <= i < len(x)]
+                    if picked:
+                        return sum(picked, [])
         return None
 
     def leaves(self, node, t):
@@ -1096,6 +1108,8 @@ class Expr:
         tp = typed_positions(t)                   # known positions, literals remembered
         if tp is not None:
             return sum(tp, [])
+        if is_either(t) and all(is_list(a) for a in alts(t)):
+            return sum((self.elts(node, a) for a in alts(t)), [])
         return [(None, t[1] if is_list(t) else None)]
 
     def positions(self, node):
