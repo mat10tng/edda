@@ -1562,6 +1562,9 @@ class Expr:
                 if f.id == "sum" and not all_alts(et, lambda a: a in ("INTEGER", "NUMBER")):
                     self.problem("type_mismatch", f"sum expects numbers: {src}")
                     return None
+                m = self.lit_type(g.elt, et)         # min and max choose one of the elements
+                if m is not None and LIT in alts(m):
+                    self.marks[id(n)] = m
                 return et
             if f.id in ONE_ARG:
                 if len(n.args) != 1 or n.keywords:

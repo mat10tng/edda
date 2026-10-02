@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edda.local/schema/v48",
-  "title": "Edda spec file (revision 48)",
+  "$id": "https://edda.local/schema/v49",
+  "title": "Edda spec file (revision 49)",
   "description": "The keys of a .edda file: the shape layer of reference section 11 together with the quoting rule. Strings that carry logic are Python expressions (section 7) or type phrases (section 4) and are checked in the meaning layer, not here. The YAML subset is checked at the source, before this schema.",
   "type": "object",
   "additionalProperties": false,
