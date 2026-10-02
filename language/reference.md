@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 34, 2 Oct 2026. Replaces revision 33 (kb:9378932). Decisions
+Revision 35, 2 Oct 2026. Replaces revision 34 (kb:9378933). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 11. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 12. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -559,11 +559,13 @@ a re-read is the binding's test, not a level 1 fact.
   (`order:`, `FUL-005:`) to its last line, with comments, blank lines
   and trailing spaces removed and re-indented so the key line starts at
   column 0. Quoting is tracked across lines: inside a quoted text that
-  wraps, a `#`, a blank line and the spaces are kept as they are. An
+  wraps, a `#`, a blank line and the spaces are kept as they are; a
+  `#` right after a closing quote starts a comment, as YAML reads it. An
   entry's
   `text` is a self-contained snapshot of the block as it was then: it
-  must be normalised already (normalising it changes nothing) and its
-  first line must name the entry's block (`bad_snapshot` otherwise). It
+  must be normalised already (normalising it changes nothing), read as
+  one block under the entry's name, and its first line must name that
+  block (`bad_snapshot` otherwise). It
   is never compared with the current block by the checker; `approved`
   does that, and only against the newest entry.
 - **Draft, story.** Its `rules_text` differs from the newest version's:
@@ -620,7 +622,8 @@ a re-read is the binding's test, not a level 1 fact.
 **Layers.** Each file is read in four layers; a layer runs only when
 the earlier ones found nothing, and every independent problem of the
 first failing layer is reported, ordered by file, line, rule name.
-Problems in the `.vc` carry that file's name. A `with:` value's
+Problems in the `.vc` carry that file's name; every `.vc` of the
+project is read, with or without a `.edda` beside it. A `with:` value's
 quoting follows its property's declared type, so that one quoting
 check runs in the meaning layer. Two problems are
 dependent: a block with an unknown key reports only that, never a
@@ -670,7 +673,7 @@ the pin's line for every other `bad_pin`.
 | rule | when | message |
 |---|---|---|
 | `not_yaml` | the file does not parse | `not YAML: <parser message>` |
-| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, or an expression, type phrase or title on more than one line | `anchors and aliases are not allowed` (and likewise for each feature) |
+| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or title on more than one line, a quoted key, or `DONE` anywhere but first under `then` | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item` |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
 | `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, tag or role |
 | `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
@@ -692,7 +695,7 @@ the pin's line for every other `bad_pin`.
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
 | `bad_version` | a `.vc` number out of sequence or an unknown story or block | `<kind> <name> version <n> out of sequence; expected <m>`; for an unknown block, `<kind> <name> version <n>: no such <kind>` |
 | `bad_pin` | a pin on a block entry, a story entry without pins, a duplicate `(kind, name)`, a pin to no such block or version; a version exists when a history of the project holds it | `pin <kind> <name> v<n>: no such version`, `pin <kind> <name> v<n>: no such <kind>`, `pin <kind> <name> v<n>: pinned twice`, `story <id> version <n>: no pins`, `<kind> <name> version <n>: a block entry has no pins` |
-| `bad_snapshot` | an entry's text that is not already normalised or does not name the entry's block | `text of <kind> <name> v<n> is not a normalised block` |
+| `bad_snapshot` | an entry's text that is not already normalised, does not read as one block under the entry's name, or does not name it on its first line | `text of <kind> <name> v<n> is not a normalised block` |
 
 **Flags** (`problem.kind == flagged`):
 
@@ -826,7 +829,20 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 33
+## 14. Changes from revision 34
+
+- From Astra's round 12: every `.vc` of a project is checked, with or
+  without a `.edda` beside it, so an unchecked history can no longer
+  supply a pin target; a snapshot must also read as one block under
+  the entry's name; a `#` right after a closing quote is a comment
+  for normalisation, as YAML reads it; two lists compare element by
+  element even when their types read the same; each value the right
+  side of `in` may be is checked on its own, with its own elements;
+  `None` compares with anything inside a list as well; the quoted-key
+  and misplaced-`DONE` messages are in the `yaml_feature` row; the
+  validator's own description names the history checks.
+
+## 15. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -842,7 +858,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 15. Changes from revision 32
+## 16. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -860,7 +876,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 16. Changes from revision 31
+## 17. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -879,7 +895,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 17. Changes from revision 30
+## 18. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -900,7 +916,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 18. Changes from revision 29
+## 19. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -921,7 +937,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 19. Changes from revision 28
+## 20. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -938,7 +954,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 20. Changes from revision 27
+## 21. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -960,7 +976,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 21. Changes from revision 26
+## 22. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

@@ -102,7 +102,7 @@ def edit(folder, fn, bad_text=None, file="order.edda"):
 # --- normalisation and .vc ---------------------------------------------
 
 def strip_comment(s):
-    out, q = [], False
+    out, q, close = [], False, -2
     i = 0
     while i < len(s):
         c = s[i]
@@ -112,7 +112,9 @@ def strip_comment(s):
                 k -= 1
             if (i - 1 - k) % 2 == 0:
                 q = not q
-        if c == "#" and not q and (i == 0 or s[i - 1] == " "):
+                if not q:
+                    close = i
+        if c == "#" and not q and (i == 0 or s[i - 1] == " " or close == i - 1):
             break
         out.append(c)
         i += 1
@@ -134,7 +136,7 @@ def block(lines, key_line_text):
             ind = len(s) - len(s.lstrip())
             if n > 0 and ind <= indent:
                 break
-        kept, i = [], 0
+        kept, i, close = [], 0, -2
         while i < len(s):
             c = s[i]
             if c == '"':
@@ -143,7 +145,9 @@ def block(lines, key_line_text):
                     k -= 1
                 if (i - 1 - k) % 2 == 0:
                     q = not q
-            if c == "#" and not q and (i == 0 or s[i - 1] == " "):
+                    if not q:
+                        close = i
+            if c == "#" and not q and (i == 0 or s[i - 1] == " " or close == i - 1):
                 break
             kept.append(c)
             i += 1

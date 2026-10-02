@@ -6,9 +6,9 @@ names (shape), names resolved across the files of one folder, the
 type-phrase grammar, the Python expression whitelist (7.1) with types
 from literals and declarations, operation signatures, ordering, and the
 style rule (7.2) under its equivalences (meaning), and the version
-sequence of a .edda.vc (history). A partial checker: pins, snapshots,
-the flags and the running of examples are not here. Each folder
-(specs/, one fixture folder) is one project."""
+sequence, the pins and the snapshots of a .edda.vc (history). A
+partial checker: the flags and the running of examples are not here.
+Each folder (specs/, one fixture folder) is one project."""
 import ast, copy, glob, json, os, re, sys
 import yaml
 from jsonschema import Draft202012Validator
@@ -982,11 +982,13 @@ class Expr:
     def pair(self, a, an, b, bn):
         """may two single values be compared for equality: one kind, a time literal
         beside a TIME, two lists by their elements in any order"""
-        if a is None or b is None or "ANY" in (a, b) or a == b:
+        if a is None or b is None or "ANY" in (a, b) or "NONE" in (a, b):
             return True
         if is_either(a) or is_either(b):
-            return all(self.pair(x, an, y, bn) for x in alts(a) for y in alts(b) if x != "NONE" and y != "NONE")
-        if {a, b} == {"INTEGER", "NUMBER"}:
+            return all(self.pair(x, an, y, bn) for x in alts(a) for y in alts(b))
+        if is_list(a) and is_list(b):
+            return all(self.pair(x, xn, y, yn) for xn, x in self.elts(an, a) for yn, y in self.elts(bn, b))
+        if a == b or {a, b} == {"INTEGER", "NUMBER"}:
             return True
         if (a, b) == ("TIME", "TEXT") and is_time_literal(bn) or (a, b) == ("TEXT", "TIME") and is_time_literal(an):
             return True
@@ -994,8 +996,6 @@ class Expr:
             return a[1] is None or b[1] is None or set(a[1]) <= set(b[1]) or set(b[1]) <= set(a[1])
         if is_actor(a) and is_actor(b):
             return True
-        if is_list(a) and is_list(b):
-            return all(self.pair(x, xn, y, yn) for xn, x in self.elts(an, a) for yn, y in self.elts(bn, b))
         return False
 
     def eq_ok(self, L, R):
@@ -1142,16 +1142,18 @@ class Expr:
             neg = isinstance(op, ast.NotEq)
             # the operands must compare: one kind for == and !=, an element for in, numbers, texts or times for <
             if isinstance(op, (ast.In, ast.NotIn)):
-                r = no_none(rt)
-                rl = as_list(r)
-                if rl is not None:
-                    if not self.eq_ok(self.leaves(left, lt), self.elts(right, rl)):
-                        self.problem("type_mismatch", f"in expects an element of the list: {src}")
-                elif r == "TEXT":
-                    if not self.fits(left, lt, "TEXT", True):
-                        self.problem("type_mismatch", f"in expects a text in a text: {src}")
-                elif rt is not None:
-                    self.problem("type_mismatch", f"in expects a list or a text: {src}")
+                L = self.leaves(left, lt)
+                for rn, r in self.leaves(right, rt):      # each value the right side may be, on its own
+                    if r is None:
+                        continue
+                    if is_list(r):
+                        if not self.eq_ok(L, self.elts(rn, r)):
+                            self.problem("type_mismatch", f"in expects an element of the list: {src}")
+                    elif r == "TEXT":
+                        if not all(compatible(a, "TEXT", True, an) for an, a in L):
+                            self.problem("type_mismatch", f"in expects a text in a text: {src}")
+                    else:
+                        self.problem("type_mismatch", f"in expects a list or a text: {src}")
             elif equality:
                 if not self.eq_ok(self.leaves(left, lt), self.leaves(right, rt)):
                     self.problem("type_mismatch", f"{'!=' if neg else '=='} expects two values of one kind: {src}")
@@ -1625,7 +1627,7 @@ def normalise(text):
                 continue
             if n > 0 and len(s) - len(s.lstrip(" ")) <= indent:
                 break
-        kept = []
+        kept, close = [], -2
         for i, c in enumerate(s):
             if c == '"':
                 k = i - 1
@@ -1633,7 +1635,9 @@ def normalise(text):
                     k -= 1
                 if (i - 1 - k) % 2 == 0:
                     q = not q
-            if c == "#" and not q and (i == 0 or s[i - 1] == " "):
+                    if not q:
+                        close = i
+            if c == "#" and not q and (i == 0 or s[i - 1] == " " or close == i - 1):
                 break
             kept.append(c)
         t = "".join(kept) if q else "".join(kept).rstrip()
@@ -1684,7 +1688,15 @@ def history_problems(entries, P, source):
         text = e.get("text")
         if isinstance(text, str):
             norm = normalise(text)
-            if norm != text or norm.split("\n")[0] != f"{name}:":
+            ok = norm == text and norm.split("\n")[0] == f"{name}:"
+            if ok:                # and it reads as one block under that name
+                try:
+                    DUPLICATES.clear()
+                    block = yaml.load(text, Loader=Core)
+                    ok = isinstance(block, dict) and list(block) == [name] and isinstance(block[name], dict)
+                except Exception:
+                    ok = False
+            if not ok:
                 out.append(("bad_snapshot", line, f"text of {kind} {name} v{n} is not a normalised block"))
     return out
 
@@ -1727,8 +1739,7 @@ def check(path, P):
     if shape:
         return [], shape, [], []
     if is_vc:
-        if stem in P.files:
-            history = sorted(set(history_problems(data, P, source)), key=lambda p: (p[1], p[0]))
+        history = sorted(set(history_problems(data, P, source)), key=lambda p: (p[1], p[0]))
     else:
         meaning = [(rule, source.line(where, key=rule in KEY_LINE_RULES), msg)
                    for rule, where, msg in walk_meaning(data, stem, P, source)]

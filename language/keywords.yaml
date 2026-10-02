@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 34).
+# Edda keyword registry, generated from language/reference.md (revision 35).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -416,8 +416,8 @@ refusals:
     when: 'the file does not parse'
     message: 'not YAML: <parser message>'
   - rule: 'yaml_feature'
-    when: 'an anchor (its aliases with it), tag, directive, <<, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside .vc text, an odd or jumping indentation, or an expression, type phrase or title on more than one line'
-    message: 'anchors and aliases are not allowed (and likewise for each feature)'
+    when: 'an anchor (its aliases with it), tag, directive, <<, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside .vc text, an odd or jumping indentation, an expression, type phrase or title on more than one line, a quoted key, or DONE anywhere but first under then'
+    message: 'anchors and aliases are not allowed (and likewise for each feature); a key is plain, not quoted; DONE is allowed only as the first then item'
   - rule: 'unquoted_text'
     when: 'free text or an expression written plain'
     message: 'quote the <key>; an unquoted # drops the rest of the line'
@@ -482,7 +482,7 @@ refusals:
     when: 'a pin on a block entry, a story entry without pins, a duplicate (kind, name), a pin to no such block or version; a version exists when a history of the project holds it'
     message: 'pin <kind> <name> v<n>: no such version, pin <kind> <name> v<n>: no such <kind>, pin <kind> <name> v<n>: pinned twice, story <id> version <n>: no pins, <kind> <name> version <n>: a block entry has no pins'
   - rule: 'bad_snapshot'
-    when: 'an entry''s text that is not already normalised or does not name the entry''s block'
+    when: 'an entry''s text that is not already normalised, does not read as one block under the entry''s name, or does not name it on its first line'
     message: 'text of <kind> <name> v<n> is not a normalised block'
 
 flags:
