@@ -344,7 +344,7 @@ def schema_problems(validator, root, data, source):
         key = key_name(path)
         if v in ("anyOf", "oneOf"):
             branches = [resolve(b, root) for b in err.validator_value]
-            kinds = [b.get("type") for b in branches]
+            kinds = [b.get("type") or (yaml_kind(b["const"]) if "const" in b else None) for b in branches]
             if all(k is None for k in kinds):
                 names = [", ".join(b.get("required", [])) for b in branches]
                 add("wrong_type", path, f"{block_name(path, is_vc)} must name one of {' or '.join(names)}")
@@ -391,7 +391,10 @@ def schema_problems(validator, root, data, source):
         if v == "minLength":
             add("wrong_type", path, f"{key} expects a text, nothing was given", key=False)
             return
-        if v in ("const", "not"):
+        if v == "const":
+            add("wrong_type", path, f"{key} must start with DONE or refused", key=False)
+            return
+        if v == "not":
             add("wrong_type", path, f"{key} expects an expression, not DONE", key=False)
             return
         if v == "propertyNames":
@@ -695,14 +698,8 @@ def words(t):
 class Project:
     def __init__(self, files, histories=()):
         """files: list of (stem, data) for every .edda that passed the shape layer;
-        histories: the entries of every .edda.vc that did"""
-        self.entities, self.roles, self.operations, self.epics, self.stories = {}, {}, {}, set(), set()
-        self.versions = {}        # (kind, name) -> the version numbers its histories hold
-        for entries in histories:
-            for e in listing(entries):
-                if isinstance(e, dict):
-                    kind = "story" if "story" in e else "entity" if "entity" in e else "role"
-                    self.versions.setdefault((kind, e.get(kind)), set()).add(e.get("number"))
+        histories: (stem, entries) of every .edda.vc that did"""
+        self.entities, self.roles, self.operations, self.epics, self.stories = {}, {}, {}, set(), {}
         self.files = {stem for stem, _ in files}
         self.dups = {}            # stem -> [(path, name)]: a name declared twice across the project
         self.role_order = []
@@ -742,7 +739,7 @@ class Project:
                         if sid in self.stories:
                             self.dups.setdefault(stem, []).append((("stories", sid), sid))
                             continue
-                        self.stories.add(sid)
+                        self.stories[sid] = stem
                         for oname, op in mapping(mapping(st).get("operations")).items():
                             if oname in self.operations:
                                 self.dups.setdefault(stem, []).append((("stories", sid, "operations", oname), oname))
@@ -775,6 +772,20 @@ class Project:
             if not changed:
                 break
         self.cycle_anchors = self.find_cycles()
+        self.versions = {}        # (kind, name) -> the version numbers in the history beside the block's file
+        for stem, entries in histories:
+            for e in listing(entries):
+                if isinstance(e, dict):
+                    kind = "story" if "story" in e else "entity" if "entity" in e else "role"
+                    if self.file_of(kind, e.get(kind)) == stem:
+                        self.versions.setdefault((kind, e.get(kind)), set()).add(e.get("number"))
+
+    def file_of(self, kind, name):
+        """the stem of the file a block lives in, or None"""
+        if kind == "story":
+            return self.stories.get(name)
+        block = (self.entities if kind == "entity" else self.roles).get(name)
+        return block["file"] if block else None
 
     def find_cycles(self):
         """the first declared role of each cycle of includes, in file-name then file order"""
@@ -974,9 +985,24 @@ class Expr:
         return [(node, a) for a in alts(t) if a != "NONE"] if t is not None else [(node, None)]
 
     def elts(self, node, t):
-        """the (node, type) pairs a list's elements may be: each literal element, else the element type"""
+        """the (node, type) pairs a list's elements may be: each literal element,
+        through a slice, a +, a comprehension's projection, OLD and alternatives;
+        else the element type"""
+        T = lambda n: self.types.get(id(n))
         if isinstance(node, ast.List):
-            return sum((self.leaves(e, self.types.get(id(e))) for e in node.elts), [])
+            return sum((self.leaves(e, T(e)) for e in node.elts), [])
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+            return self.elts(node.value, T(node.value))
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return self.elts(node.left, T(node.left)) + self.elts(node.right, T(node.right))
+        if isinstance(node, ast.ListComp):
+            return self.leaves(node.elt, T(node.elt))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OLD" and len(node.args) == 1:
+            return self.elts(node.args[0], T(node.args[0]))
+        if isinstance(node, ast.IfExp):
+            return self.elts(node.body, T(node.body)) + self.elts(node.orelse, T(node.orelse))
+        if isinstance(node, ast.BoolOp):
+            return sum((self.elts(v, T(v)) for v in node.values), [])
         return [(None, t[1] if is_list(t) else None)]
 
     def pair(self, a, an, b, bn):
@@ -1030,7 +1056,10 @@ class Expr:
             if i in ("NOW", "TODAY"):
                 return "TIME"
             if i == "RESULT":
-                return scope.get("RESULT")
+                if "RESULT" not in scope:
+                    self.problem("not_an_expression", f"not an expression (RESULT only after a call): {src}")
+                    return None
+                return scope["RESULT"]
             if i in scope and i != "RESULT_OP":
                 return scope[i]
             if i in ONE_ARG or i in GEN_ONLY or i in P.operations:
@@ -1142,8 +1171,10 @@ class Expr:
             neg = isinstance(op, ast.NotEq)
             # the operands must compare: one kind for == and !=, an element for in, numbers, texts or times for <
             if isinstance(op, (ast.In, ast.NotIn)):
-                L = self.leaves(left, lt)
-                for rn, r in self.leaves(right, rt):      # each value the right side may be, on its own
+                L, R = self.leaves(left, lt), self.leaves(right, rt)
+                if rt is not None and not R:              # only None: neither a list nor a text
+                    self.problem("type_mismatch", f"in expects a list or a text: {src}")
+                for rn, r in R:                           # each value the right side may be, on its own
                     if r is None:
                         continue
                     if is_list(r):
@@ -1645,11 +1676,36 @@ def normalise(text):
     return "\n".join(out) + "\n"
 
 
-def history_problems(entries, P, source):
-    """the history layer: bad_version (the entries of a .edda.vc numbered
-    1, 2, 3 per block, in file order), bad_pin (pins on a story entry only,
-    each to a version that exists, no block twice) and bad_snapshot (a text
-    already normalised that names the entry's block)"""
+SECTION = {"entity": "entities", "role": "roles", "story": "stories"}
+
+
+def snapshot_ok(text, kind, name):
+    """is text a self-contained snapshot of the block (section 10): already
+    normalised, named on its first line, in the subset of section 2 with no
+    duplicate key, and one block under the entry's name"""
+    norm = normalise(text)
+    first = norm.split("\n")[0]
+    if norm != text or not (first == f"{name}:" or first.startswith(f"{name}: ")):
+        return False
+    wrapped = SECTION[kind] + ":\n" + "".join("  " + l + "\n" for l in text.split("\n")[:-1])
+    try:
+        if Source(wrapped, False).src:
+            return False
+        DUPLICATES.clear()
+        data = yaml.load(wrapped, Loader=Core)
+    except Exception:
+        return False
+    if DUPLICATES:
+        return False
+    block = mapping(data).get(SECTION[kind])
+    return isinstance(block, dict) and list(block) == [name] and isinstance(block[name], dict)
+
+
+def history_problems(entries, P, source, stem):
+    """the history layer of <stem>.edda.vc: bad_version (entries of the
+    blocks of <stem>.edda only, numbered 1, 2, 3 per block, in file order),
+    bad_pin (pins on a story entry only, each to a version that exists, no
+    block twice) and bad_snapshot (snapshot_ok)"""
     out, count = [], {}
     kinds = {"story": P.stories, "entity": P.entities, "role": P.roles}
     for i, e in enumerate(listing(entries)):
@@ -1660,6 +1716,9 @@ def history_problems(entries, P, source):
         line = source.line((i, "number"))
         if name not in kinds[kind]:
             out.append(("bad_version", line, f"{kind} {name} version {n}: no such {kind}"))
+            continue
+        if P.file_of(kind, name) != stem:
+            out.append(("bad_version", line, f"{kind} {name} version {n}: belongs in {P.file_of(kind, name)}.edda.vc"))
             continue
         expected = count.get((kind, name), 0) + 1
         if n != expected:
@@ -1686,18 +1745,8 @@ def history_problems(entries, P, source):
         elif "pins" in e:
             out.append(("bad_pin", source.line((i, "pins")), f"{kind} {name} version {n}: a block entry has no pins"))
         text = e.get("text")
-        if isinstance(text, str):
-            norm = normalise(text)
-            ok = norm == text and norm.split("\n")[0] == f"{name}:"
-            if ok:                # and it reads as one block under that name
-                try:
-                    DUPLICATES.clear()
-                    block = yaml.load(text, Loader=Core)
-                    ok = isinstance(block, dict) and list(block) == [name] and isinstance(block[name], dict)
-                except Exception:
-                    ok = False
-            if not ok:
-                out.append(("bad_snapshot", line, f"text of {kind} {name} v{n} is not a normalised block"))
+        if isinstance(text, str) and not snapshot_ok(text, kind, name):
+            out.append(("bad_snapshot", line, f"text of {kind} {name} v{n} is not a normalised block"))
     return out
 
 
@@ -1739,7 +1788,7 @@ def check(path, P):
     if shape:
         return [], shape, [], []
     if is_vc:
-        history = sorted(set(history_problems(data, P, source)), key=lambda p: (p[1], p[0]))
+        history = sorted(set(history_problems(data, P, source, stem)), key=lambda p: (p[1], p[0]))
     else:
         meaning = [(rule, source.line(where, key=rule in KEY_LINE_RULES), msg)
                    for rule, where, msg in walk_meaning(data, stem, P, source)]
@@ -1756,7 +1805,7 @@ def project_of(folder):
     for path in sorted(glob.glob(f"{folder}/*.edda.vc")):
         source, data = load(path)
         if isinstance(data, list) and not schema_problems(VC, VC_SCHEMA, data, source):
-            histories.append(data)
+            histories.append((os.path.basename(path)[:-8], data))
     return Project(files, histories)
 
 

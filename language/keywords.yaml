@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 35).
+# Edda keyword registry, generated from language/reference.md (revision 36).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -369,7 +369,7 @@ words:
     means: 'the asker: name, roles, and the has: properties of its roles'
     from: 'Edda'
   - word: 'RESULT'
-    means: 'what the latest call returned; no value after refused'
+    means: 'what the latest call returned; no value after refused; in scope only in a then item after a call (not_an_expression elsewhere)'
     from: 'Edda'
   - word: 'NOW'
     means: 'the time and the day of the request, in the business zone'
@@ -426,7 +426,7 @@ refusals:
     message: '<key> must be a list, one <item> per line, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, tag or role'
   - rule: 'wrong_type'
     when: 'a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a with value that is not flat; an empty expression or type phrase; a quoted DONE after the first then item; a .vc entry or pin naming no block'
-    message: '<key> must be a <mapping/list/text/number/yes-no>, or <key> must be a <kind> or a <kind> where the schema allows several; <key> must be a list with at least one <item>; given must name exactly one thing besides with; <key> must be a number, text, yes/no, name or a flat list of those; <key> expects a text, nothing was given; <key> expects an expression, not DONE; <entry> must name one of story or entity or role; <pin> must name one of entity or role'
+    message: '<key> must be a <mapping/list/text/number/yes-no>, or <key> must be a <kind> or a <kind> where the schema allows several; <key> must be a list with at least one <item>; given must name exactly one thing besides with; <key> must be a number, text, yes/no, name or a flat list of those; <key> expects a text, nothing was given; <key> expects an expression, not DONE; then must start with DONE or refused for a first then item under a when that is neither; <entry> must name one of story or entity or role; <pin> must name one of entity or role'
   - rule: 'missing_key'
     when: 'a required key absent'
     message: '<block> needs <key>:, the block named by kind and name: operation remove, entity order, refusal 2, step 1, file'
@@ -449,7 +449,7 @@ refusals:
     when: 'a type phrase outside the grammar'
     message: 'not a type phrase: <text>; with a reason, not a type phrase (<reason>): <text>'
   - rule: 'not_an_expression'
-    when: 'a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a call that is not a call of an operation'
+    when: 'a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a call that is not a call of an operation, RESULT before any call'
     message: 'not an expression: <text>; with a reason, not an expression (<reason>): <text>'
   - rule: 'second_way'
     when: 'a form 7.2 spells another way'
@@ -476,13 +476,13 @@ refusals:
     when: 'who: admits a role the about entity''s matrix never names'
     message: '<operation> admits <role>, which <entity> does not'
   - rule: 'bad_version'
-    when: 'a .vc number out of sequence or an unknown story or block'
-    message: '<kind> <name> version <n> out of sequence; expected <m>; for an unknown block, <kind> <name> version <n>: no such <kind>'
+    when: 'a .vc number out of sequence, an unknown story or block, or an entry for a block of another file'
+    message: '<kind> <name> version <n> out of sequence; expected <m>; for an unknown block, <kind> <name> version <n>: no such <kind>; for another file''s block, <kind> <name> version <n>: belongs in <file>.edda.vc'
   - rule: 'bad_pin'
     when: 'a pin on a block entry, a story entry without pins, a duplicate (kind, name), a pin to no such block or version; a version exists when a history of the project holds it'
     message: 'pin <kind> <name> v<n>: no such version, pin <kind> <name> v<n>: no such <kind>, pin <kind> <name> v<n>: pinned twice, story <id> version <n>: no pins, <kind> <name> version <n>: a block entry has no pins'
   - rule: 'bad_snapshot'
-    when: 'an entry''s text that is not already normalised, does not read as one block under the entry''s name, or does not name it on its first line'
+    when: 'an entry''s text that is not already normalised, is outside the subset of section 2 or has a duplicate key, does not read as one block under the entry''s name, or does not name it on its first line'
     message: 'text of <kind> <name> v<n> is not a normalised block'
 
 flags:

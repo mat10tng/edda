@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 35, 2 Oct 2026. Replaces revision 34 (kb:9378933). Decisions
+Revision 36, 2 Oct 2026. Replaces revision 35 (kb:9378934). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 12. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 13. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -451,7 +451,7 @@ and outside 7.1 is reported as `second_way`.
 |---|---|---|
 | `OLD` | the value before the operation, only under `ensure` | Design by Contract |
 | `ACTOR` | the asker: `name`, `roles`, and the `has:` properties of its roles | Edda |
-| `RESULT` | what the latest call returned; no value after `refused` | Edda |
+| `RESULT` | what the latest call returned; no value after `refused`; in scope only in a `then` item after a call (`not_an_expression` elsewhere) | Edda |
 | `NOW` `TODAY` | the time and the day of the request, in the business zone | Edda |
 | `DONE` | the outcome of a successful call, as a `then` item, not inside an expression | Edda |
 | `MANY` `IN ORDER` `DEFAULT` `OPTIONAL` `DERIVED` `TEXT` `NUMBER` `INTEGER` `TIME` `YES_NO` | type-phrase words, section 4, not inside an expression | Edda |
@@ -552,9 +552,11 @@ a re-read is the binding's test, not a level 1 fact.
 
 - `.edda` is current; the agent edits it. `.edda.vc` is the file's
   history: append-only, oldest first, one entry per approved version of
-  a story, an entity block or a role block (role blocks in
-  `glossary.edda.vc`); only the operator's approve command writes it; a
-  repository guard keeps the agent out.
+  a story, an entity block or a role block of that file (role blocks in
+  `glossary.edda.vc`; an entry for a block of another file is
+  `bad_version`, and a pin sees only the versions in the history
+  beside the block's file); only the operator's approve command writes
+  it; a repository guard keeps the agent out.
 - **Normalised text.** A block's `text` is its lines from its key line
   (`order:`, `FUL-005:`) to its last line, with comments, blank lines
   and trailing spaces removed and re-indented so the key line starts at
@@ -563,9 +565,10 @@ a re-read is the binding's test, not a level 1 fact.
   `#` right after a closing quote starts a comment, as YAML reads it. An
   entry's
   `text` is a self-contained snapshot of the block as it was then: it
-  must be normalised already (normalising it changes nothing), read as
-  one block under the entry's name, and its first line must name that
-  block (`bad_snapshot` otherwise). It
+  must be normalised already (normalising it changes nothing), be in
+  the subset of section 2 with no duplicate key, read as one block
+  under the entry's name, and name that block on its first line, in
+  block or flow form (`bad_snapshot` otherwise). It
   is never compared with the current block by the checker; `approved`
   does that, and only against the newest entry.
 - **Draft, story.** Its `rules_text` differs from the newest version's:
@@ -623,7 +626,8 @@ a re-read is the binding's test, not a level 1 fact.
 the earlier ones found nothing, and every independent problem of the
 first failing layer is reported, ordered by file, line, rule name.
 Problems in the `.vc` carry that file's name; every `.vc` of the
-project is read, with or without a `.edda` beside it. A `with:` value's
+project is read, with or without a `.edda` beside it, and a block's
+versions live in the history beside its file. A `with:` value's
 quoting follows its property's declared type, so that one quoting
 check runs in the meaning layer. Two problems are
 dependent: a block with an unknown key reports only that, never a
@@ -676,7 +680,7 @@ the pin's line for every other `bad_pin`.
 | `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or title on more than one line, a quoted key, or `DONE` anywhere but first under `then` | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item` |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
 | `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, tag or role |
-| `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
+| `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `then must start with DONE or refused` for a first `then` item under a `when` that is neither; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
 | `missing_key` | a required key absent | `<block> needs <key>:`, the block named by kind and name: `operation remove`, `entity order`, `refusal 2`, `step 1`, `file` |
 | `unknown_key` | a key the schema does not name | `unknown key: <key>` |
 | `bad_name` | a name not snake_case, an id not `ABC-123`, a name, choice value or role-list item that is a Python keyword, a quoted name, a quoted `DONE` as the first `then` item, a role-list item that is no name | `not a name: <text>`; for a quoted name `not a name: "<text>" (a name is plain)` |
@@ -684,7 +688,7 @@ the pin's line for every other `bad_pin`.
 | `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status compared with a choice property | `unknown name: <name>` |
 | `unknown_status` | a status value not in its property's list: in a comparison, `may_change`, `wording` or a given | `status not in its list: <value>` |
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>` |
-| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
+| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation, `RESULT` before any call | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
 | `second_way` | a form 7.2 spells another way | `write <one way> (not <other>)` |
 | `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, an index or slice on a text, a comparison of two values of different kinds (`==`), of a non-element with a list (`in`) or of anything but two numbers, texts or times (`<`), a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, `may_change` or `wording` on a property that is no choice, a given value of another type than its property or fitting none of its possible types | `<what> expects <kind>: <text>`; for a comparison `== expects two values of one kind: <text>`, `in expects an element of the list: <text>`, `in expects a text in a text: <text>`, `in expects a list or a text: <text>`, `< expects two numbers, two texts or two times: <text>`; `may_change expects a choice property: <property>` |
 | `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `returns and also_changes on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
@@ -693,9 +697,9 @@ the pin's line for every other `bad_pin`.
 | `role_cycle` | `includes` reaches itself; each cycle once, at its first role in file order | `role <name> includes itself` |
 | `derived_in_given` | a `with:` value for a derived or computed property, or for an actor's `name` | `<property> is derived and cannot be given`, `<property> is computed and cannot be given`, `name is fixed and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
-| `bad_version` | a `.vc` number out of sequence or an unknown story or block | `<kind> <name> version <n> out of sequence; expected <m>`; for an unknown block, `<kind> <name> version <n>: no such <kind>` |
+| `bad_version` | a `.vc` number out of sequence, an unknown story or block, or an entry for a block of another file | `<kind> <name> version <n> out of sequence; expected <m>`; for an unknown block, `<kind> <name> version <n>: no such <kind>`; for another file's block, `<kind> <name> version <n>: belongs in <file>.edda.vc` |
 | `bad_pin` | a pin on a block entry, a story entry without pins, a duplicate `(kind, name)`, a pin to no such block or version; a version exists when a history of the project holds it | `pin <kind> <name> v<n>: no such version`, `pin <kind> <name> v<n>: no such <kind>`, `pin <kind> <name> v<n>: pinned twice`, `story <id> version <n>: no pins`, `<kind> <name> version <n>: a block entry has no pins` |
-| `bad_snapshot` | an entry's text that is not already normalised, does not read as one block under the entry's name, or does not name it on its first line | `text of <kind> <name> v<n> is not a normalised block` |
+| `bad_snapshot` | an entry's text that is not already normalised, is outside the subset of section 2 or has a duplicate key, does not read as one block under the entry's name, or does not name it on its first line | `text of <kind> <name> v<n> is not a normalised block` |
 
 **Flags** (`problem.kind == flagged`):
 
@@ -829,7 +833,20 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 34
+## 14. Changes from revision 35
+
+- From Astra's round 13: a block's versions live in the history
+  beside its file, an entry elsewhere is `bad_version` and a pin sees
+  only those versions, so one block version has one text; a snapshot
+  must be in the subset of section 2 with no duplicate key, and may
+  name its block in flow form; `RESULT` is in scope only in a `then`
+  item after a call; `in` refuses a right side that can only be
+  `None`; a time literal is seen inside a list through a slice, a `+`,
+  a comprehension's projection, `OLD` and alternatives; a first `then`
+  item under a `when` that is neither `DONE` nor `refused` gets its
+  own message.
+
+## 15. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -842,7 +859,7 @@ are build step 4 and get their own stories then.
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 15. Changes from revision 33
+## 16. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -858,7 +875,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 16. Changes from revision 32
+## 17. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -876,7 +893,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 17. Changes from revision 31
+## 18. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -895,7 +912,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 18. Changes from revision 30
+## 19. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -916,7 +933,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 19. Changes from revision 29
+## 20. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -937,7 +954,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 20. Changes from revision 28
+## 21. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -954,7 +971,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 21. Changes from revision 27
+## 22. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -976,7 +993,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 22. Changes from revision 26
+## 23. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names
