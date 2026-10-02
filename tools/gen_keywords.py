@@ -59,7 +59,8 @@ for section, header, rows in tables(md):
 
 # the two rule tables come in order: refusals then flags
 
-out = ["# Edda keyword registry, generated from language/reference.md (revision 30).",
+REV = re.search(r"^Revision (\d+)", md, re.M).group(1)
+out = [f"# Edda keyword registry, generated from language/reference.md (revision {REV}).",
        "# Plain YAML, not a spec file: the .edda subset does not apply here.",
        "# Every key, expression form, style rule, fixed name, checker rule and",
        "# read-view sentence kind, with what it means, why it exists and where it",
