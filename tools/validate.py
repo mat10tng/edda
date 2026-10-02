@@ -625,6 +625,14 @@ def all_alts(t, pred):
     return t is None or all(a is None or pred(a) for a in alts(t))
 
 
+def old_arg(node):
+    """the operand of OLD(x), else None"""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OLD" \
+            and len(node.args) == 1 and not node.keywords:
+        return node.args[0]
+    return None
+
+
 def list_alts(t):
     """the list types a value of type t may be, when it is certainly a list; else None"""
     if is_list(t):
@@ -845,8 +853,9 @@ class Project:
                     scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op["who"] if isinstance(r, str))))
                     t = Expr(self, scope, silent=True).run(op["returns"])
                     if t is not None and (op["returns_type"] is None or unknowns(t) < unknowns(op["returns_type"])):
-                        if op["ordered_by"] and is_list(t):
-                            t = ("list", t[1], True)
+                        if op["ordered_by"] and as_list(t):     # each alternative ordered, positions kept
+                            ts = [("list", a[1], True) + tuple(a[3:]) for a in list_alts(t)]
+                            t = ts[0] if len(ts) == 1 else ("either", frozenset(ts))
                         op["returns_type"] = t
                         changed = True
             if not changed:
@@ -1050,6 +1059,8 @@ class Expr:
         """may the value of node, of type t, stand where expected is declared;
         each branch of a conditional and each operand of and/or is checked on its
         own, and an element a constant index picks is checked as written"""
+        if (o := old_arg(node)) is not None:
+            return self.fits(o, self.types.get(id(o)), expected, optional)
         L = self.index_leaf(node)
         if L is not None:
             if "NONE" in alts(t) and not compatible("NONE", expected, optional):
@@ -1064,6 +1075,8 @@ class Expr:
     def lit_type(self, node, t):
         """a position's type: LIT for a text literal, each branch of a conditional
         and each operand of and/or on its own, else the type"""
+        if (o := old_arg(node)) is not None:
+            return self.lit_type(o, self.types.get(id(o)))
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return LIT
         if isinstance(node, ast.IfExp):
@@ -1099,6 +1112,8 @@ class Expr:
         """the (node, type) pairs a value may be: each branch of a conditional,
         each operand of and/or, each alternative, the element a constant index
         picks; None compares with anything"""
+        if (o := old_arg(node)) is not None:
+            return self.leaves(o, self.types.get(id(o)))
         L = self.index_leaf(node)
         if L is not None:
             return [(n, a) for n, x in L for a in alts(x) if a != "NONE"] if any(x is not None for _, x in L) else L
@@ -1126,8 +1141,8 @@ class Expr:
             return self.elts(node.left, T(node.left)) + self.elts(node.right, T(node.right))
         if isinstance(node, ast.ListComp):
             return self.leaves(node.elt, T(node.elt))
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OLD" and len(node.args) == 1:
-            return self.elts(node.args[0], T(node.args[0]))
+        if (o := old_arg(node)) is not None:
+            return self.elts(o, T(o))
         if isinstance(node, ast.IfExp):
             return self.elts(node.body, T(node.body)) + self.elts(node.orelse, T(node.orelse))
         if isinstance(node, ast.BoolOp):
@@ -1157,8 +1172,8 @@ class Expr:
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             A, B = self.positions(node.left), self.positions(node.right)
             return A + B if A is not None and B is not None else None
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OLD" and len(node.args) == 1:
-            return self.positions(node.args[0])
+        if (o := old_arg(node)) is not None:
+            return self.positions(o)
         L = self.index_leaf(node)
         if L is not None and len(L) == 1 and L[0][0] is not None:
             return self.positions(L[0][0])
@@ -1681,10 +1696,11 @@ def walk_meaning(data, stem, P, source):
                 yield from fact(f, where + ("ensure", i), body, allow_old=True)
             yield from ex(op.get("returns"), where + ("returns",), body)
             rt = P.operations.get(oname, {}).get("returns_type")
+            rl = as_list(rt)
             item_scope = {"ACTOR": body["ACTOR"]}
-            if is_list(rt) and is_entity(rt[1]):
-                item_scope[rt[1][1]] = rt[1]
-            if "ordered_by" in op and rt is not None and not is_list(rt):
+            if rl and is_entity(rl[1]):
+                item_scope[rl[1][1]] = rl[1]
+            if "ordered_by" in op and rt is not None and rl is None:
                 yield "type_mismatch", where + ("ordered_by",), f"ordered_by expects a list result: {op.get('returns')}"
             for i, o in enumerate(listing(op.get("ordered_by"))):
                 yield from ex(o, where + ("ordered_by", i), item_scope)
