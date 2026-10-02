@@ -625,6 +625,32 @@ def all_alts(t, pred):
     return t is None or all(a is None or pred(a) for a in alts(t))
 
 
+def list_alts(t):
+    """the list types a value of type t may be, when it is certainly a list; else None"""
+    if is_list(t):
+        return [t]
+    if is_either(t) and all(is_list(a) for a in t[1]):
+        return list(t[1])
+    return None
+
+
+def sliced(lt, lo, hi):
+    """a constant slice of one list type: only the positions it keeps, when known"""
+    ps = positions_of(lt)
+    if ps is None:
+        return ("list", lt[1], ordered(lt))
+    ps = ps[lo:hi]
+    return ("list", unify_all([unlit(x) for x in ps]) if ps else "ANY", ordered(lt), ps)
+
+
+def joined(a, b):
+    """a + b for two list types: the positions of both in order, when known"""
+    u = as_list(unify(a, b))
+    if u and positions_of(a) is not None and positions_of(b) is not None:
+        return ("list", u[1], ordered(u), a[3] + b[3])
+    return u
+
+
 def as_list(t):
     """the list type a value of type t certainly is, or None"""
     if is_list(t):
@@ -1091,7 +1117,11 @@ class Expr:
             return sum((self.leaves(e, T(e)) for e in node.elts), [])
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
             P = self.positions(node)
-            return sum(P, []) if P is not None else self.elts(node.value, T(node.value))
+            if P is not None:
+                return sum(P, [])
+            if list_alts(t) and any(positions_of(a) is not None for a in list_alts(t)):
+                return self.typed_elts(t)
+            return self.elts(node.value, T(node.value))
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             return self.elts(node.left, T(node.left)) + self.elts(node.right, T(node.right))
         if isinstance(node, ast.ListComp):
@@ -1105,11 +1135,17 @@ class Expr:
         L = self.index_leaf(node)
         if L is not None and len(L) == 1 and L[0][0] is not None:
             return self.elts(L[0][0], T(L[0][0]))
-        tp = typed_positions(t)                   # known positions, literals remembered
+        return self.typed_elts(t)
+
+    def typed_elts(self, t):
+        """the (node, type) pairs a list's elements may be, from its type alone:
+        known positions with literals remembered, each list alternative on its own,
+        else the element type"""
+        tp = typed_positions(t)
         if tp is not None:
             return sum(tp, [])
         if is_either(t) and all(is_list(a) for a in alts(t)):
-            return sum((self.elts(node, a) for a in alts(t)), [])
+            return sum((self.typed_elts(a) for a in alts(t)), [])
         return [(None, t[1] if is_list(t) else None)]
 
     def positions(self, node):
@@ -1242,9 +1278,9 @@ class Expr:
                         self.problem("type_mismatch", f"a slice bound expects an INTEGER: {src}")
                 if t is not None and lt is None:
                     self.problem("type_mismatch", f"a slice expects a list: {src}")
-                if positions_of(lt) is not None and all(b is None or int_lit(b) is not None for b in (s.lower, s.upper)):
-                    ps = lt[3][int_lit(s.lower) if s.lower else None:int_lit(s.upper) if s.upper else None]
-                    return ("list", unify_all([unlit(x) for x in ps]) if ps else "ANY", ordered(lt), ps)
+                if lt and all(b is None or int_lit(b) is not None for b in (s.lower, s.upper)):
+                    lo, hi = (int_lit(b) if b is not None else None for b in (s.lower, s.upper))
+                    return unify_all([sliced(a, lo, hi) for a in list_alts(t)])
                 return ("list", lt[1], ordered(lt)) if lt else None
             st = self.visit(s, scope)
             if not all_alts(st, lambda a: a == "INTEGER"):
@@ -1257,9 +1293,15 @@ class Expr:
             if lt and not ordered(lt) and mentions_result(n.value):
                 self.problem("not_ordered", f"{scope.get('RESULT_OP', 'the operation')} gives no order; RESULT[{self.seg(s)}] needs ordered_by or IN ORDER")
             if lt:
-                ps, i = positions_of(lt), int_lit(s)
-                if ps is not None and i is not None and -len(ps) <= i < len(ps):
-                    return unlit(ps[i])
+                i, picks = int_lit(s), []
+                for a in list_alts(t) if i is not None else []:
+                    ps = positions_of(a)
+                    if ps is None:
+                        picks.append(a[1] if a[1] != "ANY" else None)
+                    elif -len(ps) <= i < len(ps):
+                        picks.append(unlit(ps[i]))
+                if picks:
+                    return unify_all(picks)
                 return lt[1] if lt[1] != "ANY" else None
             if t is not None:
                 self.problem("type_mismatch", f"an index expects a list: {src}")
@@ -1383,10 +1425,7 @@ class Expr:
                     self.problem("type_mismatch", f"+ expects two lists or two numbers: {src}")
                     return None
                 if ll and rl:
-                    u = as_list(unify(ll, rl))
-                    if u and positions_of(ll) is not None and positions_of(rl) is not None:
-                        return ("list", u[1], ordered(u), ll[3] + rl[3])
-                    return u
+                    return unify_all([joined(a, b) for a in list_alts(lt) for b in list_alts(rt)])
                 return ll or rl
             for t in (lt, rt):
                 if not all_alts(t, lambda a: a in ("INTEGER", "NUMBER")):
