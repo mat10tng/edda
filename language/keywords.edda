@@ -1,8 +1,8 @@
-# Edda keyword registry, generated from language/reference.md (revision 26).
-# Every key, expression form, language word, checker rule and read-view
-# sentence kind, with what it means, why it exists and where it comes
-# from. The checker refuses any key not in schema.json, any form not
-# here and any uppercase word not here. Hover text in the views comes
+# Edda keyword registry, generated from language/reference.md (revision 27).
+# Every key, expression form, style rule, fixed name, checker rule and
+# read-view sentence kind, with what it means, why it exists and where it
+# comes from. The checker refuses any key not in schema.json, any form not
+# here and any second way 7.2 names. Hover text in the views comes
 # from means and why. A new entry is added like a rule, with a because.
 
 keys:
@@ -10,506 +10,503 @@ keys:
     section: 'Roles'
     means: 'the kinds of actor, person or program'
     why: 'permissions and stories name roles'
-    since: v26
+    since: v27
   - key: 'is:'
     section: 'Roles'
     means: 'one sentence of description'
     why: 'the read view'
-    since: v26
+    since: v27
   - key: 'has:'
     section: 'Roles'
     means: 'the properties a holder of this role has, as type phrases'
-    why: 'shop_user WHOSE shop = order.shop needs a shop'
-    since: v26
+    why: 'ACTOR.shop == order.shop needs a shop'
+    since: v27
   - key: 'includes:'
     section: 'Roles'
     means: 'every permission line admitting those roles admits this one too, condition included; a cycle is role_cycle'
     why: 'RBAC''s role hierarchy'
-    since: v26
+    since: v27
   - key: 'entities:'
     section: 'Entities'
     means: 'the kinds of business object the system keeps'
     why: 'the glossary; every expression is over declared names'
-    since: v26
+    since: v27
   - key: 'is:'
     section: 'Entities'
     means: 'one sentence of description'
     why: 'the read view'
-    since: v26
+    since: v27
   - key: 'properties:'
     section: 'Entities'
     means: 'name to type phrase, or {computed: expr}'
     why: 'the shape the checker and the binding read'
-    since: v26
+    since: v27
   - key: 'part_of:'
     section: 'Entities'
     means: 'this entity belongs to that one'
     why: 'placement and the frame rule follow the owner'
-    since: v26
+    since: v27
   - key: 'may_change:'
     section: 'Entities'
     means: 'per status property, the only allowed changes'
     why: 'a change outside it fails at run time; an unreached status is flagged'
-    since: v26
+    since: v27
   - key: 'wording:'
     section: 'Entities'
     means: 'per value and role, the words shown'
     why: 'the one piece of screen wording kept'
-    since: v26
+    since: v27
   - key: 'always:'
     section: 'Entities'
     means: 'facts that hold after every operation'
     why: 'invariants checked on the suite'
-    since: v26
+    since: v27
   - key: 'while:'
     section: 'Entities'
     means: 'when a condition holds, holds a fact'
     why: 'state-bound invariants, EARS WHILE'
-    since: v26
+    since: v27
   - key: 'may_create:'
     section: 'Entities'
-    means: 'who may, as a list of who-expressions'
+    means: 'who may, as a list of who-lines; a key left out means nobody'
     why: 'the CRUD matrix, default deny'
-    since: v26
+    since: v27
   - key: 'may_read:'
     section: 'Entities'
-    means: 'who may, as a list of who-expressions'
+    means: 'who may, as a list of who-lines; a key left out means nobody'
     why: 'the CRUD matrix, default deny'
-    since: v26
+    since: v27
   - key: 'may_update:'
     section: 'Entities'
-    means: 'who may, as a list of who-expressions'
+    means: 'who may, as a list of who-lines; a key left out means nobody'
     why: 'the CRUD matrix, default deny'
-    since: v26
+    since: v27
   - key: 'may_delete:'
     section: 'Entities'
-    means: 'who may, as a list of who-expressions'
+    means: 'who may, as a list of who-lines; a key left out means nobody'
     why: 'the CRUD matrix, default deny'
-    since: v26
+    since: v27
   - key: 'epics:'
     section: 'Stories'
     means: 'id to one sentence of intent; no rules'
     why: 'one level above the story, nothing deeper; done when its stories are'
-    since: v26
+    since: v27
   - key: 'stories:'
     section: 'Stories'
     means: 'id to story'
     why: 'the unit of done, review, version and delivery'
-    since: v26
+    since: v27
   - key: 'story:'
     section: 'Stories'
     means: 'the sentence'
     why: 'what the customer said'
-    since: v26
+    since: v27
   - key: 'about:'
     section: 'Stories'
     means: 'the entity it is about'
     why: 'placement, authoritative'
-    since: v26
+    since: v27
   - key: 'as_a:'
     section: 'Stories'
     means: 'the one role it serves, declared'
     why: 'the read view groups by role'
-    since: v26
+    since: v27
   - key: 'i_want:'
     section: 'Stories'
     means: 'free text'
     why: 'stored and shown; nothing runs on them'
-    since: v26
+    since: v27
   - key: 'so_that:'
     section: 'Stories'
     means: 'free text'
     why: 'stored and shown; nothing runs on them'
-    since: v26
+    since: v27
   - key: 'epic:'
     section: 'Stories'
     means: 'labels'
     why: 'grouping; changeable without a new version'
-    since: v26
+    since: v27
   - key: 'tags:'
     section: 'Stories'
     means: 'labels'
     why: 'grouping; changeable without a new version'
-    since: v26
+    since: v27
   - key: 'notes:'
     section: 'Stories'
     means: 'what the grammar cannot say, on a story, an operation or an example; ignored by the checker, grey in the view, collected across files'
     why: 'nothing the customer said is lost; repeated notes are the evidence for a new key'
-    since: v26
+    since: v27
   - key: 'questions:'
     section: 'Stories'
     means: 'the undecided'
     why: 'a flag on an approved story, never a block'
-    since: v26
+    since: v27
   - key: 'operations:'
     section: 'Operations'
     means: 'name to operation; one thing an actor can ask for'
     why: 'the anchor the code carries'
-    since: v26
+    since: v27
   - key: 'is:'
     section: 'Operations'
     means: 'one sentence of what it does; required'
     why: 'heads the operation in the read view; its meaning beside the mechanics'
-    since: v26
+    since: v27
   - key: 'inputs:'
     section: 'Operations'
-    means: 'name to type phrase; an , OPTIONAL input may be omitted in a call and IS EMPTY then'
+    means: 'name to type phrase, in call order; required inputs are passed by position, , OPTIONAL inputs by keyword (remove(purchase, because="moved")) and are None when left out'
     why: 'the binding and placement need the types'
-    since: v26
+    since: v27
   - key: 'who:'
     section: 'Operations'
-    means: 'list of who-expressions; required'
+    means: 'list of who-lines; required'
     why: 'no defaults; wider_than_entity when it admits a role the about entity''s matrix never admits'
-    since: v26
+    since: v27
   - key: 'refuse:'
     section: 'Operations'
     means: 'list of when condition and reason; the first that holds is given'
     why: 'preconditions with a reason tests match'
-    since: v26
+    since: v27
   - key: 'ensure:'
     section: 'Operations'
     means: 'list of facts true after; a fact is a quoted expression or {fact, means}; may use OLD(...)'
     why: 'postconditions, each with its meaning when the mechanics do not read'
-    since: v26
+    since: v27
   - key: 'returns:'
     section: 'Operations'
     means: 'the expression a read operation gives back; never with ensure or also_changes'
     why: 'one word for reads and writes, command-query separation'
-    since: v26
+    since: v27
   - key: 'ordered_by:'
     section: 'Operations'
-    means: 'list of expressions over one result item, bare property names, ascending, ties keep input order; only with returns'
+    means: 'list of expressions over one result item, reached by its entity''s name, ascending, ties keep input order; only with returns'
     why: 'sorts; without it or an IN ORDER source, a positional check on RESULT is not_ordered'
-    since: v26
+    since: v27
   - key: 'also_changes:'
     section: 'Operations'
     means: 'property paths (order.history) the frame rule allows to change without an ensure fact'
     why: 'everything else stays unchanged'
-    since: v26
+    since: v27
   - key: 'notes:'
     section: 'Operations'
     means: 'free text'
     why: 'as on stories'
-    since: v26
+    since: v27
   - key: 'examples:'
     section: 'Examples'
     means: 'title to example; one concrete run'
     why: 'the acceptance criteria that run'
-    since: v26
+    since: v27
   - key: 'given:'
     section: 'Examples'
-    means: 'a list of things to make; each item has exactly one key besides with: - <entity>: <name> or - actor: <name>; with: holds property values, roles: for an actor, fixture: for a spec_file'
+    means: 'a list of things to make; each item has exactly one key besides with: - <entity>: <name> or - actor: <name>'
     why: 'order-independent, schema-checked; names declared here are used below; the binding makes them; no glue is written'
-    since: v26
+    since: v27
   - key: 'with:'
     section: 'Examples'
-    means: 'property name to value: a number, quoted text, a quoted time, YES/NO, a choice value, a given name, or a list of those'
-    why: 'a property left out takes its DEFAULT, [] for MANY, empty for OPTIONAL, otherwise unset: reading it fails the example; a derived property is derived_in_given'
-    since: v26
+    means: 'property name to value: a number, quoted text, a quoted time, True, False, a choice value, a given name, or a flat list of those; roles: for an actor, fixture: for a spec_file'
+    why: 'a property left out takes its DEFAULT, [] for MANY, None for OPTIONAL, otherwise unset: reading it fails the example; a derived property is derived_in_given'
+    since: v27
   - key: 'fixture:'
     section: 'Examples'
     means: 'the folder under fixtures/; its file, and its history when present, become the given spec_file'
     why: 'the whole spec is the given, never a hand-made fragment'
-    since: v26
+    since: v27
   - key: 'steps:'
     section: 'Examples'
     means: 'a list of when and then; when may be left out to check the given state'
     why: 'a flow is several steps'
-    since: v26
+    since: v27
   - key: 'when:'
     section: 'Examples'
     means: 'actor (a declared given), call (the operation with its arguments, Python call form), at (optional time)'
     why: 'one fixed shape; every actor is declared (unknown_name otherwise)'
-    since: v26
+    since: v27
   - key: 'then:'
     section: 'Examples'
     means: 'with when: the outcome first, DONE or refused: "<reason>", then facts; without when: facts only'
     why: 'the checker compares; RESULT is what the latest call returned'
-    since: v26
+    since: v27
   - key: 'notes:'
     section: 'Examples'
     means: 'free text'
     why: 'as on stories'
-    since: v26
+    since: v27
+  - key: 'computed:'
+    section: 'Examples'
+    means: 'the one key of a computed property, holding its expression'
+    why: 'a property that is an expression, never stored'
+    since: v27
+  - key: 'when:'
+    section: 'Examples'
+    means: 'in while: the condition and the fact that holds under it'
+    why: 'EARS WHILE'
+    since: v27
+  - key: 'holds:'
+    section: 'Examples'
+    means: 'in while: the condition and the fact that holds under it'
+    why: 'EARS WHILE'
+    since: v27
+  - key: 'fact:'
+    section: 'Examples'
+    means: 'a fact with its meaning in words'
+    why: 'the meaning beside the mechanics (decision 40)'
+    since: v27
+  - key: 'means:'
+    section: 'Examples'
+    means: 'a fact with its meaning in words'
+    why: 'the meaning beside the mechanics (decision 40)'
+    since: v27
+  - key: 'role:'
+    section: 'Examples'
+    means: 'a who-line: the role and its condition'
+    why: 'one shape for every permission'
+    since: v27
+  - key: 'when:'
+    section: 'Examples'
+    means: 'a who-line: the role and its condition'
+    why: 'one shape for every permission'
+    since: v27
+  - key: 'actor:'
+    section: 'Examples'
+    means: 'inside a step''s when: who asks, what, when'
+    why: 'one fixed request shape'
+    since: v27
+  - key: 'call:'
+    section: 'Examples'
+    means: 'inside a step''s when: who asks, what, when'
+    why: 'one fixed request shape'
+    since: v27
+  - key: 'at:'
+    section: 'Examples'
+    means: 'inside a step''s when: who asks, what, when'
+    why: 'one fixed request shape'
+    since: v27
+  - key: 'refused:'
+    section: 'Examples'
+    means: 'a then outcome with the reason given'
+    why: 'tests match the reason'
+    since: v27
+  - key: 'roles:'
+    section: 'Examples'
+    means: 'inside with:: an actor''s roles, a spec_file''s folder'
+    why: 'the binding reads them'
+    since: v27
+  - key: 'fixture:'
+    section: 'Examples'
+    means: 'inside with:: an actor''s roles, a spec_file''s folder'
+    why: 'the binding reads them'
+    since: v27
+  - key: 'story:'
+    section: 'Versions and approval'
+    means: 'which block this entry is a version of; exactly one'
+    why: 'one entry, one block'
+    since: v27
+  - key: 'entity:'
+    section: 'Versions and approval'
+    means: 'which block this entry is a version of; exactly one'
+    why: 'one entry, one block'
+    since: v27
+  - key: 'role:'
+    section: 'Versions and approval'
+    means: 'which block this entry is a version of; exactly one'
+    why: 'one entry, one block'
+    since: v27
+  - key: 'number:'
+    section: 'Versions and approval'
+    means: '1, 2, 3 ... per story or block, in file order'
+    why: 'bad_version otherwise'
+    since: v27
+  - key: 'approved_at:'
+    section: 'Versions and approval'
+    means: 'when, who, why; because optional'
+    why: 'the audit line'
+    since: v27
+  - key: 'approved_by:'
+    section: 'Versions and approval'
+    means: 'when, who, why; because optional'
+    why: 'the audit line'
+    since: v27
+  - key: 'because:'
+    section: 'Versions and approval'
+    means: 'when, who, why; because optional'
+    why: 'the audit line'
+    since: v27
+  - key: 'pins:'
+    section: 'Versions and approval'
+    means: 'on a story entry: {entity, number} or {role, number} for every block the story names, in story.blocks order, no extras, no duplicates'
+    why: 'the fence against a block changing under an approved story'
+    since: v27
+  - key: 'text:'
+    section: 'Versions and approval'
+    means: 'the block as approved, normalised'
+    why: 'the exact copy'
+    since: v27
 
 forms:
   - form: 'order.status, order.shop.name, story.versions[-1].text'
     means: 'reach into an entity or a list element; chains allowed'
     from: 'Python'
-    since: v26
-  - form: 'x = v, x != v, x < v, x > v, x <= v, x >= v'
-    means: 'compare numbers, times, text, choice values and references'
-    from: 'SQL'
-    since: v26
-  - form: 'a AND b, a OR b, NOT a'
-    means: 'logic; NOT binds tightest, then AND, then OR; left to right; short-circuit'
-    from: 'SQL'
-    since: v26
-  - form: 'x IS EMPTY, x IS SET'
+    since: v27
+  - form: 'x == v, x != v, x < v, x > v, x <= v, x >= v'
+    means: 'compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison'
+    from: 'Python'
+    since: v27
+  - form: 'a and b, a or b, not a'
+    means: 'logic; not binds tightest, then and, then or; short-circuit'
+    from: 'Python'
+    since: v27
+  - form: 'x is None, x is not None'
     means: 'an optional value has no value, has a value'
-    from: 'SQL (IS NULL)'
-    since: v26
-  - form: 'x BETWEEN a AND b'
-    means: 'inclusive range'
-    from: 'SQL'
-    since: v26
-  - form: 'x IN list, x NOT IN list'
+    from: 'Python'
+    since: v27
+  - form: 'x in list, x not in list'
     means: 'membership in a list'
-    from: 'SQL'
-    since: v26
-  - form: 'x STARTS WITH y, x CONTAINS y'
-    means: 'prefix of a text or a list; a text contains a text'
-    from: 'Cypher'
-    since: v26
-  - form: 'LENGTH(text)'
-    means: 'characters of a text; on a list it is wrong_type'
-    from: 'SQL'
-    since: v26
-  - form: 'COUNT(list), SUM(e FOR x IN list), MIN(e FOR x IN list), MAX(e FOR x IN list), ANY(c FOR x IN list), ALL(c FOR x IN list)'
-    means: 'the six list words; COUNT on a text is wrong_type'
-    from: 'SQL words, Python generator form'
-    since: v26
-  - form: '[x FOR x IN list IF c], [y FOR x IN xs FOR y IN x.ys]'
+    from: 'Python'
+    since: v27
+  - form: '"t" in text, text.startswith("t")'
+    means: 'a text contains, starts with a text'
+    from: 'Python'
+    since: v27
+  - form: 'len(x)'
+    means: 'the number of elements of a list or characters of a text'
+    from: 'Python'
+    since: v27
+  - form: 'sum(e for x in list), min(e for x in list), max(e for x in list), any(c for x in list), all(c for x in list)'
+    means: 'the five list words, each over one generator'
+    from: 'Python'
+    since: v27
+  - form: '[e for x in list if c], [y for x in xs for y in x.ys]'
     means: 'filtered and nested lists; order of the source kept'
     from: 'Python'
-    since: v26
-  - form: 'list[0], list[-1], list[1:]'
-    means: 'index and slice; an index is a whole number in range, else the example fails'
+    since: v27
+  - form: 'list[0], list[-1], list[1:], list[:n]'
+    means: 'index and slice with whole-number constants; out of range fails the example'
     from: 'Python'
-    since: v26
-  - form: 'a IF c ELSE b'
+    since: v27
+  - form: 'a if c else b'
     means: 'conditional; the untaken side is not evaluated'
     from: 'Python'
-    since: v26
-  - form: 'story.approved, NOT fresh.approved'
+    since: v27
+  - form: 'story.approved, not fresh.approved'
     means: 'a yes/no property as a condition'
     from: 'Python'
-    since: v26
+    since: v27
   - form: '+ - * /, ( )'
-    means: 'arithmetic with Python precedence; + joins two lists into a new list'
+    means: 'arithmetic; + joins two lists into a new list'
     from: 'Python'
-    since: v26
+    since: v27
   - form: '"text", \n, \"'
-    means: 'a text literal'
+    means: 'a text literal; a time is written as text, "2026-10-03 10:00" or "2026-10-03", and read as a TIME where a TIME is expected'
     from: 'Python'
-    since: v26
-  - form: '"#{x} units"'
-    means: 'interpolation, only in reason'
-    from: 'Ruby'
-    since: v26
-  - form: '3, -2, 1.5, 2026-10-03 10:00, 2026-10-03, 1 HOUR, 30 MINUTES, 2 DAYS, [], [a, b]'
-    means: 'number, time and list literals; times in the business zone'
-    from: 'Python, SQL interval words'
-    since: v26
-  - form: 'YES, NO'
-    means: 'the yes/no literals, only under DEFAULT and with:'
-    from: 'Edda (the type''s name)'
-    since: v26
+    since: v27
+  - form: '3, -2, 1.5, True, False, None, [], [a, b]'
+    means: 'number, yes/no, no-value and list literals'
+    from: 'Python'
+    since: v27
   - form: 'NOW, TODAY, ACTOR, RESULT'
     means: 'the four fixed names: the time, the day, the asker, the latest call''s return'
     from: 'Edda'
-    since: v26
+    since: v27
   - form: 'OLD(x)'
     means: 'the value before the operation'
-    from: 'Design by Contract'
-    since: v26
-  - form: 'check(file)'
-    means: 'a declared read operation called inside an expression'
+    from: 'Design by Contract, Eiffel''s old'
+    since: v27
+  - form: 'check(file), approve(story, because="why")'
+    means: 'a declared operation called in Python call form: required inputs by position, optional ones by keyword'
     from: 'Python'
-    since: v26
+    since: v27
+
+one_way:
+  - meaning: 'a list is empty, not empty'
+    write: 'x == [], x != []'
+    not: 'len(x) == 0, not x'
+  - meaning: 'the number of elements'
+    write: 'len(x)'
+    not: 'x.count, sum(1 for ...)'
+  - meaning: 'the first, the last'
+    write: 'x[0], x[-1]'
+    not: 'x[len(x) - 1]'
+  - meaning: 'no value, a value'
+    write: 'x is None, x is not None'
+    not: 'x == None, not x'
+  - meaning: 'a yes/no property holds'
+    write: 'x.approved'
+    not: 'x.approved == True'
+  - meaning: 'between'
+    write: 'a <= x and x <= b'
+    not: 'a <= x <= b'
+  - meaning: 'text prefix'
+    write: 'x.startswith("t")'
+    not: 'x[:1] == "t"'
 
 words:
-  - word: 'AND'
-    means: 'logic'
-    from: 'SQL'
-    since: v26
-  - word: 'OR'
-    means: 'logic'
-    from: 'SQL'
-    since: v26
-  - word: 'NOT'
-    means: 'logic'
-    from: 'SQL'
-    since: v26
-  - word: 'IS EMPTY'
-    means: 'no value, a value'
-    from: 'SQL'
-    since: v26
-  - word: 'IS SET'
-    means: 'no value, a value'
-    from: 'SQL'
-    since: v26
-  - word: 'BETWEEN'
-    means: 'inclusive range, with AND'
-    from: 'SQL'
-    since: v26
-  - word: 'IN'
-    means: 'membership'
-    from: 'SQL'
-    since: v26
-  - word: 'NOT IN'
-    means: 'membership'
-    from: 'SQL'
-    since: v26
-  - word: 'STARTS WITH'
-    means: 'prefix, containment'
-    from: 'Cypher'
-    since: v26
-  - word: 'CONTAINS'
-    means: 'prefix, containment'
-    from: 'Cypher'
-    since: v26
-  - word: 'LENGTH'
-    means: 'text length and the list words'
-    from: 'SQL'
-    since: v26
-  - word: 'COUNT'
-    means: 'text length and the list words'
-    from: 'SQL'
-    since: v26
-  - word: 'SUM'
-    means: 'text length and the list words'
-    from: 'SQL'
-    since: v26
-  - word: 'MIN'
-    means: 'text length and the list words'
-    from: 'SQL'
-    since: v26
-  - word: 'MAX'
-    means: 'text length and the list words'
-    from: 'SQL'
-    since: v26
-  - word: 'ANY'
-    means: 'text length and the list words'
-    from: 'SQL'
-    since: v26
-  - word: 'ALL'
-    means: 'text length and the list words'
-    from: 'SQL'
-    since: v26
-  - word: 'FOR'
-    means: 'generator and conditional'
-    from: 'Python'
-    since: v26
-  - word: 'IF'
-    means: 'generator and conditional'
-    from: 'Python'
-    since: v26
-  - word: 'ELSE'
-    means: 'generator and conditional'
-    from: 'Python'
-    since: v26
   - word: 'OLD'
-    means: 'the value before'
+    means: 'the value before the operation, only under ensure'
     from: 'Design by Contract'
-    since: v26
-  - word: 'NOW'
-    means: 'the fixed names'
-    from: 'Edda'
-    since: v26
-  - word: 'TODAY'
-    means: 'the fixed names'
-    from: 'Edda'
-    since: v26
+    since: v27
   - word: 'ACTOR'
-    means: 'the fixed names'
+    means: 'the asker: name, roles, and the has: properties of its roles'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'RESULT'
-    means: 'the fixed names'
+    means: 'what the latest call returned; no value after refused'
     from: 'Edda'
-    since: v26
-  - word: 'YES'
-    means: 'the yes/no literals'
+    since: v27
+  - word: 'NOW'
+    means: 'the time and the day of the request, in the business zone'
     from: 'Edda'
-    since: v26
-  - word: 'NO'
-    means: 'the yes/no literals'
+    since: v27
+  - word: 'TODAY'
+    means: 'the time and the day of the request, in the business zone'
     from: 'Edda'
-    since: v26
-  - word: 'HOUR'
-    means: 'durations'
-    from: 'SQL'
-    since: v26
-  - word: 'HOURS'
-    means: 'durations'
-    from: 'SQL'
-    since: v26
-  - word: 'MINUTE'
-    means: 'durations'
-    from: 'SQL'
-    since: v26
-  - word: 'MINUTES'
-    means: 'durations'
-    from: 'SQL'
-    since: v26
-  - word: 'DAY'
-    means: 'durations'
-    from: 'SQL'
-    since: v26
-  - word: 'DAYS'
-    means: 'durations'
-    from: 'SQL'
-    since: v26
+    since: v27
   - word: 'DONE'
-    means: 'the outcome of a successful call, in then'
+    means: 'the outcome of a successful call, as a then item, not inside an expression'
     from: 'Edda'
-    since: v26
-  - word: 'NOBODY'
-    means: 'who-expressions'
-    from: 'Edda'
-    since: v26
-  - word: 'WHOSE'
-    means: 'who-expressions'
-    from: 'Edda'
-    since: v26
-  - word: 'WHILE'
-    means: 'who-expressions'
-    from: 'Edda'
-    since: v26
+    since: v27
   - word: 'MANY'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'IN ORDER'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'DEFAULT'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'OPTIONAL'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'DERIVED'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'TEXT'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'NUMBER'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'TIME'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
   - word: 'YES_NO'
-    means: 'type phrases'
+    means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
-    since: v26
+    since: v27
 
 refusals:
   - rule: 'not_yaml'
     when: 'the file does not parse'
     message: 'not YAML: <parser message>'
   - rule: 'yaml_feature'
-    when: 'an anchor (its aliases with it), tag, directive, <<, complex key, tab or second document'
+    when: 'an anchor (its aliases with it), tag, directive, <<, complex key, tab, second document, or a block scalar outside .vc text'
     message: 'anchors and aliases are not allowed (and likewise for each feature)'
   - rule: 'unquoted_text'
     when: 'free text or an expression written plain'
@@ -518,7 +515,7 @@ refusals:
     when: 'a repeated thing written as a scalar or a mapping'
     message: '<key> must be a list, one <item> per line'
   - rule: 'wrong_type'
-    when: 'a mapping, list or scalar where another is expected; a list word on a non-list'
+    when: 'a mapping, list or scalar where another is expected; a given item without exactly one name; a with value that is not flat; a list word on a non-list'
     message: '<key> must be a <mapping/list/text>'
   - rule: 'missing_key'
     when: 'a required key absent'
@@ -526,6 +523,9 @@ refusals:
   - rule: 'unknown_key'
     when: 'a key the schema does not name'
     message: 'unknown key: <key>'
+  - rule: 'bad_name'
+    when: 'a name not snake_case, an id not ABC-123'
+    message: 'not a name: <text>'
   - rule: 'declared_twice'
     when: 'a duplicate key or name, at the second'
     message: 'declared twice: <name>'
@@ -539,8 +539,11 @@ refusals:
     when: 'a type phrase outside the grammar'
     message: 'not a type phrase: <text>'
   - rule: 'not_an_expression'
-    when: 'a string outside section 7, an uppercase word not in 7.2, a step in disguise, a changing call inside a fact'
+    when: 'a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact'
     message: 'not an expression: <text>'
+  - rule: 'second_way'
+    when: 'a form 7.2 spells another way'
+    message: 'write <one way> (not <other>)'
   - rule: 'returns_and_ensure'
     when: 'both on one operation'
     message: 'returns and ensure on one operation: <name>'
@@ -562,10 +565,16 @@ refusals:
   - rule: 'bad_version'
     when: 'a .vc number out of sequence or an unknown story or block'
     message: '<kind> <name> version <n> out of sequence; expected <m>'
+  - rule: 'bad_pin'
+    when: 'a pin on a block entry, a story entry without pins, a duplicate pin, a pin to no such block or version'
+    message: 'pin <kind> <name> v<n>: no such version (and likewise)'
+  - rule: 'bad_snapshot'
+    when: 'an entry''s text that is not the normalised block or does not name the entry''s block'
+    message: 'text of <kind> <name> v<n> is not the normalised block'
 
 flags:
   - rule: 'unreachable_status'
-    when: 'no may_change arrow reaches a status'
+    when: 'a status that is neither the default nor the target of a may_change arrow'
     message: 'no change reaches status: <value>'
   - rule: 'no_example'
     when: 'a story with no example'
@@ -578,7 +587,7 @@ flags:
     message: 'story <id> is approved and still has a question'
   - rule: 'wording_drift'
     when: 'section 10'
-    message: '<id> <operation>: <side> changed, <other> did not'
+    message: '<id> <operation>: <side> changed, <other> did not; for the story pair <id>: rules changed, story sentence did not'
   - rule: 'plural_name'
     when: 'a MANY property with a singular name, or a reference with a plural one'
     message: '<property> holds MANY and should be plural'
@@ -594,14 +603,20 @@ sentences:
   - kind: 'operation'
     template: '<Name> <is-sentence>.'
   - kind: 'permission'
-    template: 'A <role> [whose <condition>] may <name> <inputs> [while <condition>].'
+    template: 'A <role> [whose <actor condition>] may <name> <inputs> [while <state condition>].; the parts of the condition that mention ACTOR go after "whose", the rest after "while"'
   - kind: 'refusal'
-    template: 'If <name> is asked for <an input> whose <condition>, then the system shall refuse it: <reason>. when every left side is that input''s property; otherwise If <name> is asked and <condition>, then ...'
+    template: 'If <name> is asked for <an input> whose <condition>, then the system shall refuse it: <reason>. when every left side starts with that input''s name, which is then dropped; otherwise If <name> is asked and <condition>, then ...'
   - kind: 'outcome'
     template: 'When <name> succeeds, <means>. or, without means, When <name> succeeds, <fact in words>.'
   - kind: 'read'
     template: '<Name> gives <returns in words>[, ordered by <keys>].'
   - kind: 'invariant'
     template: 'Always, <fact>. and While <condition>, <fact>.'
-  - kind: 'example, given, when, then'
-    template: 'Example: <title>., Given <name>, a <entity> with <property> <value> and ... (actors: <name>, a <role>), When <actor> asks to <name> <arguments>., Then it is done and <facts>. / Then it is refused: <reason>, and <facts>.'
+  - kind: 'example'
+    template: 'Example: <title>.'
+  - kind: 'given'
+    template: 'one sentence for all givens: Given <item>, <item> and <item>.; an actor reads <name>, a <role>; an entity <name>, a <entity> with <property> <value> and <property> <value>; items joined with commas and "and" before the last'
+  - kind: 'when'
+    template: 'When <actor> asks to <name> <arguments>.'
+  - kind: 'then'
+    template: 'with facts: Then it is done and <facts>. or Then it is refused: <reason>, and <facts>.; without: Then it is done. or Then it is refused: <reason>.; a step without when: Then <facts>.; facts joined with "and"'

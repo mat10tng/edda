@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edda.local/schema/v26",
-  "title": "Edda spec file (revision 26)",
-  "description": "The keys of a .edda file. Strings that carry logic are expressions (reference section 7) or type phrases (section 4) and are checked by the parser, not here. The YAML subset (quoting, lists, no anchors) is checked at the source, before this schema.",
+  "$id": "https://edda.local/schema/v27",
+  "title": "Edda spec file (revision 27)",
+  "description": "The keys of a .edda file: the shape layer of reference section 11 together with the quoting rule. Strings that carry logic are Python expressions (section 7) or type phrases (section 4) and are checked in the meaning layer, not here. The YAML subset is checked at the source, before this schema.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -15,7 +15,11 @@
         "required": ["is"],
         "properties": {
           "is": {"type": "string"},
-          "has": {"$ref": "#/$defs/properties"},
+          "has": {
+            "type": "object",
+            "propertyNames": {"$ref": "#/$defs/name"},
+            "additionalProperties": {"$ref": "#/$defs/typePhrase"}
+          },
           "includes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/name"}}
         }
       }
@@ -116,9 +120,9 @@
     "epicId": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*$"},
     "storyId": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
     "expression": {"type": "string", "minLength": 1, "not": {"const": "DONE"},
-      "description": "one expression of reference section 7, on one physical line"},
+      "description": "one Python expression of reference section 7, on one physical line"},
     "typePhrase": {"type": "string", "minLength": 1,
-      "description": "[DEFAULT <literal> | TEXT | NUMBER | TIME | YES_NO | <entity> | MANY <entity>[, IN ORDER] | a | b | c] [, OPTIONAL] [, DERIVED]"},
+      "description": "(DEFAULT <literal> | DEFAULT a | b | TEXT | NUMBER | TIME | YES_NO | <entity> | MANY <entity>[, IN ORDER] | a | b | c) [, OPTIONAL] [, DERIVED]"},
     "computed": {
       "type": "object", "additionalProperties": false, "required": ["computed"],
       "properties": {"computed": {"$ref": "#/$defs/expression"}}
@@ -128,9 +132,11 @@
       "propertyNames": {"$ref": "#/$defs/name"},
       "additionalProperties": {"anyOf": [{"$ref": "#/$defs/typePhrase"}, {"$ref": "#/$defs/computed"}]}
     },
-    "who": {"type": "string", "minLength": 1,
-      "description": "<role> | <role> WHOSE <condition> | <role> [WHOSE <condition>] WHILE <condition> | NOBODY"},
-    "whoList": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/who"}},
+    "whoLine": {
+      "type": "object", "additionalProperties": false, "required": ["role"],
+      "properties": {"role": {"$ref": "#/$defs/name"}, "when": {"$ref": "#/$defs/expression"}}
+    },
+    "whoList": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/whoLine"}},
     "textList": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "factItem": {
       "anyOf": [
@@ -164,23 +170,25 @@
         "also_changes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/path"}},
         "notes": {"$ref": "#/$defs/textList"}
       },
-      "oneOf": [
-        {"required": ["ensure"], "not": {"anyOf": [{"required": ["returns"]}, {"required": ["ordered_by"]}]}},
-        {"required": ["returns"], "not": {"anyOf": [{"required": ["ensure"]}, {"required": ["also_changes"]}]}}
+      "description": "returns and ensure never together, ordered_by only with returns, also_changes only with ensure: checked in the meaning layer (returns_and_ensure), not here"
+    },
+    "flatValue": {
+      "anyOf": [
+        {"type": "string"}, {"type": "number"}, {"type": "boolean"},
+        {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]}}
       ]
     },
     "givenItem": {
       "type": "object",
-      "minProperties": 1,
-      "maxProperties": 2,
       "propertyNames": {"$ref": "#/$defs/name"},
       "properties": {
-        "with": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}}
+        "with": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/flatValue"}}
       },
       "additionalProperties": {"$ref": "#/$defs/name"},
       "if": {"required": ["with"]},
-      "then": {"minProperties": 2},
-      "description": "exactly one key besides with: the entity or actor, whose value is the given name; with holds the property values (roles for an actor, fixture for a spec_file)"
+      "then": {"minProperties": 2, "maxProperties": 2},
+      "else": {"minProperties": 1, "maxProperties": 1},
+      "description": "exactly one key besides with: the entity or actor, whose value is the given name; with holds flat property values (roles for an actor, fixture for a spec_file)"
     },
     "outcome": {
       "anyOf": [

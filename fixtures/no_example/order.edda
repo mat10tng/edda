@@ -11,7 +11,7 @@ entities:
       status: DEFAULT incoming | removed
       units_sent: DEFAULT 0
     may_change: {status: {incoming: [removed]}}
-    may_update: ["shop_user"]
+    may_update: [{role: shop_user}]
 
 stories:
   FIX-001:
@@ -24,11 +24,11 @@ stories:
       remove:
         is: "takes an unsent order off the list"
         inputs: {order: order}
-        who: ["shop_user"]
+        who: [{role: shop_user}]
         refuse:
-          - when: "order.status = removed"
+          - when: "order.status == removed"
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
         ensure:
-          - "order.status = removed"
+          - "order.status == removed"

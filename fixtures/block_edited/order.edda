@@ -6,7 +6,7 @@ roles:
 
 entities:
   order:
-    is: "what a workshop buys"
+    is: "what a workshop buys from the shop"
     properties:
       status: DEFAULT incoming | removed
       units_sent: DEFAULT 0

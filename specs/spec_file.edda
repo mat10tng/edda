@@ -9,20 +9,41 @@ entities:
       stories: MANY story, IN ORDER, DERIVED
       notes: MANY note, IN ORDER, DERIVED
       problems: MANY problem, IN ORDER, DERIVED
-    may_create: ["agent"]
-    may_read: ["agent", "operator"]
-    may_update: ["agent"]
-    may_delete: ["NOBODY"]
+    may_create: [{role: agent}]
+    may_read: [{role: agent}, {role: operator}]
+    may_update: [{role: agent}]
 
   history:
     is: "the .edda.vc file beside a spec file: its approved versions, append-only, empty until the first approval"
     part_of: spec_file
     properties:
       text: DEFAULT ""
-    may_create: ["operator"]
-    may_read: ["agent", "operator"]
-    may_update: ["operator"]
-    may_delete: ["NOBODY"]
+      versions: MANY version, IN ORDER, DERIVED
+    may_create: [{role: operator}]
+    may_read: [{role: agent}, {role: operator}]
+    may_update: [{role: operator}]
+
+  version:
+    is: "one entry in a history: a story or a block as approved"
+    part_of: history
+    properties:
+      number: NUMBER
+      approved_at: TIME
+      approved_by: TEXT
+      because: TEXT, OPTIONAL
+      text: TEXT
+      rules_text: TEXT, DERIVED
+      pins: MANY pin, IN ORDER
+      sentences: MANY sentence, IN ORDER, DERIVED
+
+  pin:
+    is: "one block version a story was approved against"
+    part_of: version
+    properties:
+      kind: entity | role
+      name: TEXT
+      number: NUMBER
+      block: block, DERIVED
 
   note:
     is: "one note entry under a story, an operation or an example"
@@ -38,7 +59,7 @@ entities:
     part_of: spec_file
     properties:
       kind: refused | flagged
-      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | bad_version | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
+      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
       file: TEXT
       line: NUMBER
       message: TEXT
@@ -48,7 +69,7 @@ stories:
     story: "the checker refuses what it cannot read"
     about: spec_file
     as_a: agent
-    i_want: "every key the schema does not allow, every string the grammar does not allow and every history out of sequence refused, with its file, line and one plain message"
+    i_want: "every key the schema does not allow, every string Python or the whitelist does not allow and every history out of sequence refused, with its file, line and one plain message"
     so_that: "a file that passes has one reading and nothing hidden in it"
     epic: CHK
     tags: [checker, static]
@@ -59,7 +80,7 @@ stories:
       check:
         is: "reads a spec file and its history and lists every problem"
         inputs: {file: spec_file}
-        who: ["agent", "operator"]
+        who: [{role: agent}, {role: operator}]
         returns: "file.problems"
     examples:
       "a clean file has no problems":
@@ -70,7 +91,7 @@ stories:
             with: {fixture: order}
         steps:
           - when: {actor: bot, call: "check(good)"}
-            then: [DONE, "RESULT = []"]
+            then: [DONE, "RESULT == []"]
       "an unknown key is refused":
         given:
           - actor: bot
@@ -81,12 +102,12 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].kind = refused"
-              - "RESULT[0].rule = unknown_key"
-              - "RESULT[0].file = \"order.edda\""
-              - "RESULT[0].line = 33"
-              - "RESULT[0].message = \"unknown key: ensures\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == refused"
+              - "RESULT[0].rule == unknown_key"
+              - "RESULT[0].file == \"order.edda\""
+              - "RESULT[0].line == 33"
+              - "RESULT[0].message == \"unknown key: ensures\""
       "an unknown name is refused":
         given:
           - actor: bot
@@ -97,10 +118,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = unknown_name"
-              - "RESULT[0].line = 31"
-              - "RESULT[0].message = \"unknown name: units_sold\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == unknown_name"
+              - "RESULT[0].line == 31"
+              - "RESULT[0].message == \"unknown name: units_sold\""
       "a string that is not an expression is refused":
         given:
           - actor: bot
@@ -111,10 +132,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = not_an_expression"
-              - "RESULT[0].line = 34"
-              - "RESULT[0].message = \"not an expression: set the order status to removed\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_an_expression"
+              - "RESULT[0].line == 34"
+              - "RESULT[0].message == \"not an expression: set the order status to removed\""
       "a name declared twice is refused at the second":
         given:
           - actor: bot
@@ -125,10 +146,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = declared_twice"
-              - "RESULT[0].line = 13"
-              - "RESULT[0].message = \"declared twice: units_sent\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == declared_twice"
+              - "RESULT[0].line == 13"
+              - "RESULT[0].message == \"declared twice: units_sent\""
       "a status not in its list is refused":
         given:
           - actor: bot
@@ -139,10 +160,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = unknown_status"
-              - "RESULT[0].line = 29"
-              - "RESULT[0].message = \"status not in its list: archived\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == unknown_status"
+              - "RESULT[0].line == 29"
+              - "RESULT[0].message == \"status not in its list: archived\""
       "returns and ensure on one operation is refused":
         given:
           - actor: bot
@@ -153,10 +174,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = returns_and_ensure"
-              - "RESULT[0].line = 24"
-              - "RESULT[0].message = \"returns and ensure on one operation: remove\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == returns_and_ensure"
+              - "RESULT[0].line == 24"
+              - "RESULT[0].message == \"returns and ensure on one operation: remove\""
       "a story in the wrong file is refused":
         given:
           - actor: bot
@@ -167,11 +188,11 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = wrong_file"
-              - "RESULT[0].file = \"stock.edda\""
-              - "RESULT[0].line = 17"
-              - "RESULT[0].message = \"story FIX-001 is about order and belongs in order.edda\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == wrong_file"
+              - "RESULT[0].file == \"stock.edda\""
+              - "RESULT[0].line == 17"
+              - "RESULT[0].message == \"story FIX-001 is about order and belongs in order.edda\""
       "a repeated thing written as one value is refused":
         given:
           - actor: bot
@@ -182,10 +203,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = not_a_list"
-              - "RESULT[0].line = 33"
-              - "RESULT[0].message = \"ensure must be a list, one fact per line\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_a_list"
+              - "RESULT[0].line == 33"
+              - "RESULT[0].message == \"ensure must be a list, one fact per line\""
       "unquoted free text is refused":
         given:
           - actor: bot
@@ -196,10 +217,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = unquoted_text"
-              - "RESULT[0].line = 32"
-              - "RESULT[0].message = \"quote the reason; an unquoted # drops the rest of the line\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == unquoted_text"
+              - "RESULT[0].line == 32"
+              - "RESULT[0].message == \"quote the reason; an unquoted # drops the rest of the line\""
       "a YAML anchor is refused once, at the anchor":
         given:
           - actor: bot
@@ -210,10 +231,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = yaml_feature"
-              - "RESULT[0].line = 39"
-              - "RESULT[0].message = \"anchors and aliases are not allowed\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == yaml_feature"
+              - "RESULT[0].line == 39"
+              - "RESULT[0].message == \"anchors and aliases are not allowed\""
       "an operation without is: is refused":
         given:
           - actor: bot
@@ -224,10 +245,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = missing_key"
-              - "RESULT[0].line = 24"
-              - "RESULT[0].message = \"operation remove needs is:\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == missing_key"
+              - "RESULT[0].line == 24"
+              - "RESULT[0].message == \"operation remove needs is:\""
       "a list where a mapping is expected is refused":
         given:
           - actor: bot
@@ -238,10 +259,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = wrong_type"
-              - "RESULT[0].line = 26"
-              - "RESULT[0].message = \"inputs must be a mapping\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == wrong_type"
+              - "RESULT[0].line == 26"
+              - "RESULT[0].message == \"inputs must be a mapping\""
       "a type phrase outside the grammar is refused":
         given:
           - actor: bot
@@ -252,10 +273,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = bad_type_phrase"
-              - "RESULT[0].line = 12"
-              - "RESULT[0].message = \"not a type phrase: DEFAULT 0 NUMBER\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_type_phrase"
+              - "RESULT[0].line == 12"
+              - "RESULT[0].message == \"not a type phrase: DEFAULT 0 NUMBER\""
       "a positional check on an unordered result is refused":
         given:
           - actor: bot
@@ -266,10 +287,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = not_ordered"
-              - "RESULT[0].line = 86"
-              - "RESULT[0].message = \"open_lines gives no order; RESULT[0] needs ordered_by or IN ORDER\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_ordered"
+              - "RESULT[0].line == 86"
+              - "RESULT[0].message == \"open_lines gives no order; RESULT[0] needs ordered_by or IN ORDER\""
       "a role that includes itself is refused":
         given:
           - actor: bot
@@ -280,10 +301,10 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = role_cycle"
-              - "RESULT[0].line = 6"
-              - "RESULT[0].message = \"role shop_user includes itself\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == role_cycle"
+              - "RESULT[0].line == 6"
+              - "RESULT[0].message == \"role shop_user includes itself\""
       "a history out of sequence is refused in the history file":
         given:
           - actor: bot
@@ -294,11 +315,11 @@ stories:
           - when: {actor: bot, call: "check(bad)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].rule = bad_version"
-              - "RESULT[0].file = \"order.edda.vc\""
-              - "RESULT[0].line = 9"
-              - "RESULT[0].message = \"entity order version 2 out of sequence; expected 1\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_version"
+              - "RESULT[0].file == \"order.edda.vc\""
+              - "RESULT[0].line == 9"
+              - "RESULT[0].message == \"entity order version 2 out of sequence; expected 1\""
 
   EDDA-002:
     story: "the checker flags what is allowed but doubtful"
@@ -321,11 +342,11 @@ stories:
           - when: {actor: bot, call: "check(odd)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].kind = flagged"
-              - "RESULT[0].rule = unreachable_status"
-              - "RESULT[0].line = 11"
-              - "RESULT[0].message = \"no change reaches status: delivered\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == unreachable_status"
+              - "RESULT[0].line == 11"
+              - "RESULT[0].message == \"no change reaches status: delivered\""
       "a story with no example is flagged":
         given:
           - actor: bot
@@ -336,11 +357,11 @@ stories:
           - when: {actor: bot, call: "check(odd)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].kind = flagged"
-              - "RESULT[0].rule = no_example"
-              - "RESULT[0].line = 17"
-              - "RESULT[0].message = \"story FIX-001 has no example\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == no_example"
+              - "RESULT[0].line == 17"
+              - "RESULT[0].message == \"story FIX-001 has no example\""
       "a MANY property with a singular name is flagged":
         given:
           - actor: bot
@@ -351,11 +372,11 @@ stories:
           - when: {actor: bot, call: "check(odd)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].kind = flagged"
-              - "RESULT[0].rule = plural_name"
-              - "RESULT[0].line = 18"
-              - "RESULT[0].message = \"line holds MANY and should be plural\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == plural_name"
+              - "RESULT[0].line == 18"
+              - "RESULT[0].message == \"line holds MANY and should be plural\""
       "a story that never names its about entity is flagged":
         given:
           - actor: bot
@@ -366,11 +387,11 @@ stories:
           - when: {actor: bot, call: "check(odd)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].kind = flagged"
-              - "RESULT[0].rule = about_untouched"
-              - "RESULT[0].line = 23"
-              - "RESULT[0].message = \"story FIX-002 is about order but never names it\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == about_untouched"
+              - "RESULT[0].line == 23"
+              - "RESULT[0].message == \"story FIX-002 is about order but never names it\""
       "a question on an approved story is flagged":
         given:
           - actor: bot
@@ -381,11 +402,11 @@ stories:
           - when: {actor: bot, call: "check(odd)"}
             then:
               - DONE
-              - "COUNT(RESULT) = 1"
-              - "RESULT[0].kind = flagged"
-              - "RESULT[0].rule = question_on_approved"
-              - "RESULT[0].line = 23"
-              - "RESULT[0].message = \"story FIX-001 is approved and still has a question\""
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == question_on_approved"
+              - "RESULT[0].line == 23"
+              - "RESULT[0].message == \"story FIX-001 is approved and still has a question\""
 
   EDDA-003:
     story: "every note is collected in one place"
@@ -399,9 +420,9 @@ stories:
       notes:
         is: "lists the notes of several files, equal wording together"
         inputs: {files: MANY spec_file}
-        who: ["agent", "operator"]
-        returns: "[note FOR file IN files FOR note IN file.notes]"
-        ordered_by: ["text", "file.name", "line"]
+        who: [{role: agent}, {role: operator}]
+        returns: "[note for file in files for note in file.notes]"
+        ordered_by: ["note.text", "note.file.name", "note.line"]
     examples:
       "notes from two files are listed with the same wording side by side":
         given:
@@ -415,14 +436,14 @@ stories:
           - when: {actor: tuan, call: "notes([a, b])"}
             then:
               - DONE
-              - "COUNT(RESULT) = 4"
-              - "RESULT[0].text = \"a removed order keeps its history\""
-              - "RESULT[0].story_id = \"FIX-001\""
-              - "RESULT[0].line = 30"
-              - "RESULT[1].text = \"a workshop sees stock as of the last refresh\""
-              - "RESULT[2].text = \"the stock feed is refreshed every night\""
-              - "RESULT[2].file.name = \"order\""
-              - "RESULT[2].line = 23"
-              - "RESULT[3].text = \"the stock feed is refreshed every night\""
-              - "RESULT[3].file.name = \"stock\""
-              - "RESULT[3].line = 20"
+              - "len(RESULT) == 4"
+              - "RESULT[0].text == \"a removed order keeps its history\""
+              - "RESULT[0].story_id == \"FIX-001\""
+              - "RESULT[0].line == 30"
+              - "RESULT[1].text == \"a workshop sees stock as of the last refresh\""
+              - "RESULT[2].text == \"the stock feed is refreshed every night\""
+              - "RESULT[2].file.name == \"order\""
+              - "RESULT[2].line == 24"
+              - "RESULT[3].text == \"the stock feed is refreshed every night\""
+              - "RESULT[3].file.name == \"stock\""
+              - "RESULT[3].line == 20"

@@ -7,7 +7,7 @@ entities:
     is: "what the workshop has on the shelf"
     properties:
       units: DEFAULT 0
-    may_update: ["workshop_user"]
+    may_update: [{role: workshop_user}]
 
 stories:
   FIX-002:
@@ -23,7 +23,7 @@ stories:
       units_of:
         is: "gives the units on the shelf"
         inputs: {stock: stock}
-        who: ["workshop_user"]
+        who: [{role: workshop_user}]
         returns: "stock.units"
     examples:
       "the units are read":
@@ -34,4 +34,4 @@ stories:
             with: {units: 7}
         steps:
           - when: {actor: lena, call: "units_of(bolts)"}
-            then: [DONE, "RESULT = 7"]
+            then: [DONE, "RESULT == 7"]

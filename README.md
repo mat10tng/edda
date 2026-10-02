@@ -25,13 +25,13 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 26
+language/   reference.md    the language reference, revision 27
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.edda   the registry: every key, expression form,
-                            language word, checker rule and sentence
-                            kind, with what it means, why, and where
-                            it is from
+                            style rule, fixed name, checker rule and
+                            sentence kind, with what it means, why, and
+                            where it is from
 specs/      *.edda          Edda's own stories, YAML, one file per entity
             *.edda.vc       approved versions, append-only (none yet)
 fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
@@ -42,13 +42,17 @@ fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
 tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             prints the lines and counts the stories assert
             gen_keywords.py the registry, generated from the reference
-            validate.py     every file against the schemas and the subset
+            validate.py     every file through the source, shape and
+                            meaning layers: the YAML 1.2 subset, the
+                            quoting rule, both schemas, the type-phrase
+                            grammar and the Python expression whitelist
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
-in quoted expressions borrowed from SQL and Python, language words in
-UPPERCASE, names in snake_case. Tell your editor the extension is YAML
-and point it at `language/schema.json`.
+in quoted Python expressions limited to a whitelist, names in
+snake_case. Tell your editor the extension is YAML and point it at
+`language/schema.json`.
 
-Nothing is built yet. `python3 tools/validate.py` needs PyYAML and
-jsonschema.
+Nothing is built beyond the validator, which is a partial checker:
+names, statuses, versions, flags and the examples themselves are not
+checked yet. `python3 tools/validate.py` needs PyYAML and jsonschema.

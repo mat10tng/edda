@@ -16,4 +16,4 @@
         status: DEFAULT incoming | removed
         units_sent: DEFAULT 0
       may_change: {status: {incoming: [removed]}}
-      may_update: ["shop_user"]
+      may_update: [{role: shop_user}]

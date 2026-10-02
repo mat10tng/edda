@@ -16,7 +16,7 @@
         status: DEFAULT incoming | removed
         units_sent: DEFAULT 0
       may_change: {status: {incoming: [removed]}}
-      may_update: ["shop_user"]
+      may_update: [{role: shop_user}]
 - story: FIX-001
   number: 1
   approved_at: "2026-09-28 10:05"
@@ -33,12 +33,12 @@
         remove:
           is: "takes an unsent order off the list"
           inputs: {order: order}
-          who: ["shop_user"]
+          who: [{role: shop_user}]
           refuse:
             - when: "order.units_sent > 0"
               reason: "already sent"
           ensure:
-            - "order.status = removed"
+            - "order.status == removed"
       examples:
         "a fresh order is removed":
           given:
@@ -48,7 +48,7 @@
               with: {status: incoming, units_sent: 0}
           steps:
             - when: {actor: erik, call: "remove(purchase)"}
-              then: [DONE, "purchase.status = removed"]
+              then: [DONE, "purchase.status == removed"]
         "a sent order is not removed":
           given:
             - actor: erik
@@ -57,4 +57,4 @@
               with: {status: incoming, units_sent: 2}
           steps:
             - when: {actor: erik, call: "remove(shipped)"}
-              then: [{refused: "already sent"}, "shipped.status = incoming"]
+              then: [{refused: "already sent"}, "shipped.status == incoming"]

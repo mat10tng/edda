@@ -9,7 +9,7 @@ entities:
     is: "a shop that orders"
     properties:
       name: TEXT
-    may_update: ["shop_user"]
+    may_update: [{role: shop_user}]
 
   order:
     is: "what a workshop buys"
@@ -17,7 +17,7 @@ entities:
       status: DEFAULT incoming | removed
       units_sent: DEFAULT 0
     may_change: {status: {incoming: [removed]}}
-    may_update: ["shop_user"]
+    may_update: [{role: shop_user}]
 
 stories:
   FIX-002:
@@ -30,9 +30,9 @@ stories:
       rename:
         is: "gives the shop a new name"
         inputs: {shop: shop, name: TEXT}
-        who: ["shop_user"]
+        who: [{role: shop_user}]
         ensure:
-          - "shop.name = name"
+          - "shop.name == name"
     examples:
       "a shop is renamed":
         given:
@@ -42,4 +42,4 @@ stories:
             with: {name: "Butik"}
         steps:
           - when: {actor: erik, call: "rename(butik, \"Boden\")"}
-            then: [DONE, "butik.name = \"Boden\""]
+            then: [DONE, "butik.name == \"Boden\""]

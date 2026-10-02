@@ -17,7 +17,7 @@ entities:
       units_sent: DEFAULT 0
       lines: MANY line
     may_change: {status: {incoming: [removed]}}
-    may_update: ["shop_user"]
+    may_update: [{role: shop_user}]
 
 stories:
   FIX-001:
@@ -30,18 +30,18 @@ stories:
       remove:
         is: "takes an unsent order off the list"
         inputs: {order: order}
-        who: ["shop_user"]
+        who: [{role: shop_user}]
         refuse:
-          - when: "order.status = removed"
+          - when: "order.status == removed"
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
         ensure:
-          - "order.status = removed"
+          - "order.status == removed"
       open_lines:
         is: "lists the rows of an order"
         inputs: {order: order}
-        who: ["shop_user"]
+        who: [{role: shop_user}]
         returns: "order.lines"
     examples:
       "a fresh order is removed":
@@ -52,7 +52,7 @@ stories:
             with: {status: incoming, units_sent: 0}
         steps:
           - when: {actor: erik, call: "remove(purchase)"}
-            then: [DONE, "purchase.status = removed"]
+            then: [DONE, "purchase.status == removed"]
       "a sent order is not removed":
         given:
           - actor: erik
@@ -61,7 +61,7 @@ stories:
             with: {status: incoming, units_sent: 2}
         steps:
           - when: {actor: erik, call: "remove(shipped)"}
-            then: [{refused: "already sent"}, "shipped.status = incoming"]
+            then: [{refused: "already sent"}, "shipped.status == incoming"]
       "a removed order is not removed again":
         given:
           - actor: erik
@@ -72,7 +72,7 @@ stories:
           - when: {actor: erik, call: "remove(purchase)"}
             then: [DONE]
           - when: {actor: erik, call: "remove(purchase)"}
-            then: [{refused: "already removed"}, "purchase.status = removed"]
+            then: [{refused: "already removed"}, "purchase.status == removed"]
       "the first row is read":
         given:
           - actor: erik
@@ -83,4 +83,4 @@ stories:
             with: {status: incoming, lines: [row]}
         steps:
           - when: {actor: erik, call: "open_lines(purchase)"}
-            then: [DONE, "RESULT[0].units = 0"]
+            then: [DONE, "RESULT[0].units == 0"]

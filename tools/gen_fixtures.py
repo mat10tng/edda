@@ -19,7 +19,7 @@ entities:
       status: DEFAULT incoming | removed
       units_sent: DEFAULT 0
     may_change: {status: {incoming: [removed]}}
-    may_update: ["shop_user"]
+    may_update: [{role: shop_user}]
 
 stories:
   FIX-001:
@@ -32,14 +32,14 @@ stories:
       remove:
         is: "takes an unsent order off the list"
         inputs: {order: order}
-        who: ["shop_user"]
+        who: [{role: shop_user}]
         refuse:
-          - when: "order.status = removed"
+          - when: "order.status == removed"
             reason: "already removed"
           - when: "order.units_sent > 0"
             reason: "already sent"
         ensure:
-          - "order.status = removed"
+          - "order.status == removed"
     examples:
       "a fresh order is removed":
         given:
@@ -49,7 +49,7 @@ stories:
             with: {status: incoming, units_sent: 0}
         steps:
           - when: {actor: erik, call: "remove(purchase)"}
-            then: [DONE, "purchase.status = removed"]
+            then: [DONE, "purchase.status == removed"]
       "a sent order is not removed":
         given:
           - actor: erik
@@ -58,7 +58,7 @@ stories:
             with: {status: incoming, units_sent: 2}
         steps:
           - when: {actor: erik, call: "remove(shipped)"}
-            then: [{refused: "already sent"}, "shipped.status = incoming"]
+            then: [{refused: "already sent"}, "shipped.status == incoming"]
       "a removed order is not removed again":
         given:
           - actor: erik
@@ -69,7 +69,7 @@ stories:
           - when: {actor: erik, call: "remove(purchase)"}
             then: [DONE]
           - when: {actor: erik, call: "remove(purchase)"}
-            then: [{refused: "already removed"}, "purchase.status = removed"]
+            then: [{refused: "already removed"}, "purchase.status == removed"]
 """
 
 L = CLEAN.splitlines()
@@ -194,7 +194,7 @@ def unknown_name(ls):
 edit("unknown_name", unknown_name)
 
 def not_an_expression(ls):
-    i = find(ls, '          - "order.status = removed"'); ls[i] = '          - "set the order status to removed"'; return i
+    i = find(ls, '          - "order.status == removed"'); ls[i] = '          - "set the order status to removed"'; return i
 edit("not_an_expression", not_an_expression)
 
 def declared_twice(ls):
@@ -202,7 +202,7 @@ def declared_twice(ls):
 edit("declared_twice", declared_twice)
 
 def unknown_status(ls):
-    i = find(ls, 'when: "order.status = removed"'); ls[i] = ls[i].replace("removed", "archived"); return i
+    i = find(ls, 'when: "order.status == removed"'); ls[i] = ls[i].replace("removed", "archived"); return i
 edit("unknown_status", unknown_status)
 
 def returns_and_ensure(ls):
@@ -214,7 +214,7 @@ def wrong_file(ls):
 edit("wrong_file", wrong_file, file="stock.edda")
 
 def not_a_list(ls):
-    i = find(ls, "        ensure:"); ls[i] = '        ensure: "order.status = removed"'; del ls[i + 1]; return i
+    i = find(ls, "        ensure:"); ls[i] = '        ensure: "order.status == removed"'; del ls[i + 1]; return i
 edit("not_a_list", not_a_list)
 
 def unquoted_text(ls):
@@ -246,7 +246,7 @@ def not_ordered(ls):
     j = find(ls, "      units_sent: DEFAULT 0"); ls.insert(j + 1, "      lines: MANY line")
     k = find(ls, "    examples:")
     ls[k:k] = ["      open_lines:", '        is: "lists the rows of an order"',
-               "        inputs: {order: order}", '        who: ["shop_user"]',
+               "        inputs: {order: order}", '        who: [{role: shop_user}]',
                '        returns: "order.lines"']
     e = find(ls, '      "a removed order is not removed again":')
     tail = ['      "the first row is read":', "        given:", "          - actor: erik",
@@ -254,7 +254,7 @@ def not_ordered(ls):
             "            with: {units: 0}", "          - order: purchase",
             "            with: {status: incoming, lines: [row]}", "        steps:",
             '          - when: {actor: erik, call: "open_lines(purchase)"}',
-            '            then: [DONE, "RESULT[0].units = 0"]']
+            '            then: [DONE, "RESULT[0].units == 0"]']
     ls += tail
     return len(ls) - 1
 edit("not_ordered", not_ordered)
@@ -293,19 +293,19 @@ edit("plural_name", plural_name)
 def about_untouched(ls):
     i = find(ls, "entities:")
     ls[i + 1:i + 1] = ["  shop:", '    is: "a shop that orders"', "    properties:",
-                       "      name: TEXT", '    may_update: ["shop_user"]', ""]
+                       "      name: TEXT", '    may_update: [{role: shop_user}]', ""]
     s = find(ls, "stories:")
     del ls[s + 1:]
     ls += ["  FIX-002:", '    story: "rename a shop"', "    about: order", "    as_a: shop_user",
            '    i_want: "to rename my shop"', '    so_that: "the name is right"',
            "    operations:", "      rename:", '        is: "gives the shop a new name"',
-           "        inputs: {shop: shop, name: TEXT}", '        who: ["shop_user"]',
-           "        ensure:", '          - "shop.name = name"',
+           "        inputs: {shop: shop, name: TEXT}", '        who: [{role: shop_user}]',
+           "        ensure:", '          - "shop.name == name"',
            "    examples:", '      "a shop is renamed":', "        given:",
            "          - actor: erik", "            with: {roles: [shop_user]}",
            "          - shop: butik", '            with: {name: "Butik"}', "        steps:",
            '          - when: {actor: erik, call: "rename(butik, \\"Boden\\")"}',
-           '            then: [DONE, "butik.name = \\"Boden\\""]']
+           '            then: [DONE, "butik.name == \\"Boden\\""]']
     return s + 1
 edit("about_untouched", about_untouched)
 
@@ -317,7 +317,7 @@ def notes_a(ls):
                        "    questions:", '      - "does the shop want to see the refresh time?"']
     j = find(ls, '        is: "takes an unsent order off the list"')
     ls.insert(j + 1, '        notes: ["a removed order keeps its history"]')
-    EXPECT["notes_a"] = {"note": i + 2, "question": i + 4, "op_note": j + 2}
+    EXPECT["notes_a"] = {"note": i + 3, "question": i + 5, "op_note": j + 2}
     return None
 edit("notes_a", notes_a)
 
@@ -331,7 +331,7 @@ entities:
     is: "what the workshop has on the shelf"
     properties:
       units: DEFAULT 0
-    may_update: ["workshop_user"]
+    may_update: [{role: workshop_user}]
 
 stories:
   FIX-002:
@@ -347,7 +347,7 @@ stories:
       units_of:
         is: "gives the units on the shelf"
         inputs: {stock: stock}
-        who: ["workshop_user"]
+        who: [{role: workshop_user}]
         returns: "stock.units"
     examples:
       "the units are read":
@@ -358,7 +358,7 @@ stories:
             with: {units: 7}
         steps:
           - when: {actor: lena, call: "units_of(bolts)"}
-            then: [DONE, "RESULT = 7"]
+            then: [DONE, "RESULT == 7"]
 """
 write("notes_b", "stock.edda", STOCK)
 EXPECT["notes_b"] = {"note1": STOCK.splitlines().index('      - "the stock feed is refreshed every night"') + 1,
@@ -387,9 +387,15 @@ def approved_question(ls):
 edit("approved_question", approved_question)
 write("approved_question", "order.edda.vc", hist())
 
-# pinned_old: current entity has may_delete (v2); story matches v1, pinned to order 1
+# block_edited: the entity block was edited after its approval; the story still matches v1
+def block_edited(ls):
+    i = find(ls, '    is: "what a workshop buys"'); ls[i] = '    is: "what a workshop buys from the shop"'; return None
+edit("block_edited", block_edited)
+write("block_edited", "order.edda.vc", hist())
+
+# pinned_old: current entity has may_create (v2); story matches v1, pinned to order 1
 def pinned_old(ls):
-    i = find(ls, '    may_update: ["shop_user"]'); ls.insert(i + 1, '    may_delete: ["NOBODY"]'); return None
+    i = find(ls, '    may_update: [{role: shop_user}]'); ls.insert(i + 1, '    may_create: [{role: shop_user}]'); EXPECT["pinned_old"] = {"story_line": find(ls, "  FIX-001:") + 1}; return None
 po = edit("pinned_old", pinned_old)
 ORDER_V2 = block(po, "  order:")
 write("pinned_old", "order.edda.vc", hist(extra=vc_entry("entity", "order", 2, "2026-10-01 09:00", "tuan", ORDER_V2, because="nobody may delete an order")))
@@ -399,7 +405,7 @@ def story_grown(ls):
     return None
 sg = edit("story_grown", story_grown)
 v1 = [l for l in STORY_V1]
-i = v1.index('        - when: "order.status = removed"')
+i = v1.index('        - when: "order.status == removed"')
 del v1[i:i + 2]
 j = v1.index('    "a removed order is not removed again":')
 del v1[j:]
@@ -409,7 +415,7 @@ EXPECT["story_grown"] = {"changes": ch, "count": len(ch), "v1_lines": len(v1)}
 
 # reason_changed: current reason reworded; v1 is the clean story
 def reason_changed(ls):
-    i = find(ls, 'reason: "already sent"'); ls[i] = ls[i].replace("already sent", "the order has already been sent"); return i
+    i = find(ls, 'reason: "already sent"'); ls[i] = ls[i].replace("already sent", "the order has already been sent"); j = find(ls, 'refused: "already sent"'); ls[j] = ls[j].replace("already sent", "the order has already been sent"); return i
 rc = edit("reason_changed", reason_changed)
 write("reason_changed", "order.edda.vc", hist())
 EXPECT["reason_changed"]["changes"] = lcs_changes(STORY_V1, block(rc, "FIX-001:"))
@@ -433,7 +439,7 @@ EXPECT["comment_changed"] = {"changes": lcs_changes(STORY_V1, block(cc, "FIX-001
 # swapped: v1 had the two refusals in the other order
 edit("swapped", lambda ls: None)
 v1 = list(STORY_V1)
-i = v1.index('        - when: "order.status = removed"')
+i = v1.index('        - when: "order.status == removed"')
 v1[i:i + 4] = v1[i + 2:i + 4] + v1[i:i + 2]
 write("swapped", "order.edda.vc", hist(story_text=v1))
 EXPECT["swapped"] = {"changes": lcs_changes(v1, STORY_V1)}
