@@ -1,14 +1,15 @@
 # Edda: language reference
 
-Revision 28, 2 Oct 2026. Replaces revision 27 (kb:9378924). Decisions
+Revision 29, 2 Oct 2026. Replaces revision 28 (kb:9378926). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 and 5. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 6. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
-`language/keywords.edda` (the registry: every key, expression form,
+`language/keywords.yaml` (the registry: every key, expression form,
 fixed name, checker rule and sentence kind, with what it means, why it
-exists and where it comes from).
+exists and where it comes from; generated plain YAML, not a spec file,
+so the subset below does not apply to it).
 
 ## 1. The idea
 
@@ -55,15 +56,16 @@ language/
   reference.md       this file
   schema.json        the keys of .edda, JSON Schema 2020-12
   vc-schema.json     the keys of .edda.vc
-  keywords.edda      the registry
+  keywords.yaml      the registry, generated from this file
 ```
 
 A `.edda` file is YAML 1.2, core schema, in this subset, which the
 checker enforces at the source, before the schema:
 
 - free text (`is:`, `story:`, `i_want:`, `so_that:`, `reason:`,
-  `means:`, notes, questions, example titles) and every expression is
-  quoted, with double quotes; a single-quoted scalar is `yaml_feature`;
+  `means:`, `wording` values, notes, questions, example titles) and
+  every expression is quoted, with double quotes; a single-quoted
+  scalar is `yaml_feature`; every key is plain, except example titles;
   names, numbers, ids, `True`, `False` and type-phrase words are
   plain; `DONE` is plain only as the first `then` item; an unquoted
   ` #` would silently drop the rest of the line;
@@ -83,7 +85,9 @@ checker enforces at the source, before the schema:
   for the line after it; keys are snake_case except
   story ids (`ABC-123`), epic ids (`ABC`) and example titles (quoted
   text);
-- a duplicate key is `declared_twice` at the second key;
+- a duplicate key is `declared_twice` at the second key; a declared
+  name or choice value that is a Python keyword (`class`, `in`,
+  `None`, ...) is `bad_name`, since an expression could not reach it;
 - `#` starts a comment outside a string; comments carry no rules, are
   invisible to the views and ignored by the version comparison.
 
@@ -389,11 +393,15 @@ way> (not <other>)`:
 | no value, a value | `x is None`, `x is not None` | `x == None`, `x != None`, `None == x` |
 | a yes/no property holds, does not | `x.approved`, `not x.approved` | `x.approved == True`, `x.approved == False`, `True == x.approved` |
 | between | `a <= x and x <= b` | `a <= x <= b` and every other comparison chain |
-| text prefix | `x.startswith("t")` | `x[:1] == "t"`, `x[:n] == t` |
+| text prefix | `x.startswith("t")` | `x[:n] == "t"` where `"t"` has `n` characters |
 
-The message keeps the writer's meaning: `len(x) != 0` gets `write x !=
-[] (not len(x) != 0)`. A form that is both a second way and outside
-7.1 is reported as `second_way`.
+Each rewrite applies only where it means the same: the list rows only
+to a list, the yes/no rows only to a yes/no, `x[len(x) - 1]` only when
+both are the same `x`, and a comparison chain is rewritten with its
+own operands and operators. The message keeps the writer's meaning:
+`len(x) != 0` gets `write x != [] (not len(x) != 0)`, `x[:1] != "t"`
+gets `write not x.startswith("t")`. A form that is both a second way
+and outside 7.1 is reported as `second_way`.
 
 ### 7.3 Fixed names
 
@@ -404,7 +412,7 @@ The message keeps the writer's meaning: `len(x) != 0` gets `write x !=
 | `RESULT` | what the latest call returned; no value after `refused` | Edda |
 | `NOW` `TODAY` | the time and the day of the request, in the business zone | Edda |
 | `DONE` | the outcome of a successful call, as a `then` item, not inside an expression | Edda |
-| `MANY` `IN ORDER` `DEFAULT` `OPTIONAL` `DERIVED` `TEXT` `NUMBER` `TIME` `YES_NO` | type-phrase words, section 4, not inside an expression | Edda |
+| `MANY` `IN ORDER` `DEFAULT` `OPTIONAL` `DERIVED` `TEXT` `NUMBER` `INTEGER` `TIME` `YES_NO` | type-phrase words, section 4, not inside an expression | Edda |
 
 ## 8. Examples
 
@@ -437,7 +445,7 @@ examples:
 | `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` for an actor, `fixture:` for a `spec_file` | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived property is `derived_in_given` |
 | `fixture:` | the folder under `fixtures/`; its file, and its history when present, become the given `spec_file` | the whole spec is the given, never a hand-made fragment |
 | `steps:` | a list of `when` and `then`; `when` may be left out to check the given state | a flow is several steps |
-| `when:` | `actor` (a declared given), `call` (the operation with its arguments, Python call form), `at` (optional time) | one fixed shape; every actor is declared (`unknown_name` otherwise) |
+| `when:` | `actor` (a declared given), `call` (a call of a declared operation with its arguments, Python call form; anything else is `not_an_expression`), `at` (optional time) | one fixed shape; every actor is declared (`unknown_name` otherwise) |
 | `then:` | with `when`: the outcome first, `DONE` or `refused: "<reason>"`, then facts; without `when`: facts only | the checker compares; `RESULT` is what the latest call returned |
 | `notes:` | free text | as on stories |
 
@@ -508,7 +516,9 @@ a re-read is the binding's test, not a level 1 fact.
 - **Normalised text.** A block's `text` is its lines from its key line
   (`order:`, `FUL-005:`) to its last line, with comments, blank lines
   and trailing spaces removed and re-indented so the key line starts at
-  column 0. A `#` inside a quoted string is not a comment. An entry's
+  column 0. Quoting is tracked across lines: inside a quoted text that
+  wraps, a `#`, a blank line and the spaces are kept as they are. An
+  entry's
   `text` is a self-contained snapshot of the block as it was then: it
   must be normalised already (normalising it changes nothing) and its
   first line must name the entry's block (`bad_snapshot` otherwise). It
@@ -520,13 +530,16 @@ a re-read is the binding's test, not a level 1 fact.
   `i_want`, `so_that`, `epic`, `tags`, notes, questions, comments and
   blank lines change freely. **Draft, block.** Its `text` differs from
   the newest version's.
-- **Pins.** A story version records every block the story names
-  (section 11, `story.blocks`) at its version then. A story entry's
-  pins must be exactly the blocks the `story.blocks` rule finds in the
-  snapshot's own text, in that order, each pointing at an existing
-  version of a block that exists; one pin per `(kind, name)`; a block
-  entry has no pins (`bad_pin` otherwise). A newer block version than
-  the pin in the story's newest entry flags the story
+- **Pins.** A story version records every block the story named
+  (section 11, `story.blocks`) at its version then, in that order. The
+  entry's pins are its own record from approval time: the approve
+  operation's ensure facts guarantee the set and the order; the checker
+  never recomputes them from today's files, so a later permission,
+  inclusion or re-ordering cannot invalidate an old entry. The checker
+  does verify that every pin points at an existing version of a block
+  that exists, that no `(kind, name)` repeats, that a story entry has
+  pins and a block entry has none (`bad_pin` otherwise). A newer block
+  version than the pin in the story's newest entry flags the story
   `approved_against_older`: "FUL-005 approved against entity order v2,
   order is now v3". A flag, not a draft; older entries are never
   flagged.
@@ -617,12 +630,12 @@ pin's line in the `.vc` for `bad_version`, `bad_pin` and
 | `wrong_type` | a mapping, list or scalar where another is expected; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase | `<key> must be a <mapping/list/text>` |
 | `missing_key` | a required key absent | `<block> needs <key>:` |
 | `unknown_key` | a key the schema does not name | `unknown key: <key>` |
-| `bad_name` | a name not snake_case, an id not `ABC-123` | `not a name: <text>` |
+| `bad_name` | a name not snake_case, an id not `ABC-123`, a name or choice value that is a Python keyword | `not a name: <text>` |
 | `declared_twice` | a duplicate key or name, at the second | `declared twice: <name>` |
 | `unknown_name` | an undeclared lowercase word, actor, entity, role or given | `unknown name: <name>` |
 | `unknown_status` | a status value not in its property's list | `status not in its list: <value>` |
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>` |
-| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact | `not an expression: <text>` |
+| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation | `not an expression: <text>` |
 | `second_way` | a form 7.2 spells another way | `write <one way> (not <other>)` |
 | `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, a call with the wrong number of arguments | `<what> expects <kind>: <text>` |
 | `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
@@ -632,7 +645,7 @@ pin's line in the `.vc` for `bad_version`, `bad_pin` and
 | `derived_in_given` | a `with:` value for a derived property | `<property> is derived and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
 | `bad_version` | a `.vc` number out of sequence or an unknown story or block | `<kind> <name> version <n> out of sequence; expected <m>` |
-| `bad_pin` | a pin on a block entry, a story entry whose pins are not exactly the blocks its snapshot names in that order, a duplicate `(kind, name)`, a pin to no such block or version | `pin <kind> <name> v<n>: no such version`, `pins of <id> v<n>: expected <list>` (and likewise) |
+| `bad_pin` | a pin on a block entry, a story entry without pins, a duplicate `(kind, name)`, a pin to no such block or version | `pin <kind> <name> v<n>: no such version` (and likewise) |
 | `bad_snapshot` | an entry's text that is not already normalised or does not name the entry's block | `text of <kind> <name> v<n> is not a normalised block` |
 
 **Flags** (`problem.kind == flagged`):
@@ -739,8 +752,9 @@ from 0; `l[a:b]` items a to b of l; `a if c else b` a if c, else b;
 the asker; `RESULT` the result; `True` yes, `False` no; `None`
 nothing; a text literal in its quotes. A name reads as words
 (`units_sent` reads "units sent"); an entity type takes "a" or "an"; a
-given or input keeps its name. Every sentence starts with a capital
-letter and ends with a full stop. Structural ids (story keys) are
+given or input keeps its name. Every rendered sentence starts with a
+capital letter and ends with a full stop; a note or question is shown
+as written, verbatim. Structural ids (story keys) are
 hidden; an id written inside quoted text stays. Hover shows each key's
 and word's meaning from the registry. `view_at` renders a version's
 text with the wording and permissions of its pinned blocks.
@@ -766,7 +780,24 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 27
+## 14. Changes from revision 28
+
+- From Astra's round 6: a story entry's pins are its own record from
+  approval time, verified for targets and duplicates, never recomputed;
+  normalisation tracks quotes across wrapped lines; Python keywords are
+  `bad_name` as names and choice values; notes and questions are
+  verbatim in the read view; `INTEGER` in the fixed-word table; a
+  `call` is a call of an operation; `x[:n] == t` is a second way only
+  when `t` has `n` characters, and every rewrite only where it means
+  the same; every key plain and `wording` values quoted; the registry
+  is `language/keywords.yaml`, generated plain YAML outside the
+  subset; the validator infers types from literals and declarations,
+  reports `type_mismatch`, collects every independent problem of a
+  layer, maps schema failures to rule names with unknown-key
+  suppression, checks every key's style, and matches type phrases on
+  ASCII digits and escaped quotes.
+
+## 15. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -788,7 +819,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 15. Changes from revision 26
+## 16. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate language/keywords.edda from the tables in reference.md."""
+"""Generate language/keywords.yaml from the tables in reference.md."""
 import os, re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,7 +59,8 @@ for section, header, rows in tables(md):
 
 # the two rule tables come in order: refusals then flags
 
-out = ["# Edda keyword registry, generated from language/reference.md (revision 27).",
+out = ["# Edda keyword registry, generated from language/reference.md (revision 29).",
+       "# Plain YAML, not a spec file: the .edda subset does not apply here.",
        "# Every key, expression form, style rule, fixed name, checker rule and",
        "# read-view sentence kind, with what it means, why it exists and where it",
        "# comes from. The checker refuses any key not in schema.json, any form not",
@@ -86,5 +87,5 @@ for r, w, m in flags:
 out += ["", "sentences:"]
 for k, t in kinds:
     out += [f"  - kind: {q(k)}", f"    template: {q(t)}"]
-open(f"{ROOT}/language/keywords.edda", "w").write("\n".join(out) + "\n")
+open(f"{ROOT}/language/keywords.yaml", "w").write("\n".join(out) + "\n")
 print(len(keys), "keys", len(forms), "forms", len(styles), "style rules", len(words), "words", len(rules), "refusals", len(flags), "flags", len(kinds), "sentence kinds")

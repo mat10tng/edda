@@ -121,26 +121,35 @@ def strip_comment(s):
 
 def block(lines, key_line_text):
     """lines of the block whose key line contains key_line_text, from the
-    key line to the last line indented deeper than it; normalised."""
+    key line to the last line indented deeper than it; normalised: comments,
+    blank lines and trailing spaces removed outside quoted text, quoting
+    tracked across wrapped lines, re-indented to the key line."""
     start = find(lines, key_line_text)
     indent = len(lines[start]) - len(lines[start].lstrip())
-    out = [lines[start]]
-    for s in lines[start + 1:]:
-        t = strip_comment(s)
-        if t.strip() == "":
-            if s.strip() == "" or s.strip().startswith("#"):
+    out, q = [], False
+    for n, s in enumerate(lines[start:]):
+        if not q:
+            ind = len(s) - len(s.lstrip())
+            if n > 0 and s.strip() and ind <= indent:
+                break
+            if s.strip() == "" or s.lstrip().startswith("#"):
                 continue
-        ind = len(s) - len(s.lstrip())
-        if s.strip() and ind <= indent:
-            break
-        out.append(s)
-    norm = []
-    for s in out:
-        t = strip_comment(s)
-        if t.strip() == "":
-            continue
-        norm.append(t[indent:])
-    return norm
+        kept, i = [], 0
+        while i < len(s):
+            c = s[i]
+            if c == '"':
+                k = i - 1
+                while k >= 0 and s[k] == "\\":
+                    k -= 1
+                if (i - 1 - k) % 2 == 0:
+                    q = not q
+            if c == "#" and not q and (i == 0 or s[i - 1] == " "):
+                break
+            kept.append(c)
+            i += 1
+        t = "".join(kept) if q else "".join(kept).rstrip()
+        out.append(t[indent:] if t.startswith(" " * indent) else t)
+    return out
 
 
 def vc_entry(kind, name, number, at, by, text_lines, because=None, pins=None):
@@ -402,7 +411,7 @@ def pinned_old(ls):
     i = find(ls, '    may_update: [{role: shop_user}]'); ls.insert(i + 1, '    may_create: [{role: shop_user}]'); EXPECT["pinned_old"] = {"story_line": find(ls, "  FIX-001:") + 1}; return None
 po = edit("pinned_old", pinned_old)
 ORDER_V2 = block(po, "  order:")
-write("pinned_old", "order.edda.vc", hist(extra=vc_entry("entity", "order", 2, "2026-10-01 09:00", "tuan", ORDER_V2, because="nobody may delete an order")))
+write("pinned_old", "order.edda.vc", hist(extra=vc_entry("entity", "order", 2, "2026-10-01 09:00", "tuan", ORDER_V2, because="the shop may create orders")))
 
 # story_grown: v1 had no "already removed" refusal and no third example
 def story_grown(ls):

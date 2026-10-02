@@ -75,7 +75,7 @@
   number: 2
   approved_at: "2026-10-01 09:00"
   approved_by: tuan
-  because: "nobody may delete an order"
+  because: "the shop may create orders"
   text: |
     order:
       is: "what a workshop buys"

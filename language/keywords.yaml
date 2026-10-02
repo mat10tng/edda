@@ -1,4 +1,5 @@
-# Edda keyword registry, generated from language/reference.md (revision 27).
+# Edda keyword registry, generated from language/reference.md (revision 29).
+# Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
 # comes from. The checker refuses any key not in schema.json, any form not
@@ -218,7 +219,7 @@ keys:
     since: v27
   - key: 'when:'
     section: 'Examples'
-    means: 'actor (a declared given), call (the operation with its arguments, Python call form), at (optional time)'
+    means: 'actor (a declared given), call (a call of a declared operation with its arguments, Python call form; anything else is not_an_expression), at (optional time)'
     why: 'one fixed shape; every actor is declared (unknown_name otherwise)'
     since: v27
   - key: 'then:'
@@ -445,7 +446,7 @@ one_way:
     not: 'a <= x <= b and every other comparison chain'
   - meaning: 'text prefix'
     write: 'x.startswith("t")'
-    not: 'x[:1] == "t", x[:n] == t'
+    not: 'x[:n] == "t" where "t" has n characters'
 
 words:
   - word: 'OLD'
@@ -500,6 +501,10 @@ words:
     means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
     since: v27
+  - word: 'INTEGER'
+    means: 'type-phrase words, section 4, not inside an expression'
+    from: 'Edda'
+    since: v27
   - word: 'TIME'
     means: 'type-phrase words, section 4, not inside an expression'
     from: 'Edda'
@@ -532,7 +537,7 @@ refusals:
     when: 'a key the schema does not name'
     message: 'unknown key: <key>'
   - rule: 'bad_name'
-    when: 'a name not snake_case, an id not ABC-123'
+    when: 'a name not snake_case, an id not ABC-123, a name or choice value that is a Python keyword'
     message: 'not a name: <text>'
   - rule: 'declared_twice'
     when: 'a duplicate key or name, at the second'
@@ -547,7 +552,7 @@ refusals:
     when: 'a type phrase outside the grammar'
     message: 'not a type phrase: <text>'
   - rule: 'not_an_expression'
-    when: 'a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact'
+    when: 'a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a call that is not a call of an operation'
     message: 'not an expression: <text>'
   - rule: 'second_way'
     when: 'a form 7.2 spells another way'
@@ -577,8 +582,8 @@ refusals:
     when: 'a .vc number out of sequence or an unknown story or block'
     message: '<kind> <name> version <n> out of sequence; expected <m>'
   - rule: 'bad_pin'
-    when: 'a pin on a block entry, a story entry whose pins are not exactly the blocks its snapshot names in that order, a duplicate (kind, name), a pin to no such block or version'
-    message: 'pin <kind> <name> v<n>: no such version, pins of <id> v<n>: expected <list> (and likewise)'
+    when: 'a pin on a block entry, a story entry without pins, a duplicate (kind, name), a pin to no such block or version'
+    message: 'pin <kind> <name> v<n>: no such version (and likewise)'
   - rule: 'bad_snapshot'
     when: 'an entry''s text that is not already normalised or does not name the entry''s block'
     message: 'text of <kind> <name> v<n> is not a normalised block'

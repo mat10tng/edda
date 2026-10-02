@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edda.local/schema/v27",
-  "title": "Edda spec file (revision 27)",
+  "$id": "https://edda.local/schema/v29",
+  "title": "Edda spec file (revision 29)",
   "description": "The keys of a .edda file: the shape layer of reference section 11 together with the quoting rule. Strings that carry logic are Python expressions (section 7) or type phrases (section 4) and are checked in the meaning layer, not here. The YAML subset is checked at the source, before this schema.",
   "type": "object",
   "additionalProperties": false,
@@ -114,7 +114,7 @@
     }
   },
   "$defs": {
-    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "name": {"type": "string", "pattern": "^(?!(False|None|True|and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield)$)[a-z][a-z0-9_]*$", "description": "snake_case and not a Python keyword"},
     "path": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
       "description": "a property location: name.property[.property]"},
     "epicId": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*$"},
@@ -122,7 +122,7 @@
     "expression": {"type": "string", "minLength": 1, "not": {"const": "DONE"},
       "description": "one Python expression of reference section 7, on one physical line"},
     "typePhrase": {"type": "string", "minLength": 1,
-      "description": "(DEFAULT <literal> | DEFAULT a | b | TEXT | NUMBER | TIME | YES_NO | <entity> | MANY <entity>[, IN ORDER] | a | b | c) [, OPTIONAL] [, DERIVED]"},
+      "description": "DEFAULT <literal> [, DERIVED] | DEFAULT a | b [, DERIVED] | (TEXT | NUMBER | INTEGER | TIME | YES_NO | <entity> | MANY <entity>[, IN ORDER] | a | b | c) [, OPTIONAL] [, DERIVED]"},
     "computed": {
       "type": "object", "additionalProperties": false, "required": ["computed"],
       "properties": {"computed": {"$ref": "#/$defs/expression"}}
@@ -180,7 +180,7 @@
     },
     "givenItem": {
       "type": "object",
-      "propertyNames": {"$ref": "#/$defs/name"},
+      "propertyNames": {"anyOf": [{"const": "with"}, {"$ref": "#/$defs/name"}]},
       "properties": {
         "with": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/flatValue"}}
       },
