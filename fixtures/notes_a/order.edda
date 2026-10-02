@@ -12,6 +12,7 @@ story remove an order                                    # FIX-001
   i want to remove an order
   so that the list is clean
   note: the stock feed is refreshed every night
+  question: does the shop want to see the refresh time?
   epic: FIX
 
   operation remove(order: order)

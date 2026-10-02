@@ -29,8 +29,9 @@ language/   reference.md    the language reference, revision 24
             keywords.edda   the vocabulary, one entry per keyword
 specs/      *.edda          Edda's own stories, one file per entity
             *.edda.vc       approved copies, append-only (none yet)
-fixtures/   *.edda          whole specs in one file, one deliberate
-                            problem each, used by the examples
+fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
+                            under its own file name, one deliberate
+                            problem each; the examples name the folder
 ```
 
 Nothing is built yet.

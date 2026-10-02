@@ -10,6 +10,7 @@ entity spec_file                  # one .edda file; a fixture is one whole spec 
   may delete: nobody
 
 entity note, part of spec_file    # one note: line, at any depth under a story
+  file: one spec_file
   text
   story_id
   line
@@ -155,7 +156,7 @@ story every note is collected in one place                  # EDDA-003
 
   operation notes(files: many spec_file) returns
     [note for file in files for note in file's notes]
-    ordered by text, then file name, then line
+    ordered by text, then file's name, then line
     who: agent, operator
 
   example notes from two files are listed with the same wording side by side
@@ -169,3 +170,5 @@ story every note is collected in one place                  # EDDA-003
           all[2]'s text is "the stock feed is refreshed every night"
           all[3]'s text is "the stock feed is refreshed every night"
           all[2]'s story_id is "FIX-001"
+          all[2]'s line is 14
+          all[3]'s line is 14

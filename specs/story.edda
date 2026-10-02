@@ -5,10 +5,16 @@ entity story                      # one story in a spec_file
   role_name
   epic_id, optional
   text                            # the story as it stands in the file, every line
-  rules_text                      # its operations and examples only, with comments,
-                                  #   blank lines and trailing spaces removed
+  rules_text                      # its operations and examples only, as parsed: comments,
+                                  #   blank lines, trailing spaces, note: and question: lines
+                                  #   removed; string contents and indentation kept
   approvals: many approval, in order    # oldest first; the newest is approvals[-1]
   version: count(approvals)
+  changes: many change, in order  # between approvals[-1]'s text and text; every line
+                                  #   outside the longest common sequence of lines is a
+                                  #   change: removed if in the old text, added if in the new;
+                                  #   ordered by line; a never-approved story is all added
+  sentences: many sentence, in order    # the read view of text, one per rule, in story order
   is approved: count(approvals) is more than 0
     and rules_text is approvals[-1]'s rules_text
   may create: agent
@@ -140,18 +146,14 @@ story the operator approves a story and the copy is kept    # EDDA-005
 story the operator sees what changed before saying yes      # EDDA-006
   as an operator
   i want the difference between the story in the file and its newest
-    approved copy as added and removed lines, in order
+    approved copy as added and removed lines, in order, so that a moved
+    rule shows too
   so that I read the change, not the whole story, every time
   epic: VC
   tags: version, diff
 
   operation diff(story: story) returns story's changes
     who: agent, operator
-    note: a line of the story, with its indentation and without its
-      comment, is a sentence; a sentence is removed when it is in the
-      newest approved text and not in the story's text, added when the
-      other way round; the same sentence twice counts twice; changes are
-      ordered by line
 
   example an added refusal shows as added
     given approval a1 with version 1, text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
@@ -186,6 +188,16 @@ story the operator sees what changed before saying yes      # EDDA-006
     then  done
           d is []
 
+  example two swapped refusals show as a removed pair and an added pair
+    given approval a1 with version 1, text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\"\n  if the order's units_sent is more than 0,\n    refuse: \"already sent\""
+          story swapped with id "FUL-005", approvals [a1],
+            text "operation remove(order)\n  if the order's units_sent is more than 0,\n    refuse: \"already sent\"\n  if the order's status is removed,\n    refuse: \"already removed\""
+    when  operator asks diff(swapped) as d
+    then  done
+          count(d) is 4
+          count([c for c in d if c's kind is removed]) is 2
+          count([c for c in d if c's kind is added]) is 2
+
   example a story never approved shows every line as added
     given story fresh with id "FUL-010", approvals [],
             text "operation remove(order)\n  when remove succeeds, ensure:\n    the order's status is removed"
@@ -209,26 +221,29 @@ story the operator reads a story as sentences               # EDDA-007
   operation view_at(story: story, version) returns
     the sentences of story's approvals[version - 1]'s text
     who: agent, operator
-    if version is more than story's version,
+    if version is not a whole number or version is less than 1
+      or version is more than story's version,
       refuse: "no such version"
 
-  example the clean fixture reads as six sentences
+  example the clean fixture reads as eight sentences
     given spec_file good from fixture order
     when  operator asks view(good's stories[0]) as v
     then  done
-          count(v) is 6
+          count(v) is 8
           v[0]'s kind is story
           v[0]'s text is "Remove an order. As a shop user, I want to remove an order, so that the list is clean."
           v[1]'s kind is permission
           v[1]'s text is "A shop user may remove an order."
           v[2]'s kind is refusal
-          v[2]'s text is "IF the order's units sent is more than 0, THEN refuse: already sent."
+          v[2]'s text is "If remove is asked for an order whose units sent is more than 0, then the system shall refuse it: already sent."
           v[3]'s kind is outcome
-          v[3]'s text is "WHEN remove succeeds, the order's status SHALL be removed."
+          v[3]'s text is "When remove succeeds, the system shall leave the order with status removed."
           v[4]'s kind is example
           v[4]'s text is "Example: a fresh order is removed."
           v[5]'s kind is example
-          v[5]'s text is "Given a shop user erik and an order purchase with status incoming and units sent 0, when erik asks to remove purchase, then it is done and purchase's status is removed."
+          v[5]'s text is "Given erik, a shop user, and purchase, an order with status incoming and units sent 0."
+          v[6]'s text is "When erik asks to remove purchase."
+          v[7]'s text is "Then it is done and purchase's status is removed."
 
   example a note reads in its place and a question after it
     given spec_file a from fixture notes_a
@@ -236,6 +251,8 @@ story the operator reads a story as sentences               # EDDA-007
     then  done
           v[1]'s kind is note
           v[1]'s text is "the stock feed is refreshed every night"
+          v[2]'s kind is question
+          v[2]'s text is "does the shop want to see the refresh time?"
 
   example no sentence shows an id
     given spec_file good from fixture order
