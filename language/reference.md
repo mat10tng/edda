@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 27, 2 Oct 2026. Replaces revision 26 (kb:9378915). Decisions
+Revision 28, 2 Oct 2026. Replaces revision 27 (kb:9378924). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-round 4 review. The skeleton is YAML; the words are keys; the logic is
+rounds 4 and 5. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -63,11 +63,13 @@ checker enforces at the source, before the schema:
 
 - free text (`is:`, `story:`, `i_want:`, `so_that:`, `reason:`,
   `means:`, notes, questions, example titles) and every expression is
-  quoted; names, numbers, ids, `True`, `False` and type-phrase words
-  are plain; an unquoted ` #` would silently drop the rest of the line;
-- one physical line per expression and per type phrase; a block scalar
-  (`|`) is allowed only for `text:` in `.edda.vc`; free text may wrap
-  onto further lines as YAML allows;
+  quoted, with double quotes; a single-quoted scalar is `yaml_feature`;
+  names, numbers, ids, `True`, `False` and type-phrase words are
+  plain; `DONE` is plain only as the first `then` item; an unquoted
+  ` #` would silently drop the rest of the line;
+- one physical line per expression, per type phrase and per example
+  title; a block scalar (`|`, never `>`) is allowed only for `text:` in
+  `.edda.vc`; free text may wrap onto further lines as YAML allows;
 - repeated things are lists (`- `): refusals, ensures, givens, steps,
   then items, always-rules, notes, questions, who-lists, pins; mapping
   order is never a meaning, with two stated exceptions: the order of
@@ -76,8 +78,11 @@ checker enforces at the source, before the schema:
   order;
 - no anchors, aliases, the `<<` key, tags, directives, complex keys,
   tabs or a second document;
-- two-space indentation; keys are snake_case except story ids
-  (`ABC-123`), epic ids (`ABC`) and example titles (quoted text);
+- two-space indentation, enforced: a line's indentation is even and at
+  most two deeper than the line before it, a list dash counting as two
+  for the line after it; keys are snake_case except
+  story ids (`ABC-123`), epic ids (`ABC`) and example titles (quoted
+  text);
 - a duplicate key is `declared_twice` at the second key;
 - `#` starts a comment outside a string; comments carry no rules, are
   invisible to the views and ignored by the version comparison.
@@ -172,20 +177,25 @@ entities:
 `inputs:`:
 
 ```
-type_phrase := (DEFAULT literal | DEFAULT choice | type) [, OPTIONAL] [, DERIVED]
-type        := TEXT | NUMBER | TIME | YES_NO | <entity>
+type_phrase := DEFAULT literal [, DERIVED]
+             | DEFAULT choice [, DERIVED]
+             | type [, OPTIONAL] [, DERIVED]
+type        := TEXT | NUMBER | INTEGER | TIME | YES_NO | <entity>
              | MANY <entity> [, IN ORDER] | choice
 choice      := name | name | name ...      two or more, distinct, snake_case
 literal     := number | "text" | "time" | True | False
+number      := -?[0-9]+ (an INTEGER) | -?[0-9]+.[0-9]+ (a NUMBER)
 ```
 
-`DEFAULT` fixes the type from what follows: `DEFAULT 0` is a NUMBER,
-`DEFAULT "none"` a TEXT, `DEFAULT False` a YES_NO, `DEFAULT incoming |
-removed` a choice whose first value is the default; the type word is
-then not written. `DEFAULT` never goes with a reference, a `MANY` or
-`OPTIONAL`. A bare name is a single reference to that entity; a name
-that is no entity is `unknown_name`; a single-value choice does not
-exist. `, DERIVED` marks a property the checker computes by a rule of
+`DEFAULT` fixes the type from what follows: `DEFAULT 0` is an INTEGER,
+`DEFAULT 1.5` a NUMBER, `DEFAULT "none"` a TEXT, `DEFAULT False` a
+YES_NO, `DEFAULT incoming | removed` a choice whose first value is the
+default; the type word is then not written. `DEFAULT` never goes with a
+reference, a `MANY` or `OPTIONAL`, by the grammar. `INTEGER` is a whole
+number; `NUMBER` any number; an INTEGER is accepted where a NUMBER is
+expected, not the reverse. A bare name is a single reference to that
+entity; a name that is no entity is `unknown_name`; a single-value
+choice does not exist and a repeated value is `bad_type_phrase`. `, DERIVED` marks a property the checker computes by a rule of
 section 11 named `<entity>.<property>`; it cannot be given
 (`derived_in_given`). Anything else is `bad_type_phrase`. A computed
 property is always `{computed: "<expression>"}`; one whose expression is
@@ -195,17 +205,19 @@ a condition is yes/no and is used as a condition (`order.approved`).
 plural name, a single reference a singular one (`plural_name`).
 
 **Who-lines.** A who-line is `{role: <role>}` or `{role: <role>, when:
-"<condition>"}`. In the condition the actor is `ACTOR`, the entity is
-reached by its name on an entity's `may_*` line, and the inputs by
-their names on an operation's `who:` line; bare names are not in scope
-on a who-line (`unknown_name`).
+"<condition>"}`. The roots in scope in the condition are `ACTOR`, the
+entity's own name on its `may_*` lines, and the inputs' names on an
+operation's `who:` line. A property written without its root
+(`shop == order.shop` for the actor's shop) is `unknown_name`.
 
-**Scope of bare names.** Inside `always`, `while` and `computed` a bare
-name is the entity's own property; inside an operation it is an input;
-inside an example it is a given name; inside `ordered_by` the result
-item is reached by its entity's name. The entity's own name is in
-scope only on its who-lines. Status values are in scope wherever their
-property is compared.
+**Scope of bare names.** A root is a name an expression may start
+from. Inside `always`, `while` and `computed` the roots are the
+entity's own properties; inside an operation its inputs; inside an
+example its given names; inside `ordered_by` the result item, reached
+by its entity's name; on a who-line, as above. A comprehension's
+variable is a root inside that comprehension, with Python's scope.
+Status values are in scope wherever their property is compared. The
+fixed names of 7.3 are roots everywhere they are allowed.
 
 ## 5. Stories
 
@@ -282,9 +294,9 @@ operations:
 | `who:` | list of who-lines; required | no defaults; `wider_than_entity` when it admits a role the `about` entity's matrix never admits |
 | `refuse:` | list of `when` condition and `reason`; the first that holds is given | preconditions with a reason tests match |
 | `ensure:` | list of facts true after; a fact is a quoted expression or `{fact, means}`; may use `OLD(...)` | postconditions, each with its meaning when the mechanics do not read |
-| `returns:` | the expression a read operation gives back; never with `ensure` or `also_changes` | one word for reads and writes, command-query separation |
-| `ordered_by:` | list of expressions over one result item, reached by its entity's name, ascending, ties keep input order; only with `returns` | sorts; without it or an `IN ORDER` source, a positional check on `RESULT` is `not_ordered` |
-| `also_changes:` | property paths (`order.history`) the frame rule allows to change without an `ensure` fact | everything else stays unchanged |
+| `returns:` | the expression a read operation gives back; never with `ensure` or `also_changes` (`returns_and_ensure`) | one word for reads and writes, command-query separation |
+| `ordered_by:` | list of expressions over one result item, reached by its entity's name, ascending, ties keep input order; only with `returns` (`returns_and_ensure` otherwise) | sorts; without it or an `IN ORDER` source, a positional check on `RESULT` is `not_ordered` |
+| `also_changes:` | property paths (`order.history`) the frame rule allows to change without an `ensure` fact; only with `ensure` (`returns_and_ensure` otherwise) | everything else stays unchanged |
 | `notes:` | free text | as on stories |
 
 - **Order of checks.** Permission, then refusals in the order written,
@@ -303,6 +315,11 @@ operations:
 - **`OLD(x)`** is the value of `x` captured after the refusals were
   checked and before the operation changed anything: a deep, frozen
   copy; `OLD(len(x))` is allowed. Only under `ensure`.
+- **Equality of entities.** Two references are equal when they are the
+  same entity, never by value; a frozen copy keeps every identity, so
+  `OLD(history.versions) + [story.versions[-1]]` compares element by
+  element with the live list by identity. Texts, numbers, times and
+  choice values compare by value. A binding implements the same rule.
 - **Empty values.** An `OPTIONAL` property or left-out input is `None`;
   `None == None` is true, as in Python; `<`, `>` and arithmetic on
   `None` fail the example.
@@ -337,25 +354,27 @@ form are Python's.
 | `x in list`, `x not in list` | membership in a list | Python |
 | `"t" in text`, `text.startswith("t")` | a text contains, starts with a text | Python |
 | `len(x)` | the number of elements of a list or characters of a text | Python |
-| `sum(e for x in list)`, `min(e for x in list)`, `max(e for x in list)`, `any(c for x in list)`, `all(c for x in list)` | the five list words, each over one generator | Python |
-| `[e for x in list if c]`, `[y for x in xs for y in x.ys]` | filtered and nested lists; order of the source kept | Python |
-| `list[0]`, `list[-1]`, `list[1:]`, `list[:n]` | index and slice with whole-number constants; out of range fails the example | Python |
+| `sum(e for x in list)`, `min(e for x in list)`, `max(e for x in list)`, `any(c for x in list)`, `all(c for x in list)` | the five list words, each with exactly one generator and nothing else; a generator appears nowhere else | Python |
+| `[e for x in list if c]`, `[y for x in xs for y in x.ys]` | filtered and nested lists; order of the source kept; the variable is a plain name, never a path; never `async` | Python |
+| `list[0]`, `list[-1]`, `list[n - 1]`, `list[1:]`, `list[:n]` | index and slice; an index or bound is an INTEGER-valued expression (a constant, a name, a path, or those with `+ - *`), never a yes/no or a NUMBER; out of range fails the example | Python |
 | `a if c else b` | conditional; the untaken side is not evaluated | Python |
 | `story.approved`, `not fresh.approved` | a yes/no property as a condition | Python |
 | `+ - * /`, `( )` | arithmetic; `+` joins two lists into a new list | Python |
-| `"text"`, `\n`, `\"` | a text literal; a time is written as text, `"2026-10-03 10:00"` or `"2026-10-03"`, and read as a TIME where a TIME is expected | Python |
-| `3`, `-2`, `1.5`, `True`, `False`, `None`, `[]`, `[a, b]` | number, yes/no, no-value and list literals | Python |
+| `"text"`, `\n`, `\"` | a text literal | Python |
+| `"2026-10-03 10:00"`, `"2026-10-03"` | a time, written as a text literal and read as a TIME where a TIME is expected | Python syntax, Edda meaning |
+| `3`, `-2`, `1.5`, `True`, `False`, `None`, `[]`, `[a, b]` | integer, number, yes/no, no-value and list literals | Python |
 | `NOW`, `TODAY`, `ACTOR`, `RESULT` | the four fixed names: the time, the day, the asker, the latest call's return | Edda |
-| `OLD(x)` | the value before the operation | Design by Contract, Eiffel's `old` |
+| `OLD(x)` | the value before the operation, one argument, only under `ensure` | Edda, after Eiffel's `old` |
+| `len(x)`, `x.startswith(t)` | one argument each, no keywords | Python |
 | `check(file)`, `approve(story, because="why")` | a declared operation called in Python call form: required inputs by position, optional ones by keyword | Python |
 
 Nothing else: no lambda, dict, set, tuple, slice step, f-string,
-comparison chain, walrus, star, `is` against anything but `None`, and
+walrus, star, `is` against anything but `None`, no bare generator, and
 no method or function beyond those listed. Percent, rounding, money,
 durations and date arithmetic are backlog #2494. A list word on a
-non-list, `len` on a number, or `+` between a list and a number is
-`wrong_type`; the checker knows a list from its declaration (`MANY`, a
-comprehension, a slice, a list literal).
+non-list, `len` on a number, `+` between a list and a number, or a
+NUMBER as an index is `type_mismatch`; the checker knows a list from
+its declaration (`MANY`, a comprehension, a slice, a list literal).
 
 ### 7.2 One way per meaning
 
@@ -364,13 +383,17 @@ way> (not <other>)`:
 
 | meaning | the one way | not |
 |---|---|---|
-| a list is empty, not empty | `x == []`, `x != []` | `len(x) == 0`, `not x` |
-| the number of elements | `len(x)` | `x.count`, `sum(1 for ...)` |
+| a list is empty, not empty | `x == []`, `x != []` | `len(x) == 0`, `len(x) != 0`, `len(x) > 0`, `not x` on a list |
+| the number of elements | `len(x)` | `sum(1 for ...)` |
 | the first, the last | `x[0]`, `x[-1]` | `x[len(x) - 1]` |
-| no value, a value | `x is None`, `x is not None` | `x == None`, `not x` |
-| a yes/no property holds | `x.approved` | `x.approved == True` |
-| between | `a <= x and x <= b` | `a <= x <= b` |
-| text prefix | `x.startswith("t")` | `x[:1] == "t"` |
+| no value, a value | `x is None`, `x is not None` | `x == None`, `x != None`, `None == x` |
+| a yes/no property holds, does not | `x.approved`, `not x.approved` | `x.approved == True`, `x.approved == False`, `True == x.approved` |
+| between | `a <= x and x <= b` | `a <= x <= b` and every other comparison chain |
+| text prefix | `x.startswith("t")` | `x[:1] == "t"`, `x[:n] == t` |
+
+The message keeps the writer's meaning: `len(x) != 0` gets `write x !=
+[] (not len(x) != 0)`. A form that is both a second way and outside
+7.1 is reported as `second_way`.
 
 ### 7.3 Fixed names
 
@@ -409,7 +432,7 @@ examples:
 
 | key | means | why |
 |---|---|---|
-| `examples:` | title to example; one concrete run | the acceptance criteria that run |
+| `examples:` | quoted title to example; one concrete run | the acceptance criteria that run |
 | `given:` | a list of things to make; each item has exactly one key besides `with`: `- <entity>: <name>` or `- actor: <name>` | order-independent, schema-checked; names declared here are used below; the binding makes them; no glue is written |
 | `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` for an actor, `fixture:` for a `spec_file` | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived property is `derived_in_given` |
 | `fixture:` | the folder under `fixtures/`; its file, and its history when present, become the given `spec_file` | the whole spec is the given, never a hand-made fragment |
@@ -485,9 +508,12 @@ a re-read is the binding's test, not a level 1 fact.
 - **Normalised text.** A block's `text` is its lines from its key line
   (`order:`, `FUL-005:`) to its last line, with comments, blank lines
   and trailing spaces removed and re-indented so the key line starts at
-  column 0. A `#` inside a quoted string is not a comment. The entry's
-  `text` must equal that and its first line must name the entry's
-  block (`bad_snapshot` otherwise).
+  column 0. A `#` inside a quoted string is not a comment. An entry's
+  `text` is a self-contained snapshot of the block as it was then: it
+  must be normalised already (normalising it changes nothing) and its
+  first line must name the entry's block (`bad_snapshot` otherwise). It
+  is never compared with the current block by the checker; `approved`
+  does that, and only against the newest entry.
 - **Draft, story.** Its `rules_text` differs from the newest version's:
   `rules_text` is `text` with only `about:`, `as_a:`, `operations:` and
   `examples:` kept and every `notes:` entry removed. The sentence,
@@ -495,9 +521,15 @@ a re-read is the binding's test, not a level 1 fact.
   blank lines change freely. **Draft, block.** Its `text` differs from
   the newest version's.
 - **Pins.** A story version records every block the story names
-  (section 11, `story.blocks`) at its version then. A newer block
-  version flags the story `approved_against_older`: "FUL-005 approved
-  against entity order v2, order is now v3". A flag, not a draft.
+  (section 11, `story.blocks`) at its version then. A story entry's
+  pins must be exactly the blocks the `story.blocks` rule finds in the
+  snapshot's own text, in that order, each pointing at an existing
+  version of a block that exists; one pin per `(kind, name)`; a block
+  entry has no pins (`bad_pin` otherwise). A newer block version than
+  the pin in the story's newest entry flags the story
+  `approved_against_older`: "FUL-005 approved against entity order v2,
+  order is now v3". A flag, not a draft; older entries are never
+  flagged.
 - **Approve a story.** Refused when the file does not check ("the file
   does not check"), when a named block is not approved, that is has no
   version or is itself a draft ("approve its blocks first"), or when
@@ -542,9 +574,9 @@ anchor and its aliases are one problem, at the anchor.
 2. shape: `unquoted_text`, `not_a_list`, `wrong_type`, `missing_key`,
    `unknown_key`, `bad_name`, `declared_twice`;
 3. meaning: `unknown_name`, `unknown_status`, `bad_type_phrase`,
-   `not_an_expression`, `second_way`, `returns_and_ensure`,
-   `wrong_file`, `not_ordered`, `role_cycle`, `derived_in_given`,
-   `wider_than_entity`;
+   `not_an_expression`, `second_way`, `type_mismatch`,
+   `returns_and_ensure`, `wrong_file`, `not_ordered`, `role_cycle`,
+   `derived_in_given`, `wider_than_entity`;
 4. history and flags: `bad_version`, `bad_pin`, `bad_snapshot`, then
    every flag.
 
@@ -552,8 +584,14 @@ anchor and its aliases are one problem, at the anchor.
 the quoting rule; a schema failure becomes: `additionalProperties`,
 `unknown_key`; `required`, `missing_key`; `type` with an array
 expected, `not_a_list`; any other `type`, `minProperties`,
-`maxProperties` or `minItems`, `wrong_type`; `propertyNames`, `pattern`
-or `enum` on a name, `bad_name`.
+`maxProperties`, `minItems`, `minLength`, `const` or `not`,
+`wrong_type`; `propertyNames`, `pattern` or `enum` on a name,
+`bad_name`. For `anyOf` and `oneOf` the checker takes the branch whose
+`type` matches the value's YAML kind (a mapping, a list, a scalar),
+drops the wrapper and maps that branch's own failures; when no branch
+matches the kind, `wrong_type`. An empty expression or type phrase is
+`wrong_type` (a text was expected, nothing was given). The schemas
+hold no history policy: sequence, pins and snapshots are layer 4.
 
 **Anchors.** A problem's `line` is the line of the key or value its
 message names: the key for `unknown_key` and `missing_key` (the block's
@@ -561,10 +599,11 @@ key line), the second declaration for `declared_twice`, the
 expression's line, the property's line for `unknown_status`,
 `bad_type_phrase`, `unreachable_status` and `plural_name`, the first
 role's `includes:` line for `role_cycle`, the `then` item's line for
-`not_ordered`, the story's key line for `wrong_file`, `no_example`,
-`about_untouched`, `question_on_approved` and `approved_against_older`,
-the changed side's line for `wording_drift`, and the entry's `number:`
-or the pin's line in the `.vc` for `bad_version`, `bad_pin` and
+`not_ordered`, the operation's key line for `returns_and_ensure`, the
+story's key line for `wrong_file`, `no_example`, `about_untouched`,
+`question_on_approved` and `approved_against_older`, the changed
+side's line for `wording_drift`, and the entry's `number:` or the
+pin's line in the `.vc` for `bad_version`, `bad_pin` and
 `bad_snapshot`.
 
 **Refusals** (`problem.kind == refused`), with their messages:
@@ -572,10 +611,10 @@ or the pin's line in the `.vc` for `bad_version`, `bad_pin` and
 | rule | when | message |
 |---|---|---|
 | `not_yaml` | the file does not parse | `not YAML: <parser message>` |
-| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, or a block scalar outside `.vc` text | `anchors and aliases are not allowed` (and likewise for each feature) |
+| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, or an expression, type phrase or title on more than one line | `anchors and aliases are not allowed` (and likewise for each feature) |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
 | `not_a_list` | a repeated thing written as a scalar or a mapping | `<key> must be a list, one <item> per line` |
-| `wrong_type` | a mapping, list or scalar where another is expected; a given item without exactly one name; a `with` value that is not flat; a list word on a non-list | `<key> must be a <mapping/list/text>` |
+| `wrong_type` | a mapping, list or scalar where another is expected; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase | `<key> must be a <mapping/list/text>` |
 | `missing_key` | a required key absent | `<block> needs <key>:` |
 | `unknown_key` | a key the schema does not name | `unknown key: <key>` |
 | `bad_name` | a name not snake_case, an id not `ABC-123` | `not a name: <text>` |
@@ -585,15 +624,16 @@ or the pin's line in the `.vc` for `bad_version`, `bad_pin` and
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>` |
 | `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact | `not an expression: <text>` |
 | `second_way` | a form 7.2 spells another way | `write <one way> (not <other>)` |
-| `returns_and_ensure` | both on one operation | `returns and ensure on one operation: <name>` |
+| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, a call with the wrong number of arguments | `<what> expects <kind>: <text>` |
+| `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
 | `wrong_file` | a story in another entity's file | `story <id> is about <entity> and belongs in <entity>.edda` |
 | `not_ordered` | `RESULT[n]` on an unordered return | `<operation> gives no order; RESULT[<n>] needs ordered_by or IN ORDER` |
 | `role_cycle` | `includes` reaches itself, at the first role in file order | `role <name> includes itself` |
 | `derived_in_given` | a `with:` value for a derived property | `<property> is derived and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
 | `bad_version` | a `.vc` number out of sequence or an unknown story or block | `<kind> <name> version <n> out of sequence; expected <m>` |
-| `bad_pin` | a pin on a block entry, a story entry without pins, a duplicate pin, a pin to no such block or version | `pin <kind> <name> v<n>: no such version` (and likewise) |
-| `bad_snapshot` | an entry's text that is not the normalised block or does not name the entry's block | `text of <kind> <name> v<n> is not the normalised block` |
+| `bad_pin` | a pin on a block entry, a story entry whose pins are not exactly the blocks its snapshot names in that order, a duplicate `(kind, name)`, a pin to no such block or version | `pin <kind> <name> v<n>: no such version`, `pins of <id> v<n>: expected <list>` (and likewise) |
+| `bad_snapshot` | an entry's text that is not already normalised or does not name the entry's block | `text of <kind> <name> v<n> is not a normalised block` |
 
 **Flags** (`problem.kind == flagged`):
 
@@ -614,8 +654,12 @@ unapproved version.
 
 - `spec_file.blocks`, `spec_file.stories`: the role and entity blocks,
   the stories, in file order.
+- `spec_file.name`: the file name without `.edda` (`order`);
+  `problem.file` carries the full name (`order.edda`, `order.edda.vc`).
 - `spec_file.notes`: every `notes:` entry under a story, an operation or
-  an example, in file order; `story_id` is the enclosing story's id.
+  an example, in file order; `file` is the enclosing spec_file,
+  `story_id` the enclosing story's id, `line` the line of the note's
+  text, `text` the string as YAML reads it.
 - `spec_file.problems`: the refusals and flags above for this file and
   its history, ordered as the layers say.
 - `history.versions`: the entries of the file's `.vc`, oldest first;
@@ -632,7 +676,8 @@ unapproved version.
   collected entity; every role reached through `includes` of a
   collected role; each once; ordered by file name, then file order.
 - `story.versions`, `block.versions`: the history's entries for this
-  story or block, oldest first.
+  story or block, oldest first. `pins_stale` and
+  `approved_against_older` look at the newest entry only.
 - `pin.block`: the block of the pin's kind and name, looked up across
   the project's files.
 - `story.changes`: walk the newest version's `text` (no lines when
@@ -668,29 +713,45 @@ drifted pairs). Sentences come in file order, one per rule:
 | story | `<Story>. As a <role>, I want <i_want>, so that <so_that>.` |
 | note, question | the text; a story's notes after the story sentence, then its questions; an operation's or example's after its own sentences |
 | operation | `<Name> <is-sentence>.` |
-| permission | `A <role> [whose <actor condition>] may <name> <inputs> [while <state condition>].`; the parts of the condition that mention `ACTOR` go after "whose", the rest after "while" |
+| permission | `A <role> [whose <actor condition>] may <name> <inputs> [while <state condition>].`; the condition is split only at its top-level `and`: the parts that mention `ACTOR` go after "whose", the rest after "while"; a condition whose top is not `and` stays whole, after "whose" if it mentions `ACTOR`, else after "while"; an input reads as its type with "a" or "an" when its name is its type (`order: order` reads "an order"), else `<name>, a <type>` |
 | refusal | `If <name> is asked for <an input> whose <condition>, then the system shall refuse it: <reason>.` when every left side starts with that input's name, which is then dropped; otherwise `If <name> is asked and <condition>, then ...` |
 | outcome | `When <name> succeeds, <means>.` or, without `means`, `When <name> succeeds, <fact in words>.` |
 | read | `<Name> gives <returns in words>[, ordered by <keys>].` |
 | invariant | `Always, <fact>.` and `While <condition>, <fact>.` |
 | example | `Example: <title>.` |
-| given | one sentence for all givens: `Given <item>, <item> and <item>.`; an actor reads `<name>, a <role>`; an entity `<name>, a <entity> with <property> <value> and <property> <value>`; items joined with commas and "and" before the last |
+| given | one sentence for all givens: `Given <item>, and <item>.`; an actor reads `<name>, a <role>`; an entity `<name>, a <entity> with <property> <value> and <property> <value>`; items are joined with `, ` and the last with `, and ` (the comma stays because each item carries its own apposition) |
 | when | `When <actor> asks to <name> <arguments>.` |
 | then | with facts: `Then it is done and <facts>.` or `Then it is refused: <reason>, and <facts>.`; without: `Then it is done.` or `Then it is refused: <reason>.`; a step without `when`: `Then <facts>.`; facts joined with "and" |
 
-Expressions in words: `.` reads `'s` (`the order's status`); `==` is,
-`!=` is not, `>` is more than, `<` is less than, `>=` is at least, `<=`
-is at most; `and`, `or`, `not` as they are; `is None` is empty; `is not
-None` is set; `in` is in; `startswith` starts with; `len(x)` the number
-of x; `sum(e for x in l)` the sum of e over l; `any(c for x in l)` some
-x in l has c; `all` every x in l has c; `[e for x in l if c]` every x in
-l where c; `l[0]` the first of l; `l[-1]` the last of l; `OLD(x)` x
-before; `ACTOR` the asker; `RESULT` the result; `True` yes, `False` no.
-A name reads as words (`units_sent` reads "units sent"); an entity type
-takes "a" or "an"; a given or input keeps its name. Structural ids
-(story keys) are hidden; an id written inside quoted text stays. Hover
-shows each key's and word's meaning from the registry. `view_at` renders
-a version's text with the wording and permissions of its pinned blocks.
+Expressions in words, one rule per form of 7.1, composed inside out:
+`.` reads `'s` (`the order's status`); `==` is, `!=` is not, `>` is
+more than, `<` is less than, `>=` is at least, `<=` is at most; `and`,
+`or`, `not` as they are, with brackets kept as "either ... or"; `is
+None` is empty; `is not None` is set; `in` is in; `startswith` starts
+with; `len(x)` the number of x; `sum(e for x in l)` the sum of e over
+every x in l; `min`, `max` the smallest, the largest; `any(c for x in
+l)` some x in l has c; `all` every x in l has c; `[e for x in l if c]`
+e for every x in l where c (the projection `e` is kept; a bare `x`
+reads "every x in l where c"); nested generators read in order; `l[0]`
+the first of l; `l[-1]` the last of l; `l[n]` item n of l, counted
+from 0; `l[a:b]` items a to b of l; `a if c else b` a if c, else b;
+`+ - * /` plus, minus, times, divided by; `OLD(x)` x before; `ACTOR`
+the asker; `RESULT` the result; `True` yes, `False` no; `None`
+nothing; a text literal in its quotes. A name reads as words
+(`units_sent` reads "units sent"); an entity type takes "a" or "an"; a
+given or input keeps its name. Every sentence starts with a capital
+letter and ends with a full stop. Structural ids (story keys) are
+hidden; an id written inside quoted text stays. Hover shows each key's
+and word's meaning from the registry. `view_at` renders a version's
+text with the wording and permissions of its pinned blocks.
+
+**Anchors.** A sentence's `line` is: the story's key line for `story`;
+the note's or question's text line; the operation's key line; the
+who-line for `permission`; the `when` line for `refusal`; the fact's
+line for `outcome`; the `returns` line for `read`; the fact's line for
+`invariant`; the title line for `example`; the `given:` line for
+`given`; the step's `when` line for `when`; the step's `then` line for
+`then`.
 
 **Write view.** The YAML with colour. **Diff view.** Two versions as
 added and removed lines; drifted pairs side by side.
@@ -705,7 +766,29 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 26
+## 14. Changes from revision 27
+
+- From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
+  bounds are INTEGER-valued expressions; the `DEFAULT` productions
+  stand apart so `DEFAULT` never meets `OPTIONAL`; distinct choices;
+  double quotes only, enforced indentation, one-line expressions,
+  type phrases and titles, `DONE` only as the first `then` item;
+  roots and property shorthand on who-lines; entity equality by
+  identity and `OLD` keeping identities; a snapshot is self-contained
+  and never compared with the current block; `bad_pin` checks the
+  exact ordered pin set of the snapshot; the stale flag looks at the
+  newest entry only; `type_mismatch` in the meaning layer and
+  `returns_and_ensure` covering `ordered_by` and `also_changes`; the
+  from-schema-to-rule table covers unions and the remaining keywords;
+  no history policy in the schemas; `spec_file.name` is the stem and
+  `note` fields are defined; 7.2 lists every second way with the
+  writer's polarity kept; the read view keeps projections, splits
+  permissions only at top-level `and`, renders input declarations,
+  capitalises and anchors every sentence kind; `question_on_approved`
+  at the story's key line; the registry labels say "Python syntax,
+  Edda meaning" where that is the truth.
+
+## 15. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

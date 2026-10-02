@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 27
+language/   reference.md    the language reference, revision 28
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.edda   the registry: every key, expression form,

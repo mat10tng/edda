@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edda.local/schema/vc/v27",
-  "title": "Edda .edda.vc file (revision 27)",
-  "description": "Append-only, oldest first: one entry per approved version of a story, an entity block or a role block. Only the operator's approve command writes it. Sequence, pin targets and snapshot text are checked in the history layer (bad_version, bad_pin, bad_snapshot), not here.",
+  "$id": "https://edda.local/schema/vc/v28",
+  "title": "Edda .edda.vc file (revision 28)",
+  "description": "Append-only, oldest first: one entry per approved version of a story, an entity block or a role block. Only the operator's approve command writes it. This is the shape layer only: sequence, pin policy and snapshot text are checked in the history layer (bad_version, bad_pin, bad_snapshot), not here.",
   "type": "array",
   "items": {
     "type": "object",
@@ -12,30 +12,24 @@
       "story": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
       "entity": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
       "role": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-      "number": {"type": "integer", "minimum": 1},
+      "number": {"type": "integer"},
       "approved_at": {"type": "string"},
       "approved_by": {"type": "string"},
       "because": {"type": "string"},
       "pins": {
         "type": "array",
-        "minItems": 1,
-        "uniqueItems": true,
         "items": {
           "type": "object", "additionalProperties": false, "required": ["number"],
           "properties": {
             "entity": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
             "role": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-            "number": {"type": "integer", "minimum": 1}
+            "number": {"type": "integer"}
           },
           "oneOf": [{"required": ["entity"]}, {"required": ["role"]}]
         }
       },
-      "text": {"type": "string", "description": "the whole block as approved, normalised: comments, blank lines and trailing spaces removed, re-indented so the key line starts at column 0"}
+      "text": {"type": "string", "description": "the block as approved, normalised: comments, blank lines and trailing spaces removed, re-indented so the key line starts at column 0"}
     },
-    "oneOf": [
-      {"required": ["story", "pins"], "not": {"anyOf": [{"required": ["entity"]}, {"required": ["role"]}]}},
-      {"required": ["entity"], "not": {"anyOf": [{"required": ["story"]}, {"required": ["role"]}, {"required": ["pins"]}]}},
-      {"required": ["role"], "not": {"anyOf": [{"required": ["story"]}, {"required": ["entity"]}, {"required": ["pins"]}]}}
-    ]
+    "oneOf": [{"required": ["story"]}, {"required": ["entity"]}, {"required": ["role"]}]
   }
 }

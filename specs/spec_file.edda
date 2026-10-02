@@ -27,7 +27,7 @@ entities:
     is: "one entry in a history: a story or a block as approved"
     part_of: history
     properties:
-      number: NUMBER
+      number: INTEGER
       approved_at: TIME
       approved_by: TEXT
       because: TEXT, OPTIONAL
@@ -42,7 +42,7 @@ entities:
     properties:
       kind: entity | role
       name: TEXT
-      number: NUMBER
+      number: INTEGER
       block: block, DERIVED
 
   note:
@@ -51,7 +51,7 @@ entities:
     properties:
       file: spec_file
       story_id: TEXT
-      line: NUMBER
+      line: INTEGER
       text: TEXT
 
   problem:
@@ -59,9 +59,9 @@ entities:
     part_of: spec_file
     properties:
       kind: refused | flagged
-      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
+      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
       file: TEXT
-      line: NUMBER
+      line: INTEGER
       message: TEXT
 
 stories:
@@ -405,7 +405,7 @@ stories:
               - "len(RESULT) == 1"
               - "RESULT[0].kind == flagged"
               - "RESULT[0].rule == question_on_approved"
-              - "RESULT[0].line == 23"
+              - "RESULT[0].line == 17"
               - "RESULT[0].message == \"story FIX-001 is approved and still has a question\""
 
   EDDA-003:

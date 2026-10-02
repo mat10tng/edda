@@ -26,14 +26,14 @@ entities:
     properties:
       kind: story | note | question | operation | permission | refusal | outcome | read | invariant | example | given | when | then
       text: TEXT
-      line: NUMBER
+      line: INTEGER
       shade: plain | grey | warning
 
   change:
     is: "one difference between two versions of a story"
     properties:
       kind: added | removed
-      line: NUMBER
+      line: INTEGER
       sentence: TEXT
 
 stories:
@@ -369,7 +369,7 @@ stories:
         returns: "story.sentences"
       view_at:
         is: "renders one approved version of the story as sentences"
-        inputs: {story: story, number: NUMBER}
+        inputs: {story: story, number: INTEGER}
         who: [{role: agent}, {role: operator}]
         refuse:
           - when: "number < 1 or number > story.version"

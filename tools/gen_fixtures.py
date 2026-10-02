@@ -106,8 +106,12 @@ def strip_comment(s):
     i = 0
     while i < len(s):
         c = s[i]
-        if c == '"' and (i == 0 or s[i - 1] != "\\"):
-            q = not q
+        if c == '"':
+            k = i - 1
+            while k >= 0 and s[k] == "\\":
+                k -= 1
+            if (i - 1 - k) % 2 == 0:
+                q = not q
         if c == "#" and not q and (i == 0 or s[i - 1] == " "):
             break
         out.append(c)
@@ -383,7 +387,7 @@ write("approved", "order.edda.vc", hist())
 
 def approved_question(ls):
     i = find(ls, '    so_that: "the list is clean"')
-    ls.insert(i + 1, '    questions: ["may a removed order be restored?"]'); return i + 1
+    ls.insert(i + 1, '    questions: ["may a removed order be restored?"]'); return find(ls, "  FIX-001:")
 edit("approved_question", approved_question)
 write("approved_question", "order.edda.vc", hist())
 
