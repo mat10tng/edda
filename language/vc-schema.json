@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edda.local/schema/vc/v38",
-  "title": "Edda .edda.vc file (revision 38)",
+  "$id": "https://edda.local/schema/vc/v39",
+  "title": "Edda .edda.vc file (revision 39)",
   "description": "Append-only, oldest first: one entry per approved version of a story, an entity block or a role block. Only the operator's approve command writes it. This is the shape layer only: sequence, pin policy and snapshot text are checked in the history layer (bad_version, bad_pin, bad_snapshot), not here.",
   "type": "array",
   "items": {

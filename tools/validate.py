@@ -164,7 +164,7 @@ class Source:
     problems (shape layer), source marks per path, scalar styles per path"""
 
     def __init__(self, text, is_vc):
-        self.src, self.style, self.marks, self.styles = [], [], {}, {}
+        self.src, self.style, self.marks, self.styles, self.raw = [], [], {}, {}, {}
         self.duplicates = []
         self.is_vc = is_vc
         if "\t" in text:
@@ -232,6 +232,7 @@ class Source:
                 self.walk(v, path + (i,))
         elif isinstance(node, yaml.ScalarNode):
             self.styles[path] = node.style
+            self.raw[path] = node.value          # as written, for messages
             key = path[-1] if path and isinstance(path[-1], str) else (path[-2] if len(path) > 1 else "")
             multiline = node.end_mark.line > node.start_mark.line
             if node.style == "'":
@@ -426,7 +427,7 @@ def schema_problems(validator, root, data, source):
     return list(dict.fromkeys((rule, line, msg) for rule, _, line, msg in out))
 
 
-def shape_extra(data):
+def shape_extra(data, source=None):
     """shape-layer checks beside the schema: a given name used twice, has:
     redeclaring name or roles, a role-list item that is no name, a Python
     keyword as a choice value; yields (rule, path, message, at_key)"""
@@ -468,7 +469,8 @@ def shape_extra(data):
                         out.append(("not_a_list", gw + ("with", "roles"), "roles must be a list, one role per line", True))
                     for j, r in enumerate(listing(rs)):
                         if not (isinstance(r, str) and re.fullmatch(NAME, r) and r not in PY_KEYWORDS):
-                            out.append(("bad_name", gw + ("with", "roles", j), f"not a name: {r}", False))
+                            raw = source.raw.get(gw + ("with", "roles", j), r) if source else r
+                            out.append(("bad_name", gw + ("with", "roles", j), f"not a name: {raw}", False))
     return out
 
 
@@ -538,6 +540,16 @@ def type_of_phrase(v):
 
 def is_list(t):
     return isinstance(t, tuple) and t[0] == "list"
+
+
+def int_lit(node):
+    """the value of a signed whole-number literal (3, -1), or None"""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant) \
+            and type(node.operand.value) is int:
+        return -node.operand.value
+    return None
 
 
 def positions_of(t):
@@ -1042,11 +1054,11 @@ class Expr:
             return self.positions(node.args[0])
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
             sl = node.slice
-            if all(b is None or (isinstance(b, ast.Constant) and type(b.value) is int) for b in (sl.lower, sl.upper)):
+            if all(b is None or int_lit(b) is not None for b in (sl.lower, sl.upper)):
                 P = self.positions(node.value)
                 P = typed_positions(T(node.value)) if P is None else P
                 if P is not None:
-                    return P[sl.lower.value if sl.lower else None:sl.upper.value if sl.upper else None]
+                    return P[int_lit(sl.lower) if sl.lower else None:int_lit(sl.upper) if sl.upper else None]
         return None
 
     def pair(self, a, an, b, bn):
@@ -1156,8 +1168,9 @@ class Expr:
                         self.problem("type_mismatch", f"a slice bound expects an INTEGER: {src}")
                 if t is not None and lt is None:
                     self.problem("type_mismatch", f"a slice expects a list: {src}")
-                if positions_of(lt) is not None and all(b is None or (isinstance(b, ast.Constant) and type(b.value) is int) for b in (s.lower, s.upper)):
-                    return ("list", lt[1], ordered(lt), lt[3][s.lower.value if s.lower else None:s.upper.value if s.upper else None])
+                if positions_of(lt) is not None and all(b is None or int_lit(b) is not None for b in (s.lower, s.upper)):
+                    ps = lt[3][int_lit(s.lower) if s.lower else None:int_lit(s.upper) if s.upper else None]
+                    return ("list", unify_all(ps) if ps else "ANY", ordered(lt), ps)
                 return ("list", lt[1], ordered(lt)) if lt else None
             st = self.visit(s, scope)
             if not all_alts(st, lambda a: a == "INTEGER"):
@@ -1170,9 +1183,9 @@ class Expr:
             if lt and not ordered(lt) and mentions_result(n.value):
                 self.problem("not_ordered", f"{scope.get('RESULT_OP', 'the operation')} gives no order; RESULT[{self.seg(s)}] needs ordered_by or IN ORDER")
             if lt:
-                ps = positions_of(lt)
-                if ps is not None and isinstance(s, ast.Constant) and type(s.value) is int and -len(ps) <= s.value < len(ps):
-                    return ps[s.value]
+                ps, i = positions_of(lt), int_lit(s)
+                if ps is not None and i is not None and -len(ps) <= i < len(ps):
+                    return ps[i]
                 return lt[1] if lt[1] != "ANY" else None
             if t is not None:
                 self.problem("type_mismatch", f"an index expects a list: {src}")
@@ -1841,7 +1854,7 @@ def check(path, P):
     shape = list(source.style) + [("declared_twice", ln, f"declared twice: {k}") for k, ln in source.duplicates]
     shape += schema_problems(VC if is_vc else V, VC_SCHEMA if is_vc else SCHEMA, data, source)
     if not is_vc:
-        shape += [(rule, source.line(where, at_key), msg) for rule, where, msg, at_key in shape_extra(data)]
+        shape += [(rule, source.line(where, at_key), msg) for rule, where, msg, at_key in shape_extra(data, source)]
         shape += [("declared_twice", source.line(where), f"declared twice: {name}") for where, name in P.dups.get(stem, [])]
     shape = sorted(set(shape), key=lambda p: (p[1], p[0]))
     meaning, history = [], []

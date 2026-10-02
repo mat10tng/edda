@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 38, 2 Oct 2026. Replaces revision 37 (kb:9378936). Decisions
+Revision 39, 2 Oct 2026. Replaces revision 38 (kb:9378937). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 15. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 16. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -373,7 +373,7 @@ form are Python's.
 | form | means | from |
 |---|---|---|
 | `order.status`, `order.shop.name`, `story.versions[-1].text` | reach into an entity or a list element; chains allowed | Python |
-| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; `==` and `!=` take two values of one kind, every value one side may be against every value the other may be (`None` beside anything; a time literal beside a TIME, inside a list too; two lists whose positions are known position by position, any other pair of lists every element against every element, an `IN ORDER` list beside an unordered one; a list's positions are known when it is written out, sliced or joined from such lists with constant bounds, or a computed property of one), `<` and the rest two numbers, two texts or two times (`type_mismatch` otherwise) | Python syntax, Edda type rule |
+| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; `==` and `!=` take two values of one kind, every value one side may be against every value the other may be (`None` beside anything; a time literal beside a TIME, inside a list too; two lists whose positions are known position by position, any other pair of lists every element against every element, an `IN ORDER` list beside an unordered one; a list's positions are known when it is written out, sliced or joined from such lists with whole-number bounds, `-1` included, or a computed property of one; a slice of such a list has only the elements it keeps), `<` and the rest two numbers, two texts or two times (`type_mismatch` otherwise) | Python syntax, Edda type rule |
 | `a and b`, `a or b`, `not a` | logic; `not` binds tightest, then `and`, then `or`; short-circuit; `and` and `or` give one of their operands, as in Python, so `[1] or []` is a list | Python |
 | `x is None`, `x is not None` | an optional value has no value, has a value | Python |
 | `x in list`, `x not in list` | membership in a list; every value `x` may be is of the kind of every element (`type_mismatch` otherwise); a bare status in a literal list belongs to the compared property, the other elements are typed as usual | Python syntax, Edda type rule |
@@ -834,7 +834,15 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 37
+## 14. Changes from revision 38
+
+- From Astra's round 16: a negative whole-number index or bound
+  (`-1`) keeps a list's known positions, as `list[-1]` promised; a
+  constant slice has only the elements it keeps, so a list word or
+  `in` over it sees the right types; a bad role-list item is named as
+  written (`true`, `FALSE`).
+
+## 15. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -843,7 +851,7 @@ are build step 4 and get their own stories then.
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 15. Changes from revision 36
+## 16. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -854,7 +862,7 @@ are build step 4 and get their own stories then.
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 16. Changes from revision 35
+## 17. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -867,7 +875,7 @@ are build step 4 and get their own stories then.
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 17. Changes from revision 34
+## 18. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -880,7 +888,7 @@ are build step 4 and get their own stories then.
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 18. Changes from revision 33
+## 19. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -896,7 +904,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 19. Changes from revision 32
+## 20. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -914,7 +922,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 20. Changes from revision 31
+## 21. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -933,7 +941,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 21. Changes from revision 30
+## 22. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -954,7 +962,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 22. Changes from revision 29
+## 23. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -975,7 +983,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 23. Changes from revision 28
+## 24. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -992,7 +1000,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 24. Changes from revision 27
+## 25. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1014,7 +1022,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 25. Changes from revision 26
+## 26. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names
