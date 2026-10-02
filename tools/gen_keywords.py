@@ -59,7 +59,7 @@ for section, header, rows in tables(md):
 
 # the two rule tables come in order: refusals then flags
 
-out = ["# Edda keyword registry, generated from language/reference.md (revision 29).",
+out = ["# Edda keyword registry, generated from language/reference.md (revision 30).",
        "# Plain YAML, not a spec file: the .edda subset does not apply here.",
        "# Every key, expression form, style rule, fixed name, checker rule and",
        "# read-view sentence kind, with what it means, why it exists and where it",
@@ -68,16 +68,16 @@ out = ["# Edda keyword registry, generated from language/reference.md (revision 
        "# from means and why. A new entry is added like a rule, with a because.",
        "", "keys:"]
 for k, s, m, w in keys:
-    out += [f"  - key: {q(k)}", f"    section: {q(s)}", f"    means: {q(m)}", f"    why: {q(w)}", "    since: v27"]
+    out += [f"  - key: {q(k)}", f"    section: {q(s)}", f"    means: {q(m)}", f"    why: {q(w)}"]
 out += ["", "forms:"]
 for f, m, s in forms:
-    out += [f"  - form: {q(f)}", f"    means: {q(m)}", f"    from: {q(s)}", "    since: v27"]
+    out += [f"  - form: {q(f)}", f"    means: {q(m)}", f"    from: {q(s)}"]
 out += ["", "one_way:"]
 for m, w, n in styles:
     out += [f"  - meaning: {q(m)}", f"    write: {q(w)}", f"    not: {q(n)}"]
 out += ["", "words:"]
 for w, m, s in words:
-    out += [f"  - word: {q(w)}", f"    means: {q(m)}", f"    from: {q(s)}", "    since: v27"]
+    out += [f"  - word: {q(w)}", f"    means: {q(m)}", f"    from: {q(s)}"]
 out += ["", "refusals:"]
 for r, w, m in rules:
     out += [f"  - rule: {q(r)}", f"    when: {q(w)}", f"    message: {q(m)}"]

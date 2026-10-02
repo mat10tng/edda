@@ -129,11 +129,11 @@ def block(lines, key_line_text):
     out, q = [], False
     for n, s in enumerate(lines[start:]):
         if not q:
-            ind = len(s) - len(s.lstrip())
-            if n > 0 and s.strip() and ind <= indent:
-                break
             if s.strip() == "" or s.lstrip().startswith("#"):
-                continue
+                continue        # a comment or blank line never ends the block
+            ind = len(s) - len(s.lstrip())
+            if n > 0 and ind <= indent:
+                break
         kept, i = [], 0
         while i < len(s):
             c = s[i]

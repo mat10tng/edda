@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 29, 2 Oct 2026. Replaces revision 28 (kb:9378926). Decisions
+Revision 30, 2 Oct 2026. Replaces revision 29 (kb:9378927). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 6. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 7. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -67,8 +67,9 @@ checker enforces at the source, before the schema:
   every expression is quoted, with double quotes; a single-quoted
   scalar is `yaml_feature`; every key is plain, except example titles;
   names, numbers, ids, `True`, `False` and type-phrase words are
-  plain; `DONE` is plain only as the first `then` item; an unquoted
-  ` #` would silently drop the rest of the line;
+  plain (a quoted name is `bad_name`); `DONE` is plain only as the
+  first `then` item; an unquoted ` #` would silently drop the rest of
+  the line;
 - one physical line per expression, per type phrase and per example
   title; a block scalar (`|`, never `>`) is allowed only for `text:` in
   `.edda.vc`; free text may wrap onto further lines as YAML allows;
@@ -353,7 +354,7 @@ form are Python's.
 |---|---|---|
 | `order.status`, `order.shop.name`, `story.versions[-1].text` | reach into an entity or a list element; chains allowed | Python |
 | `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison | Python |
-| `a and b`, `a or b`, `not a` | logic; `not` binds tightest, then `and`, then `or`; short-circuit | Python |
+| `a and b`, `a or b`, `not a` | logic; `not` binds tightest, then `and`, then `or`; short-circuit; `and` and `or` give one of their operands, as in Python, so `[1] or []` is a list | Python |
 | `x is None`, `x is not None` | an optional value has no value, has a value | Python |
 | `x in list`, `x not in list` | membership in a list | Python |
 | `"t" in text`, `text.startswith("t")` | a text contains, starts with a text | Python |
@@ -378,7 +379,13 @@ no method or function beyond those listed. Percent, rounding, money,
 durations and date arithmetic are backlog #2494. A list word on a
 non-list, `len` on a number, `+` between a list and a number, or a
 NUMBER as an index is `type_mismatch`; the checker knows a list from
-its declaration (`MANY`, a comprehension, a slice, a list literal).
+its declaration (`MANY`, a comprehension, a slice, a list literal) and
+an element's type from the list's. A call of a declared operation is
+checked against its `inputs:`: as many positional arguments as
+required inputs, keywords only for optional inputs, each once, each
+argument of its input's type (`type_mismatch` otherwise); a changing
+operation inside a fact is `not_an_expression`; after a call, `RESULT`
+has the type of the operation's `returns`.
 
 ### 7.2 One way per meaning
 
@@ -442,7 +449,7 @@ examples:
 |---|---|---|
 | `examples:` | quoted title to example; one concrete run | the acceptance criteria that run |
 | `given:` | a list of things to make; each item has exactly one key besides `with`: `- <entity>: <name>` or `- actor: <name>` | order-independent, schema-checked; names declared here are used below; the binding makes them; no glue is written |
-| `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` for an actor, `fixture:` for a `spec_file` | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived property is `derived_in_given` |
+| `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` for an actor, `fixture:` for a `spec_file` | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived property is `derived_in_given`; every value is checked against the property's declared type: a plain text or time is `unquoted_text`, the wrong kind `type_mismatch`, a status not in its list `unknown_status`, a name no given declares `unknown_name` |
 | `fixture:` | the folder under `fixtures/`; its file, and its history when present, become the given `spec_file` | the whole spec is the given, never a hand-made fragment |
 | `steps:` | a list of `when` and `then`; `when` may be left out to check the given state | a flow is several steps |
 | `when:` | `actor` (a declared given), `call` (a call of a declared operation with its arguments, Python call form; anything else is `not_an_expression`), `at` (optional time) | one fixed shape; every actor is declared (`unknown_name` otherwise) |
@@ -578,7 +585,9 @@ a re-read is the binding's test, not a level 1 fact.
 **Layers.** Each file is read in four layers; a layer runs only when
 the earlier ones found nothing, and every independent problem of the
 first failing layer is reported, ordered by file, line, rule name.
-Problems in the `.vc` carry that file's name. Two problems are
+Problems in the `.vc` carry that file's name. A `with:` value's
+quoting follows its property's declared type, so that one quoting
+check runs in the meaning layer. Two problems are
 dependent: a block with an unknown key reports only that, never a
 missing key (the unknown key is usually the missing one misspelt); an
 anchor and its aliases are one problem, at the anchor.
@@ -601,8 +610,8 @@ expected, `not_a_list`; any other `type`, `minProperties`,
 `wrong_type`; `propertyNames`, `pattern` or `enum` on a name,
 `bad_name`. For `anyOf` and `oneOf` the checker takes the branch whose
 `type` matches the value's YAML kind (a mapping, a list, a scalar),
-drops the wrapper and maps that branch's own failures; when no branch
-matches the kind, `wrong_type`. An empty expression or type phrase is
+drops the wrapper and maps that branch's own failures, each with its
+own path; when no branch matches the kind, `wrong_type`. An empty expression or type phrase is
 `wrong_type` (a text was expected, nothing was given). The schemas
 hold no history policy: sequence, pins and snapshots are layer 4.
 
@@ -626,18 +635,18 @@ pin's line in the `.vc` for `bad_version`, `bad_pin` and
 | `not_yaml` | the file does not parse | `not YAML: <parser message>` |
 | `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, or an expression, type phrase or title on more than one line | `anchors and aliases are not allowed` (and likewise for each feature) |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
-| `not_a_list` | a repeated thing written as a scalar or a mapping | `<key> must be a list, one <item> per line` |
-| `wrong_type` | a mapping, list or scalar where another is expected; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase | `<key> must be a <mapping/list/text>` |
-| `missing_key` | a required key absent | `<block> needs <key>:` |
+| `not_a_list` | a repeated thing written as a scalar or a mapping | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, tag or role |
+| `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry naming no block | `<key> must be a <mapping/list/text/number/yes-no>`; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `<entry> must name one of story or entity or role` |
+| `missing_key` | a required key absent | `<block> needs <key>:`, the block named by kind and name: `operation remove`, `entity order`, `refusal 2`, `step 1`, `file` |
 | `unknown_key` | a key the schema does not name | `unknown key: <key>` |
-| `bad_name` | a name not snake_case, an id not `ABC-123`, a name or choice value that is a Python keyword | `not a name: <text>` |
+| `bad_name` | a name not snake_case, an id not `ABC-123`, a name or choice value that is a Python keyword, a quoted name | `not a name: <text>`; for a quoted name `not a name: "<text>" (a name is plain)` |
 | `declared_twice` | a duplicate key or name, at the second | `declared twice: <name>` |
-| `unknown_name` | an undeclared lowercase word, actor, entity, role or given | `unknown name: <name>` |
-| `unknown_status` | a status value not in its property's list | `status not in its list: <value>` |
+| `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status beside a choice property | `unknown name: <name>` |
+| `unknown_status` | a status value not in its property's list: in a comparison, `may_change`, `wording` or a given | `status not in its list: <value>` |
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>` |
 | `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation | `not an expression: <text>` |
 | `second_way` | a form 7.2 spells another way | `write <one way> (not <other>)` |
-| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, a call with the wrong number of arguments | `<what> expects <kind>: <text>` |
+| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, a call with the wrong inputs, a given value of another type than its property | `<what> expects <kind>: <text>` |
 | `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
 | `wrong_file` | a story in another entity's file | `story <id> is about <entity> and belongs in <entity>.edda` |
 | `not_ordered` | `RESULT[n]` on an unordered return | `<operation> gives no order; RESULT[<n>] needs ordered_by or IN ORDER` |
@@ -780,7 +789,28 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 28
+## 14. Changes from revision 29
+
+- From Astra's round 7: every style rewrite is built from the
+  expression tree, so brackets survive; the prefix rewrite needs a text
+  receiver, a whole-number bound and no step; comprehension variables
+  are scoped as Python scopes them; list element types, `and`/`or`
+  operand types, conditionals, the list words and computed properties
+  propagate; a call is checked against its operation's `inputs:` and
+  `RESULT` takes the `returns` type; the schema adapter keeps every
+  failure of the matching branch; a recursive alias is one problem at
+  the anchor; a comment never ends a normalised block;
+  `spec_file.name` is `DERIVED`; choice checks apply only to choice
+  productions; the messages name the block (`operation remove needs
+  is:`) and the item (`one fact per line`), carry rule names and
+  source lines, sorted; a quoted name is `bad_name` and a `with:`
+  value is checked against its property's type; the history schema
+  excludes Python keywords; the registry carries no invented `since`.
+  Names are now resolved across the files of a folder: `unknown_name`,
+  `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
+  and `derived_in_given` are checked.
+
+## 15. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -797,7 +827,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 15. Changes from revision 27
+## 16. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -819,7 +849,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 16. Changes from revision 26
+## 17. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

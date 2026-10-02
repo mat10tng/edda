@@ -2,7 +2,7 @@ entities:
   spec_file:
     is: "one .edda file; a fixture is one whole spec in one folder"
     properties:
-      name: TEXT
+      name: TEXT, DERIVED
       text: TEXT
       history: history
       blocks: MANY block, IN ORDER, DERIVED
