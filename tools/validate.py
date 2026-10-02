@@ -342,10 +342,11 @@ def schema_problems(validator, root, data, source):
     def adapt(err, path):
         v = err.validator
         key = key_name(path)
+        if "propertyNames" in err.schema_path:            # a key that is no name, whatever failed
+            raw = next((k[-1] for k in source.marks if k[:-1] == path and str(k[-1]).lower() == str(err.instance).lower()), err.instance)
+            add("bad_name", path + (raw,), f"not a name: {raw}")
+            return
         if v in ("anyOf", "oneOf"):
-            if "propertyNames" in err.schema_path:        # a key failed every allowed name form
-                add("bad_name", path + (err.instance,), f"not a name: {err.instance}")
-                return
             branches = [resolve(b, root) for b in err.validator_value]
             kinds = [b.get("type") or (yaml_kind(b["const"]) if "const" in b else None) for b in branches]
             if all(k is None for k in kinds):
@@ -539,6 +540,17 @@ def is_list(t):
     return isinstance(t, tuple) and t[0] == "list"
 
 
+def positions_of(t):
+    """the element types of a list by position, when known"""
+    return t[3] if is_list(t) and len(t) > 3 else None
+
+
+def typed_positions(t):
+    """positions_of as (node, type) leaves per position, for pair()"""
+    ps = positions_of(t)
+    return [[(None, x)] for x in ps] if ps is not None else None
+
+
 def ordered(t):
     return is_list(t) and len(t) > 2 and bool(t[2])
 
@@ -613,8 +625,13 @@ def unify(a, b):
         if a[1] is None or b[1] is None:
             return ("list", None, o) if a[1] is None and b[1] is None else None
         e = unify(a[1], b[1])
-        if e == a[1] or e == b[1]:
-            return ("list", e, o)      # one element type covers the other
+        if e == a[1] or e == b[1]:     # one element type covers the other
+            pa, pb = positions_of(a), positions_of(b)
+            if pa is not None and pb is not None and len(pa) == len(pb):
+                ps = tuple(unify(x, y) for x, y in zip(pa, pb))
+                if all(x is not None for x in ps):
+                    return ("list", e, o, ps)
+            return ("list", e, o)
         return ("either", frozenset({a, b}))
     if is_choice(a) and is_choice(b):
         if a[1] is None or b[1] is None:
@@ -998,7 +1015,8 @@ class Expr:
         if isinstance(node, ast.List):
             return sum((self.leaves(e, T(e)) for e in node.elts), [])
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
-            return self.elts(node.value, T(node.value))
+            P = self.positions(node)
+            return sum(P, []) if P is not None else self.elts(node.value, T(node.value))
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             return self.elts(node.left, T(node.left)) + self.elts(node.right, T(node.right))
         if isinstance(node, ast.ListComp):
@@ -1022,6 +1040,13 @@ class Expr:
             return A + B if A is not None and B is not None else None
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "OLD" and len(node.args) == 1:
             return self.positions(node.args[0])
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+            sl = node.slice
+            if all(b is None or (isinstance(b, ast.Constant) and type(b.value) is int) for b in (sl.lower, sl.upper)):
+                P = self.positions(node.value)
+                P = typed_positions(T(node.value)) if P is None else P
+                if P is not None:
+                    return P[sl.lower.value if sl.lower else None:sl.upper.value if sl.upper else None]
         return None
 
     def pair(self, a, an, b, bn):
@@ -1033,7 +1058,9 @@ class Expr:
             return all(self.pair(x, an, y, bn) for x in alts(a) for y in alts(b))
         if is_list(a) and is_list(b):
             A, B = self.positions(an), self.positions(bn)
-            if A is not None and B is not None:     # both written out: position by position
+            A = typed_positions(a) if A is None else A
+            B = typed_positions(b) if B is None else B
+            if A is not None and B is not None:     # both with known positions: position by position
                 return all(self.pair(x, xn, y, yn) for pa, pb in zip(A, B) for xn, x in pa for yn, y in pb)
             return all(self.pair(x, xn, y, yn) for xn, x in self.elts(an, a) for yn, y in self.elts(bn, b))
         if a == b or {a, b} == {"INTEGER", "NUMBER"}:
@@ -1129,7 +1156,9 @@ class Expr:
                         self.problem("type_mismatch", f"a slice bound expects an INTEGER: {src}")
                 if t is not None and lt is None:
                     self.problem("type_mismatch", f"a slice expects a list: {src}")
-                return lt
+                if positions_of(lt) is not None and all(b is None or (isinstance(b, ast.Constant) and type(b.value) is int) for b in (s.lower, s.upper)):
+                    return ("list", lt[1], ordered(lt), lt[3][s.lower.value if s.lower else None:s.upper.value if s.upper else None])
+                return ("list", lt[1], ordered(lt)) if lt else None
             st = self.visit(s, scope)
             if not all_alts(st, lambda a: a == "INTEGER"):
                 self.problem("type_mismatch", f"an index expects an INTEGER: {src}")
@@ -1141,6 +1170,9 @@ class Expr:
             if lt and not ordered(lt) and mentions_result(n.value):
                 self.problem("not_ordered", f"{scope.get('RESULT_OP', 'the operation')} gives no order; RESULT[{self.seg(s)}] needs ordered_by or IN ORDER")
             if lt:
+                ps = positions_of(lt)
+                if ps is not None and isinstance(s, ast.Constant) and type(s.value) is int and -len(ps) <= s.value < len(ps):
+                    return ps[s.value]
                 return lt[1] if lt[1] != "ANY" else None
             if t is not None:
                 self.problem("type_mismatch", f"an index expects a list: {src}")
@@ -1264,7 +1296,10 @@ class Expr:
                     self.problem("type_mismatch", f"+ expects two lists or two numbers: {src}")
                     return None
                 if ll and rl:
-                    return as_list(unify(ll, rl))
+                    u = as_list(unify(ll, rl))
+                    if u and positions_of(ll) is not None and positions_of(rl) is not None:
+                        return ("list", u[1], ordered(u), ll[3] + rl[3])
+                    return u
                 return ll or rl
             for t in (lt, rt):
                 if not all_alts(t, lambda a: a in ("INTEGER", "NUMBER")):
@@ -1281,7 +1316,8 @@ class Expr:
             self.visit(n.test, scope)
             return unify(self.visit(n.body, scope), self.visit(n.orelse, scope))
         if isinstance(n, ast.List):
-            return ("list", unify_all([self.visit(e, scope) for e in n.elts]) if n.elts else "ANY", True)
+            types = [self.visit(e, scope) for e in n.elts]
+            return ("list", unify_all(types) if n.elts else "ANY", True, tuple(types))
         if isinstance(n, ast.ListComp):
             inner, o = self.comprehension(n.generators, scope)
             return ("list", self.visit(n.elt, inner), o)
@@ -1716,9 +1752,10 @@ def snapshot_ok(text, kind, name):
             return False
         DUPLICATES.clear()
         data = yaml.load(wrapped, Loader=Core)
+        src.duplicates = list(DUPLICATES)
+        if DUPLICATES or schema_problems(V, SCHEMA, data, src) or shape_extra(data):
+            return False
     except Exception:
-        return False
-    if DUPLICATES:
         return False
     block = mapping(data).get(SECTION[kind])
     return isinstance(block, dict) and list(block) == [name] and isinstance(block[name], dict)

@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 37).
+# Edda keyword registry, generated from language/reference.md (revision 38).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -281,7 +281,7 @@ forms:
     means: 'reach into an entity or a list element; chains allowed'
     from: 'Python'
   - form: 'x == v, x != v, x < v, x > v, x <= v, x >= v'
-    means: 'compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; == and != take two values of one kind, every value one side may be against every value the other may be (None beside anything; a time literal beside a TIME, inside a list too; two written-out lists position by position, any other pair of lists every element against every element, an IN ORDER list beside an unordered one), < and the rest two numbers, two texts or two times (type_mismatch otherwise)'
+    means: 'compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; == and != take two values of one kind, every value one side may be against every value the other may be (None beside anything; a time literal beside a TIME, inside a list too; two lists whose positions are known position by position, any other pair of lists every element against every element, an IN ORDER list beside an unordered one; a list''s positions are known when it is written out, sliced or joined from such lists with constant bounds, or a computed property of one), < and the rest two numbers, two texts or two times (type_mismatch otherwise)'
     from: 'Python syntax, Edda type rule'
   - form: 'a and b, a or b, not a'
     means: 'logic; not binds tightest, then and, then or; short-circuit; and and or give one of their operands, as in Python, so [1] or [] is a list'
@@ -434,8 +434,8 @@ refusals:
     when: 'a key the schema does not name'
     message: 'unknown key: <key>'
   - rule: 'bad_name'
-    when: 'a name not snake_case, an id not ABC-123, a name, choice value or role-list item that is a Python keyword, a quoted name, a quoted DONE as the first then item, a role-list item that is no name'
-    message: 'not a name: <text>; for a quoted name not a name: "<text>" (a name is plain)'
+    when: 'a name not snake_case, an id not ABC-123, a name, choice value or role-list item that is a Python keyword (True and False as keys included), a quoted name, a quoted DONE as the first then item, a role-list item that is no name'
+    message: 'not a name: <text>, the text as written; for a quoted name not a name: "<text>" (a name is plain)'
   - rule: 'declared_twice'
     when: 'a duplicate key, a name declared twice in one project, a given name used twice in one example, a has: entry named name or roles; at the second'
     message: 'declared twice: <name>'
@@ -482,7 +482,7 @@ refusals:
     when: 'a pin on a block entry, a story entry without pins, a duplicate (kind, name), a pin to no such block or version; a version exists when a history of the project holds it'
     message: 'pin <kind> <name> v<n>: no such version, pin <kind> <name> v<n>: no such <kind>, pin <kind> <name> v<n>: pinned twice, story <id> version <n>: no pins, <kind> <name> version <n>: a block entry has no pins'
   - rule: 'bad_snapshot'
-    when: 'an entry''s text that is not already normalised, is outside the subset of section 2 or has a duplicate key, does not read as one block under the entry''s name, or does not name it on its first line'
+    when: 'an entry''s text that is not already normalised, is outside the subset of section 2 or fails the shape layer (a bad name, a wrong key, a duplicate), does not read as one block under the entry''s name, or does not name it on its first line'
     message: 'text of <kind> <name> v<n> is not a normalised block'
 
 flags:
