@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 32, 2 Oct 2026. Replaces revision 31 (kb:9378930). Decisions
+Revision 33, 2 Oct 2026. Replaces revision 32 (kb:9378931). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 9. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 10. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -69,7 +69,8 @@ checker enforces at the source, before the schema:
   scalar is `yaml_feature`; every key is plain, except example titles;
   names, numbers, ids, `True`, `False` and type-phrase words are
   plain (a quoted name is `bad_name`); `DONE` is plain only as the
-  first `then` item; an unquoted ` #` would silently drop the rest of
+  first `then` item (a quoted `DONE` there is `bad_name`, like any
+  quoted name); an unquoted ` #` would silently drop the rest of
   the line;
 - one physical line per expression, per type phrase and per example
   title; a block scalar (`|`, never `>`) is allowed only for `text:` in
@@ -103,7 +104,8 @@ entity's file, which for a part is its owner's (`wrong_file`
 otherwise). `about` is authoritative; the
 checker only flags `about_untouched` when the story names that entity
 nowhere else (no input, given, fact or who-line). A part (`part_of:`)
-lives in its owner's file. One home per story; a story with two homes
+lives in its owner's file, through the whole chain of owners
+(`wrong_file` otherwise). One home per story; a story with two homes
 is two stories under one epic.
 
 ## 3. Roles
@@ -137,7 +139,8 @@ role and of the roles it includes; inside an operation's body, those
 every role on its `who:` has (a property two of them declare with
 different types may be either); in an example, those of the given
 actor's roles, and `ACTOR` is the step's actor. `name` and `roles`
-are fixed; a role's `has:` cannot redeclare them. Role blocks are versioned and pinned
+are fixed; a role's `has:` cannot redeclare them, and a given cannot
+set `name` (`derived_in_given`). Role blocks are versioned and pinned
 exactly like entity blocks (section 10).
 
 ## 4. Entities
@@ -184,8 +187,8 @@ entities:
 | `is:` | one sentence of description | the read view |
 | `properties:` | name to type phrase, or `{computed: expr}` | the shape the checker and the binding read |
 | `part_of:` | this entity belongs to that one | placement and the frame rule follow the owner |
-| `may_change:` | per status property, the only allowed changes | a change outside it fails at run time; an unreached status is flagged |
-| `wording:` | per value and role, the words shown | the one piece of screen wording kept |
+| `may_change:` | per status property, the only allowed changes; only on a choice property, optional or not (`type_mismatch` otherwise) | a change outside it fails at run time; an unreached status is flagged |
+| `wording:` | per value and role, the words shown; only on a choice property (`type_mismatch` otherwise) | the one piece of screen wording kept |
 | `always:` | facts that hold after every operation | invariants checked on the suite |
 | `while:` | `when` a condition holds, `holds` a fact | state-bound invariants, EARS WHILE |
 | `may_create:` `may_read:` `may_update:` `may_delete:` | who may, as a list of who-lines; a key left out means nobody | the CRUD matrix, default deny |
@@ -369,15 +372,15 @@ form are Python's.
 | form | means | from |
 |---|---|---|
 | `order.status`, `order.shop.name`, `story.versions[-1].text` | reach into an entity or a list element; chains allowed | Python |
-| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison | Python |
+| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; `==` and `!=` take two values of one kind (`None` beside anything), `<` and the rest two numbers, two texts or two times (`type_mismatch` otherwise) | Python |
 | `a and b`, `a or b`, `not a` | logic; `not` binds tightest, then `and`, then `or`; short-circuit; `and` and `or` give one of their operands, as in Python, so `[1] or []` is a list | Python |
 | `x is None`, `x is not None` | an optional value has no value, has a value | Python |
-| `x in list`, `x not in list` | membership in a list | Python |
+| `x in list`, `x not in list` | membership in a list; `x` is of the list's element kind (`type_mismatch` otherwise) | Python |
 | `"t" in text`, `text.startswith("t")` | a text contains, starts with a text | Python |
 | `len(x)` | the number of elements of a list or characters of a text | Python |
 | `sum(e for x in list)`, `min(e for x in list)`, `max(e for x in list)`, `any(c for x in list)`, `all(c for x in list)` | the five list words, each with exactly one generator and nothing else; a generator appears nowhere else | Python |
 | `[e for x in list if c]`, `[y for x in xs for y in x.ys]` | filtered and nested lists; order of the source kept; the variable is a plain name, never a path; never `async` | Python |
-| `list[0]`, `list[-1]`, `list[n - 1]`, `list[1:]`, `list[:n]` | index and slice; an index or bound is an INTEGER-valued expression (a constant, a name, a path, or those with `+ - *`), never a yes/no or a NUMBER; out of range fails the example | Python |
+| `list[0]`, `list[-1]`, `list[n - 1]`, `list[1:]`, `list[:n]` | index and slice, on a list only (an index or slice on a text is `type_mismatch`); an index or bound is an INTEGER-valued expression (a constant, a name, a path, or those with `+ - *`), never a yes/no or a NUMBER; out of range fails the example | Python |
 | `a if c else b` | conditional; the untaken side is not evaluated | Python |
 | `story.approved`, `not fresh.approved` | a yes/no property as a condition | Python |
 | `+ - * /`, `( )` | arithmetic; `+` joins two lists into a new list | Python |
@@ -393,8 +396,9 @@ Nothing else: no lambda, dict, set, tuple, slice step, f-string,
 walrus, star, `is` against anything but `None`, no bare generator, and
 no method or function beyond those listed. Percent, rounding, money,
 durations and date arithmetic are backlog #2494. A list word on a
-non-list, `len` on a number, `+` between a list and a number, or a
-NUMBER as an index is `type_mismatch`; the checker knows a list from
+non-list, `len` on a number, `+` between a list and a number, a
+NUMBER as an index, an index on a text, or a comparison of two values
+that do not compare is `type_mismatch`; the checker knows a list from
 its declaration (`MANY`, a comprehension, a slice, a list literal) and
 an element's type from the list's. A call of a declared operation is
 checked against its `inputs:`: as many positional arguments as
@@ -404,9 +408,11 @@ operation inside a fact is `not_an_expression`; after a call, `RESULT`
 has the type of the operation's `returns`. A property read on a value
 that is no entity (`order.units_sent.made_up`) is `type_mismatch`. A
 value that may be of two types (`a if c else b`, `x or y`) stands only
-where both fit; an `OPTIONAL` property or input may be `None`, so it
-stands only where `None` fits: an optional input or a comparison;
-`[]` fits every list; a text literal stands where a TIME is expected. An ordered list is a `MANY
+where both fit, each branch or operand checked on its own, so a text
+literal in one branch still reads as a time; an `OPTIONAL` property or
+input may be `None`, so it stands only where `None` fits: an optional
+input or a comparison; `[]` fits every list; a text literal stands
+where a TIME is expected. An ordered list is a `MANY
 ..., IN ORDER` property, a list literal, a slice of or a comprehension
 over an ordered list, a `+` of two ordered lists, or the result of an
 operation with `ordered_by`; any other list has no order, and
@@ -475,7 +481,7 @@ examples:
 |---|---|---|
 | `examples:` | quoted title to example; one concrete run | the acceptance criteria that run |
 | `given:` | a list of things to make; each item has exactly one key besides `with`: `- <entity>: <name>` or `- actor: <name>` | order-independent, schema-checked; names declared here are used below; the binding makes them; no glue is written |
-| `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` (a list of role names) for an actor, `fixture:` for a `spec_file` only | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived or computed property is `derived_in_given`; every value is checked against the property's declared type: a plain text or time is `unquoted_text`, the wrong kind `type_mismatch`, a status not in its list `unknown_status`, a name no given declares `unknown_name` |
+| `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` (a list of role names) for an actor, `fixture:` for a `spec_file` only | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived or computed property, or an actor's `name`, is `derived_in_given`; every value is checked against the property's declared type, and a value whose property may be of several types must fit one of them: a plain text or time is `unquoted_text`, the wrong kind `type_mismatch`, a status not in its list `unknown_status`, a name no given declares `unknown_name` |
 | `fixture:` | the folder under `fixtures/`; its file, and its history when present, become the given `spec_file` | the whole spec is the given, never a hand-made fragment |
 | `steps:` | a list of `when` and `then`; `when` may be left out to check the given state | a flow is several steps |
 | `when:` | `actor` (a declared given), `call` (a call of a declared operation with its arguments, Python call form; anything else is `not_an_expression`), `at` (optional time) | one fixed shape; every actor is declared (`unknown_name` otherwise) |
@@ -648,6 +654,7 @@ expression's line, the property's line for `unknown_status`,
 `bad_type_phrase`, `unreachable_status` and `plural_name`, the first
 role's `includes:` line for `role_cycle`, the `then` item's line for
 `not_ordered`, the operation's key line for `returns_and_ensure`, the
+entity's key line for `wrong_file` on a part, the
 story's key line for `wrong_file`, `no_example`, `about_untouched`,
 `question_on_approved` and `approved_against_older`, the changed
 side's line for `wording_drift`, and the entry's `number:` or the
@@ -665,19 +672,19 @@ pin's line in the `.vc` for `bad_version`, `bad_pin` and
 | `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
 | `missing_key` | a required key absent | `<block> needs <key>:`, the block named by kind and name: `operation remove`, `entity order`, `refusal 2`, `step 1`, `file` |
 | `unknown_key` | a key the schema does not name | `unknown key: <key>` |
-| `bad_name` | a name not snake_case, an id not `ABC-123`, a name or choice value that is a Python keyword, a quoted name, a role-list item that is no name | `not a name: <text>`; for a quoted name `not a name: "<text>" (a name is plain)` |
+| `bad_name` | a name not snake_case, an id not `ABC-123`, a name, choice value or role-list item that is a Python keyword, a quoted name, a quoted `DONE` as the first `then` item, a role-list item that is no name | `not a name: <text>`; for a quoted name `not a name: "<text>" (a name is plain)` |
 | `declared_twice` | a duplicate key, a name declared twice in one project, a given name used twice in one example, a `has:` entry named `name` or `roles`; at the second | `declared twice: <name>` |
 | `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status compared with a choice property | `unknown name: <name>` |
 | `unknown_status` | a status value not in its property's list: in a comparison, `may_change`, `wording` or a given | `status not in its list: <value>` |
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>` |
 | `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
 | `second_way` | a form 7.2 spells another way | `write <one way> (not <other>)` |
-| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, a given value of another type than its property | `<what> expects <kind>: <text>` |
+| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, an index or slice on a text, a comparison of two values of different kinds (`==`), of a non-element with a list (`in`) or of anything but two numbers, texts or times (`<`), a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, `may_change` or `wording` on a property that is no choice, a given value of another type than its property or fitting none of its possible types | `<what> expects <kind>: <text>`; for a comparison `== expects two values of one kind: <text>`, `in expects an element of the list: <text>`, `in expects a text in a text: <text>`, `in expects a list or a text: <text>`, `< expects two numbers, two texts or two times: <text>`; `may_change expects a choice property: <property>` |
 | `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `returns and also_changes on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
-| `wrong_file` | a story in another entity's file | `story <id> is about <entity> and belongs in <entity>.edda` |
+| `wrong_file` | a story in another entity's file; a part outside its owner's file | `story <id> is about <entity> and belongs in <entity>.edda`; `entity <name> is part of <owner> and belongs in <entity>.edda` |
 | `not_ordered` | `RESULT[n]` on an unordered return, through a slice, `or` or comprehension of `RESULT` as well | `<operation> gives no order; RESULT[<n>] needs ordered_by or IN ORDER` |
 | `role_cycle` | `includes` reaches itself; each cycle once, at its first role in file order | `role <name> includes itself` |
-| `derived_in_given` | a `with:` value for a derived or computed property | `<property> is derived and cannot be given`, `<property> is computed and cannot be given` |
+| `derived_in_given` | a `with:` value for a derived or computed property, or for an actor's `name` | `<property> is derived and cannot be given`, `<property> is computed and cannot be given`, `name is fixed and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
 | `bad_version` | a `.vc` number out of sequence or an unknown story or block | `<kind> <name> version <n> out of sequence; expected <m>`; for an unknown block, `<kind> <name> version <n>: no such <kind>` |
 | `bad_pin` | a pin on a block entry, a story entry without pins, a duplicate `(kind, name)`, a pin to no such block or version | `pin <kind> <name> v<n>: no such version` (and likewise) |
@@ -815,7 +822,25 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 31
+## 14. Changes from revision 32
+
+- From Astra's round 10: a comparison types its operands (`==` two
+  values of one kind, `in` an element of a list or a text in a text,
+  `<` two numbers, texts or times); a given value whose property may
+  be of several types must fit one of them; an optional choice keeps
+  its statuses in comparisons, `may_change` and `wording`, and those
+  two keys refuse a property that is no choice; types refine until
+  nothing gets more precise, with no pass limit; two actors stay two
+  alternatives, each with its roles' properties; each branch of a
+  conditional and each operand of `and` or `or` is checked on its own,
+  so a time literal in one branch reads as a time; an index or slice
+  is for a list only, as 7.1 says; a part outside its owner's file is
+  `wrong_file`; a given cannot set an actor's `name`; `None`, `True`
+  and `False` as choice values and keywords in a role list are
+  `bad_name` in the shape layer; a quoted `DONE` as the first `then`
+  item is `bad_name`.
+
+## 15. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -834,7 +859,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 15. Changes from revision 30
+## 16. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -855,7 +880,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 16. Changes from revision 29
+## 17. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -876,7 +901,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 17. Changes from revision 28
+## 18. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -893,7 +918,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 18. Changes from revision 27
+## 19. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -915,7 +940,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 19. Changes from revision 26
+## 20. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

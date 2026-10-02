@@ -258,6 +258,9 @@ class Source:
                 if not (len(path) >= 2 and path[-2] == "then" and path[-1] == 0):
                     self.src.append(("yaml_feature", line, "DONE is allowed only as the first then item"))
                 return
+            if is_expr and node.value == "DONE" and node.style == '"' and len(path) >= 2 and path[-2] == "then" and path[-1] == 0:
+                self.style.append(("bad_name", line, 'not a name: "DONE" (a name is plain)'))
+                return
             if (is_expr or is_text) and node.style is None:
                 self.style.append(("unquoted_text", line, f"quote the {key}; an unquoted # drops the rest of the line"))
             if is_name and node.style == '"':
@@ -420,13 +423,11 @@ def shape_extra(data):
     out = []
 
     def phrase(v, path):
-        if isinstance(v, str):
-            m = TYPE_RE.fullmatch(v)
-            choice = m and (m.group("dchoice") or m.group("choice"))
-            if choice:
-                for x in choice.split(" | "):
-                    if x in PY_KEYWORDS:
-                        out.append(("bad_name", path, f"not a name: {x}", False))
+        if isinstance(v, str) and " | " in v:
+            core = re.sub(r"^DEFAULT ", "", re.sub(r"(, (OPTIONAL|DERIVED))+$", "", v))
+            for x in core.split(" | "):
+                if x in PY_KEYWORDS:
+                    out.append(("bad_name", path, f"not a name: {x}", False))
 
     for rname, role in mapping(mapping(data).get("roles")).items():
         for p, v in mapping(mapping(role).get("has")).items():
@@ -453,7 +454,7 @@ def shape_extra(data):
                         seen.add(v)
                 if "actor" in g:
                     for j, r in enumerate(listing(mapping(g.get("with")).get("roles"))):
-                        if not (isinstance(r, str) and re.fullmatch(NAME, r)):
+                        if not (isinstance(r, str) and re.fullmatch(NAME, r) and r not in PY_KEYWORDS):
                             out.append(("bad_name", gw + ("with", "roles", j), f"not a name: {r}", False))
     return out
 
@@ -546,6 +547,20 @@ def is_either(t):
     return isinstance(t, tuple) and t[0] == "either"
 
 
+def choice_of(t):
+    """the choice a value of type t is, NONE aside, or None"""
+    rest = [a for a in alts(t) if a != "NONE"]
+    return rest[0] if len(rest) == 1 and is_choice(rest[0]) else None
+
+
+def no_none(t):
+    """the type without its NONE alternative; None when nothing is left or known"""
+    if t is None:
+        return None
+    rest = [a for a in alts(t) if a != "NONE"]
+    return None if not rest else (rest[0] if len(rest) == 1 else ("either", frozenset(rest)))
+
+
 def alts(t):
     """the alternatives a value of type t may be"""
     return list(t[1]) if is_either(t) else [t]
@@ -589,8 +604,6 @@ def unify(a, b):
         if a[1] is None or b[1] is None:
             return ("choice", None)
         return ("choice", tuple(dict.fromkeys(a[1] + b[1])))
-    if is_actor(a) and is_actor(b):
-        return ("actor", None)
     out = set()
     for t in (a, b):
         out |= set(t[1]) if is_either(t) else {t}
@@ -726,7 +739,7 @@ class Project:
                             who = [w.get("role") for w in listing(mapping(op).get("who")) if isinstance(w, dict)]
                             self.operations[oname] = {"inputs": inputs, "returns": mapping(op).get("returns"), "returns_type": None,
                                                       "ordered_by": "ordered_by" in mapping(op), "who": who, "story": sid, "file": stem}
-        for _ in range(50):       # computed properties and returns, until no type gets more precise
+        while True:               # computed properties and returns, until no type gets more precise
             changed = False
             for ename, ent in self.entities.items():
                 for p, expr in ent["computed"].items():
@@ -831,6 +844,7 @@ class Project:
 GEN_ONLY = {"sum", "min", "max", "any", "all"}
 ONE_ARG = {"len", "OLD"}
 OP_WORD = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}
+CMP_WORD = {ast.Lt: "<", ast.Gt: ">", ast.LtE: "<=", ast.GtE: ">="}
 FIXED = {"ACTOR", "RESULT", "NOW", "TODAY", "OLD"}
 
 
@@ -858,6 +872,7 @@ class Expr:
     def __init__(self, project, scope, allow_old=False, silent=False):
         self.P, self.scope, self.allow_old, self.silent = project, scope, allow_old, silent
         self.out, self.src, self.outer = [], "", None
+        self.types = {}           # id(node) -> its type, for fits()
 
     def problem(self, rule, msg):
         if not self.silent:
@@ -896,8 +911,9 @@ class Expr:
 
     def status(self, name, other, scope):
         """type a bare name compared with a value of type other"""
-        choices = [a for a in alts(other) if is_choice(a)]
-        if choices and len(choices) == len(alts(other)):
+        rest = [a for a in alts(other) if a != "NONE"]
+        choices = [a for a in rest if is_choice(a)]
+        if choices and len(choices) == len(rest):
             values = [v for c in choices for v in (c[1] or ())]
             if all(c[1] for c in choices) and name.id not in values:
                 self.problem("unknown_status", f"status not in its list: {name.id}")
@@ -925,7 +941,28 @@ class Expr:
                 self.visit(c, inner)
         return inner, ordered_all
 
+    def fits(self, node, t, expected, optional=False):
+        """may the value of node, of type t, stand where expected is declared;
+        each branch of a conditional and each operand of and/or is checked on its own"""
+        if isinstance(node, ast.IfExp):
+            return all(self.fits(b, self.types.get(id(b)), expected, optional) for b in (node.body, node.orelse))
+        if isinstance(node, ast.BoolOp):
+            return all(self.fits(v, self.types.get(id(v)), expected, optional) for v in node.values)
+        return compatible(t, expected, optional, node)
+
+    def comparable(self, ln, lt, rn, rt):
+        """may two values be compared for equality: None aside, one fits the other"""
+        a, b = no_none(lt), no_none(rt)
+        if a is None or b is None:
+            return True
+        return self.fits(ln, a, b, True) or self.fits(rn, b, a, True)
+
     def visit(self, n, scope):
+        t = self.typed(n, scope)
+        self.types[id(n)] = t
+        return t
+
+    def typed(self, n, scope):
         P, src = self.P, self.src
         if isinstance(n, ast.Constant):
             v = n.value
@@ -994,9 +1031,9 @@ class Expr:
                 for b in (s.lower, s.upper):
                     if b is not None and not all_alts(self.visit(b, scope), lambda a: a == "INTEGER"):
                         self.problem("type_mismatch", f"a slice bound expects an INTEGER: {src}")
-                if t is not None and lt is None and not all_alts(t, lambda a: a == "TEXT"):
-                    self.problem("type_mismatch", f"a slice expects a list or a text: {src}")
-                return lt if lt else ("TEXT" if all_alts(t, lambda a: a == "TEXT") and t is not None else None)
+                if t is not None and lt is None:
+                    self.problem("type_mismatch", f"a slice expects a list: {src}")
+                return lt
             st = self.visit(s, scope)
             if not all_alts(st, lambda a: a == "INTEGER"):
                 self.problem("type_mismatch", f"an index expects an INTEGER: {src}")
@@ -1009,10 +1046,8 @@ class Expr:
                 self.problem("not_ordered", f"{scope.get('RESULT_OP', 'the operation')} gives no order; RESULT[{self.seg(s)}] needs ordered_by or IN ORDER")
             if lt:
                 return lt[1] if lt[1] != "ANY" else None
-            if t is not None and all_alts(t, lambda a: a == "TEXT"):
-                return "TEXT"
             if t is not None:
-                self.problem("type_mismatch", f"an index expects a list or a text: {src}")
+                self.problem("type_mismatch", f"an index expects a list: {src}")
             return None
         if isinstance(n, ast.Compare):
             if len(n.ops) != 1:
@@ -1036,8 +1071,17 @@ class Expr:
                 return isinstance(b, ast.List) and b.elts and all(bare(e) for e in b.elts)
 
             equality = isinstance(op, (ast.Eq, ast.NotEq))
+            # x[:n] == "t" where "t" has n characters, x a text: a second way, found before its slice is typed
+            prefix = isinstance(left, ast.Subscript) and isinstance(left.slice, ast.Slice) and left.slice.lower is None \
+                and left.slice.step is None and isinstance(left.slice.upper, ast.Constant) \
+                and type(left.slice.upper.value) is int and equality \
+                and isinstance(right, ast.Constant) and isinstance(right.value, str) \
+                and len(right.value) == left.slice.upper.value and self.quiet(left.value, scope) == "TEXT"
             # a bare name beside == or != is a status value: in the property's list or unknown_status
-            if equality and bare(right) and not bare(left):
+            if prefix:
+                self.visit(left.value, scope)
+                lt, rt = "TEXT", self.visit(right, scope)
+            elif equality and bare(right) and not bare(left):
                 lt = self.visit(left, scope)
                 rt = self.status(right, lt, scope)
             elif equality and bare(left) and not bare(right):
@@ -1049,6 +1093,25 @@ class Expr:
             else:
                 lt, rt = self.visit(left, scope), self.visit(right, scope)
             neg = isinstance(op, ast.NotEq)
+            # the operands must compare: one kind for == and !=, an element for in, numbers, texts or times for <
+            if isinstance(op, (ast.In, ast.NotIn)):
+                rl = as_list(no_none(rt))
+                if rl is not None:
+                    if not self.comparable(left, lt, None, rl[1] if rl[1] != "ANY" else None):
+                        self.problem("type_mismatch", f"in expects an element of the list: {src}")
+                elif no_none(rt) == "TEXT":
+                    if not self.fits(left, lt, "TEXT", True):
+                        self.problem("type_mismatch", f"in expects a text in a text: {src}")
+                elif rt is not None:
+                    self.problem("type_mismatch", f"in expects a list or a text: {src}")
+            elif equality:
+                if not self.comparable(left, lt, right, rt):
+                    self.problem("type_mismatch", f"{'!=' if neg else '=='} expects two values of one kind: {src}")
+            elif type(op) in CMP_WORD:
+                a, b = no_none(lt), no_none(rt)
+                if a is not None and b is not None and not any(
+                        self.fits(left, a, k, True) and self.fits(right, b, k, True) for k in ("NUMBER", "TEXT", "TIME")):
+                    self.problem("type_mismatch", f"{CMP_WORD[type(op)]} expects two numbers, two texts or two times: {src}")
             # len(x) == 0, len(x) != 0, len(x) > 0, only for a list
             if isinstance(left, ast.Call) and isinstance(left.func, ast.Name) and left.func.id == "len" \
                     and len(left.args) == 1 and isinstance(right, ast.Constant) and right.value == 0 \
@@ -1069,12 +1132,7 @@ class Expr:
                     holds = b.value != neg
                     self.second(a if holds else ast.UnaryOp(ast.Not(), a), n)
                     break
-            # x[:n] == "t" where "t" has n characters, x a text
-            if isinstance(left, ast.Subscript) and isinstance(left.slice, ast.Slice) and left.slice.lower is None \
-                    and left.slice.step is None and isinstance(left.slice.upper, ast.Constant) \
-                    and type(left.slice.upper.value) is int and equality \
-                    and isinstance(right, ast.Constant) and isinstance(right.value, str) \
-                    and len(right.value) == left.slice.upper.value and self.quiet(left.value, scope) == "TEXT":
+            if prefix:
                 call = ast.Call(ast.Attribute(left.value, "startswith", ast.Load()), [right], [])
                 self.second(ast.UnaryOp(ast.Not(), call) if neg else call, n)
             return "YES_NO"
@@ -1186,7 +1244,7 @@ class Expr:
                     self.problem("type_mismatch", f"{f.id} expects {len(req)} input{'s' if len(req) != 1 else ''} by position: {src}")
                 for a, (iname, itype, _) in zip(n.args, req):
                     at = self.visit(a, scope)
-                    if not compatible(at, itype, False, a):
+                    if not self.fits(a, at, itype):
                         self.problem("type_mismatch", f"{f.id} input {iname} expects {words(itype)}: {src}")
                 for a in n.args[len(req):]:
                     self.visit(a, scope)
@@ -1200,7 +1258,7 @@ class Expr:
                     else:
                         seen.add(kw.arg)
                         at = self.visit(kw.value, scope)
-                        if not compatible(at, opt[kw.arg], True, kw.value):
+                        if not self.fits(kw.value, at, opt[kw.arg], True):
                             self.problem("type_mismatch", f"{f.id} input {kw.arg} expects {words(opt[kw.arg])}: {src}")
                 if op["returns"] is None and n is not self.outer:
                     self.problem("not_an_expression", f"not an expression (a changing operation inside a fact): {src}")
@@ -1269,6 +1327,8 @@ def walk_meaning(data, stem, P, source):
         own = dict(props)
         if "part_of" in ent and ent["part_of"] not in P.entities:
             yield "unknown_name", ("entities", ename, "part_of"), f"unknown name: {ent['part_of']}"
+        elif "part_of" in ent and ename in P.entities and P.home(ename) != stem:
+            yield "wrong_file", ("entities", ename), f"entity {ename} is part of {ent['part_of']} and belongs in {P.home(ename)}.edda"
         for p, v in mapping(ent.get("properties")).items():
             if isinstance(v, dict):
                 yield from ex(v.get("computed"), ("entities", ename, "properties", p, "computed"), own)
@@ -1279,7 +1339,12 @@ def walk_meaning(data, stem, P, source):
             if p not in props:
                 yield "unknown_name", where, f"unknown name: {p}"
                 continue
-            vals = props[p][1] if is_choice(props[p]) else None
+            c = choice_of(props[p])
+            if c is None:
+                if props[p] is not None:
+                    yield "type_mismatch", where, f"may_change expects a choice property: {p}"
+                continue
+            vals = c[1]
             for frm, tos in mapping(arrows).items():
                 if vals is not None and frm not in vals:
                     yield "unknown_status", where + (frm,), f"status not in its list: {frm}"
@@ -1291,7 +1356,12 @@ def walk_meaning(data, stem, P, source):
             if p not in props:
                 yield "unknown_name", where, f"unknown name: {p}"
                 continue
-            vals = props[p][1] if is_choice(props[p]) else None
+            c = choice_of(props[p])
+            if c is None:
+                if props[p] is not None:
+                    yield "type_mismatch", where, f"wording expects a choice property: {p}"
+                continue
+            vals = c[1]
             for val, per_role in mapping(per_value).items():
                 if vals is not None and val not in vals:
                     yield "unknown_status", where + (val,), f"status not in its list: {val}"
@@ -1401,6 +1471,9 @@ def walk_meaning(data, stem, P, source):
                         for j, r in enumerate(v):
                             yield from role_ok(r, pw + (j,))
                         continue
+                    if p == "name" and k == "actor":
+                        yield "derived_in_given", pw, "name is fixed and cannot be given"
+                        continue
                     if p not in props:
                         yield "unknown_name", pw, f"unknown name: {p}"
                         continue
@@ -1438,10 +1511,15 @@ def walk_meaning(data, stem, P, source):
 
 
 def given_value(v, t, p, pw, givens, names, source):
-    """problems of one with: value against its declared type"""
+    """problems of one with: value against its declared type; a value that may
+    be of several types must fit one of them, quoting and names included"""
     if is_either(t):
         rest = [a for a in t[1] if a != "NONE"]
-        t = rest[0] if len(rest) == 1 else None
+        if len(rest) == 1:
+            yield from given_value(v, rest[0], p, pw, givens, names, source)
+        elif rest and all(list(given_value(v, a, p, pw, givens, names, source)) for a in rest):
+            yield "type_mismatch", pw, f"{p} expects {words(('either', frozenset(rest)))}: {v}"
+        return
     if t is None:
         return
     if isinstance(v, list):
