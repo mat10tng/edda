@@ -653,11 +653,26 @@ def list_alts(t):
     return None
 
 
+def elem_mark(lt):
+    """what any element of a list may be, literal markers kept: its repeated
+    element, else its positions as one, else its element type"""
+    if repeat_of(lt) is not None:
+        return repeat_of(lt)
+    ps = positions_of(lt)
+    return unify_all(ps) if ps else lt[1]
+
+
+def anon(lt):
+    """a list type without positions, its elements' literal markers kept"""
+    m = elem_mark(lt)
+    return ("list", lt[1], ordered(lt)) + ((None, m) if m is not None and LIT in alts(m) else ())
+
+
 def sliced(lt, lo, hi):
     """a constant slice of one list type: only the positions it keeps, when known"""
     ps = positions_of(lt)
     if ps is None:
-        return ("list", lt[1], ordered(lt)) + ((None, repeat_of(lt)) if repeat_of(lt) is not None else ())
+        return anon(lt)
     ps = ps[lo:hi]
     return ("list", unify_all([unlit(x) for x in ps]) if ps else "ANY", ordered(lt), ps)
 
@@ -665,9 +680,12 @@ def sliced(lt, lo, hi):
 def joined(a, b):
     """a + b for two list types: the positions of both in order, when known"""
     u = as_list(unify(a, b))
-    if u and positions_of(a) is not None and positions_of(b) is not None:
+    if u is None:
+        return None
+    if positions_of(a) is not None and positions_of(b) is not None:
         return ("list", u[1], ordered(u), a[3] + b[3])
-    return u
+    m = unify(elem_mark(a), elem_mark(b))
+    return ("list", u[1], ordered(u)) + ((None, m) if m is not None and LIT in alts(m) else ())
 
 
 def as_list(t):
@@ -1105,21 +1123,25 @@ class Expr:
         return t
 
     def index_leaf(self, node):
-        """the (node, type) pairs of the element a constant index picks out of a
-        list with known positions, or None"""
+        """the (node, type) pairs of the element an index picks: the position a
+        constant index names, any position otherwise, out of each list alternative
+        with known positions or a repeated element; else None"""
         if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
-            i = int_lit(node.slice)
+            i = int_lit(node.slice)         # None: any position
             P = self.positions(node.value)
+            if P is not None:
+                if i is None:
+                    return sum(P, []) or None
+                return P[i] if -len(P) <= i < len(P) else None
             t = self.types.get(id(node.value))
-            P = typed_positions(t) if P is None else P
-            if i is not None and P is not None and -len(P) <= i < len(P):
-                return P[i]
-            if i is not None and P is None and list_alts(t):
+            if list_alts(t):
                 picked = []
                 for a in list_alts(t):          # each alternative on its own
                     tp = typed_positions(a)
                     if tp is not None:
-                        if -len(tp) <= i < len(tp):
+                        if i is None:
+                            picked += tp
+                        elif -len(tp) <= i < len(tp):
                             picked.append(tp[i])
                     elif repeat_of(a) is not None:
                         picked.append(rep_leaf(repeat_of(a)))
@@ -1319,7 +1341,7 @@ class Expr:
                 if lt and all(b is None or int_lit(b) is not None for b in (s.lower, s.upper)):
                     lo, hi = (int_lit(b) if b is not None else None for b in (s.lower, s.upper))
                     return unify_all([sliced(a, lo, hi) for a in list_alts(t)])
-                return ("list", lt[1], ordered(lt)) if lt else None
+                return unify_all([anon(a) for a in list_alts(t)]) if lt else None
             st = self.visit(s, scope)
             if not all_alts(st, lambda a: a == "INTEGER"):
                 self.problem("type_mismatch", f"an index expects an INTEGER: {src}")
