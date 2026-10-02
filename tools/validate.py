@@ -1019,6 +1019,7 @@ class Expr:
         self.P, self.scope, self.allow_old, self.silent = project, scope, allow_old, silent
         self.out, self.src, self.outer = [], "", None
         self.types = {}           # id(node) -> its type, for fits()
+        self.marks = {}           # id(node) -> what a comprehension variable may be, literal markers kept
 
     def problem(self, rule, msg):
         if not self.silent:
@@ -1077,11 +1078,15 @@ class Expr:
             if not isinstance(g.target, ast.Name):
                 self.problem("not_an_expression", f"not an expression (a comprehension variable is a plain name): {self.src}")
                 continue
+            inner.pop(("lit", g.target.id), None)
             if it is not None and lt is None:
                 self.problem("type_mismatch", f"for expects a list: {self.src}")
                 inner[g.target.id] = None
             else:
                 inner[g.target.id] = (lt[1] if lt[1] != "ANY" else None) if lt else None
+                m = unify_all([elem_mark(a) for a in list_alts(it)]) if lt else None
+                if m is not None and LIT in alts(m):
+                    inner[("lit", g.target.id)] = m     # the variable's literal markers
             ordered_all = ordered_all and ordered(lt)
             for c in g.ifs:
                 self.visit(c, inner)
@@ -1094,6 +1099,8 @@ class Expr:
         if (o := old_arg(node)) is not None:
             return self.fits(o, self.types.get(id(o)), expected, optional)
         L = self.index_leaf(node)
+        if L is None and (m := self.marks.get(id(node))) is not None:
+            L = rep_leaf(m)
         if L is not None:
             if "NONE" in alts(t) and not compatible("NONE", expected, optional):
                 return False
@@ -1109,6 +1116,8 @@ class Expr:
         and each operand of and/or on its own, else the type"""
         if (o := old_arg(node)) is not None:
             return self.lit_type(o, self.types.get(id(o)))
+        if (m := self.marks.get(id(node))) is not None:
+            return m
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return LIT
         if isinstance(node, ast.IfExp):
@@ -1135,19 +1144,21 @@ class Expr:
                 return P[i] if -len(P) <= i < len(P) else None
             t = self.types.get(id(node.value))
             if list_alts(t):
-                picked = []
+                picked, informed = [], False
                 for a in list_alts(t):          # each alternative on its own
                     tp = typed_positions(a)
                     if tp is not None:
+                        informed = True
                         if i is None:
                             picked += tp
                         elif -len(tp) <= i < len(tp):
                             picked.append(tp[i])
                     elif repeat_of(a) is not None:
+                        informed = True
                         picked.append(rep_leaf(repeat_of(a)))
-                    else:
-                        return None
-                if picked:
+                    else:                       # a branch without literals: its element
+                        picked.append(rep_leaf(a[1]) if a[1] is not None else [(None, None)])
+                if picked and informed:
                     return sum(picked, [])
         return None
 
@@ -1157,6 +1168,8 @@ class Expr:
         picks; None compares with anything"""
         if (o := old_arg(node)) is not None:
             return self.leaves(o, self.types.get(id(o)))
+        if (m := self.marks.get(id(node))) is not None:
+            return rep_leaf(m)
         L = self.index_leaf(node)
         if L is not None:
             return [(n, a) for n, x in L for a in alts(x) if a != "NONE"] if any(x is not None for _, x in L) else L
@@ -1292,6 +1305,8 @@ class Expr:
                     return None
                 return scope["RESULT"]
             if i in scope and i != "RESULT_OP":
+                if ("lit", i) in scope:
+                    self.marks[id(n)] = scope[("lit", i)]
                 return scope[i]
             if i in ONE_ARG or i in GEN_ONLY or i in P.operations:
                 self.problem("not_an_expression", f"not an expression (name {i}): {src}")
