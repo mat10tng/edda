@@ -1,5 +1,5 @@
-role agent                        # writes .edda files from the customer's words
-role operator                     # reads the read view, approves, owns level 1
+role agent                        # a program that writes .edda files from the customer's words
+role operator                     # the person who reads the read view and approves; owns level 1
 
 entity keyword                    # one word of the language, from language/keywords.edda
   word
@@ -7,8 +7,19 @@ entity keyword                    # one word of the language, from language/keyw
   why
   since
 
-entity problem                    # one thing the checker found
-  kind: default refused | flagged
-  file
-  line
+entity problem                    # one thing the checker found in a file
+  kind: refused | flagged
+  rule: unknown_keyword | unknown_name | tab | odd_indent | not_a_sentence |
+        declared_twice | unknown_status | returns_and_ensure | wrong_file |
+        unreachable_status | no_example
+  line                            # 1-based, in the file checked
   message
+
+entity sentence                   # one line of the read view
+  kind: story | permission | refusal | outcome | invariant | note | question | example
+  text
+
+entity change                     # one difference between two versions of a story
+  kind: added | removed
+  sentence                        # the line, with its indentation, comments removed
+  line                            # where it sits in the newer text; for removed, where it sat

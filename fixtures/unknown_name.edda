@@ -1,0 +1,28 @@
+role shop_user                   # a fixture is one whole spec in one file
+epic fixtures                                            # FIX
+
+entity order
+  status: default incoming | removed
+    may change: incoming to removed
+  units_sent: default 0
+  may update: shop_user
+
+story remove an order                                    # FIX-001
+  as a shop_user
+  i want to remove an order
+  so that the list is clean
+  epic: FIX
+
+  operation remove(order: order)
+    if the order's units_sold is more than 0,
+      refuse: "already sent"
+    when remove succeeds, ensure:
+      the order's status is removed
+
+  example a fresh order is removed
+    given shop_user erik
+          order purchase with status incoming, units_sent 0
+    when  erik asks remove(purchase)
+    then  done
+          purchase's status is removed
+

@@ -25,9 +25,12 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   keywords.edda   the vocabulary, one entry per keyword
-specs/      *.edda          Edda's own stories, one file per thing
-            *.edda.vc       approved copies, append-only
+language/   reference.md    the language reference, revision 24
+            keywords.edda   the vocabulary, one entry per keyword
+specs/      *.edda          Edda's own stories, one file per entity
+            *.edda.vc       approved copies, append-only (none yet)
+fixtures/   *.edda          whole specs in one file, one deliberate
+                            problem each, used by the examples
 ```
 
 Nothing is built yet.

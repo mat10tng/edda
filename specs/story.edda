@@ -4,13 +4,13 @@ entity story                      # one story in a spec_file
   sentence
   role_name
   epic_id, optional
-  text                            # the story as it stands in the file
-  rules_text                      # its operations and examples only, normalised
-  approvals: many approval
+  text                            # the story as it stands in the file, every line
+  rules_text                      # its operations and examples only, with comments,
+                                  #   blank lines and trailing spaces removed
+  approvals: many approval, in order    # oldest first; the newest is approvals[-1]
   version: count(approvals)
-  state: approved if count(approvals) is more than 0
-           and rules_text is approvals[-1]'s rules_text
-         else draft
+  is approved: count(approvals) is more than 0
+    and rules_text is approvals[-1]'s rules_text
   may create: agent
   may read:   agent, operator
   may update: agent
@@ -22,122 +22,231 @@ entity approval, part of story    # one block in the .edda.vc file
   approved_by
   because, optional
   text                            # the whole story as approved
-  rules_text
+  rules_text                      # its operations and examples, normalised as above
 
-story a story is a draft until the operator approves it             # EDDA-004
-  as a operator
+story a story is a draft until the operator approves it     # EDDA-004
+  as an operator
   i want a story whose operations or examples differ from its newest
     approved copy to be a draft, whoever changed it
   so that nothing the agent writes counts until I have said yes
   epic: VC
   tags: version, approval
 
-  operation state_of(story) returns story's state
-    who: agent, operator
-
   example a new story is a draft
     given story fresh with id "FUL-010", approvals []
-    when  agent asks state_of(fresh)
-    then  done
-          fresh's state is draft
+    then  fresh is not approved
 
   example a story that matches its newest approval is approved
-    given approval a1 with version 1, rules_text "R1"
-          story same with id "FUL-005", rules_text "R1", approvals [a1]
-    when  agent asks state_of(same)
-    then  done
-          same's state is approved
+    given approval a1 with version 1, rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
+          story same with id "FUL-005", approvals [a1],
+            rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
+    then  same is approved
 
-  example a changed rule makes a draft again
-    given approval a1 with version 1, rules_text "R1"
-          story changed with id "FUL-005", rules_text "R2", approvals [a1]
-    when  agent asks state_of(changed)
-    then  done
-          changed's state is draft
+  example a changed refusal makes a draft again
+    given approval a1 with version 1, rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
+          story changed with id "FUL-005", approvals [a1],
+            rules_text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"the order is already removed\""
+    then  changed is not approved
 
-  example a changed label does not make a draft
-    given approval a1 with version 1, rules_text "R1", text "T1"
-          story relabelled with id "FUL-005", rules_text "R1", text "T2",
-            approvals [a1]
-    when  agent asks state_of(relabelled)
-    then  done
-          relabelled's state is approved
+  example a changed example makes a draft again
+    given approval a1 with version 1, rules_text "example a\n  given order o with status incoming\n  then  o's status is incoming"
+          story changed with id "FUL-005", approvals [a1],
+            rules_text "example a\n  given order o with status removed\n  then  o's status is removed"
+    then  changed is not approved
 
-story the operator approves a story and the copy is kept            # EDDA-005
-  as a operator
-  i want my yes to append the whole story as a new version to the
+  example a changed label, comment or blank line does not make a draft
+    given approval a1 with version 1, text "story remove orders            # FUL-005\n  tags: shop\n  operation remove(order)\n    # frees the stock\n    when remove succeeds, ensure:\n      the order's status is removed",
+            rules_text "operation remove(order)\n  when remove succeeds, ensure:\n    the order's status is removed"
+          story relabelled with id "FUL-005", approvals [a1],
+            text "story remove orders            # FUL-005\n  tags: shop, ordering\n\n  operation remove(order)\n    # frees the held stock\n    when remove succeeds, ensure:\n      the order's status is removed  ",
+            rules_text "operation remove(order)\n  when remove succeeds, ensure:\n    the order's status is removed"
+    then  relabelled is approved
+
+story the operator approves a story and the copy is kept    # EDDA-005
+  as an operator
+  i want my yes to append the whole story as the next version to the
     .edda.vc file, with the date, my name and one line of because
-  so that every approved version is kept exactly and the agent cannot
-    write it
+  so that every approved version is kept exactly, in order, and the
+    agent cannot write it
   epic: VC
   tags: version, approval
+  note: the agent is kept out of .edda.vc by a repository guard outside
+    the language; that guard is level 2 and is tested there
 
-  operation approve(story, because)
+  operation approve(story: story, because optional)
     who: operator
-    if story's state is approved,
+    if the story is approved,
       refuse: "nothing to approve: the story matches its newest version"
-    if count(check(story's file)) is more than 0
-      and any(p's kind is refused for p in check(story's file)),
+    if any(p's kind is refused for p in check(story's file)),
       refuse: "the file does not check"
     when approve succeeds, ensure:
-      count(story's approvals) is the old count(story's approvals) + 1
-      story's approvals[-1]'s version is story's version
+      story's approvals is the old story's approvals + [story's approvals[-1]]
+      story's approvals[-1]'s version is the old story's version + 1
       story's approvals[-1]'s text is story's text
       story's approvals[-1]'s rules_text is story's rules_text
       story's approvals[-1]'s approved_by is the actor
       story's approvals[-1]'s approved_at is now
       story's approvals[-1]'s because is because
-      story's state is approved
+      the story is approved
 
   example the first approval makes version 1
     given operator tuan
-          story fresh with id "FUL-010", rules_text "R1", text "T1",
-            approvals [], file good
-          spec_file good with path "fixtures/order.edda", stories [fresh]
-    when  tuan asks approve(fresh, "the shop asked for it") at 2026-10-01 14:00
+          spec_file good from fixture order
+    when  tuan asks approve(good's stories[0], "the shop asked for it") at 2026-10-02 09:00
     then  done
-          fresh's version is 1
-          fresh's approvals[-1]'s approved_by is tuan
-          fresh's approvals[-1]'s because is "the shop asked for it"
-          fresh's state is approved
+          good's stories[0]'s version is 1
+          good's stories[0]'s approvals[0]'s approved_by is tuan
+          good's stories[0]'s approvals[0]'s approved_at is 2026-10-02 09:00
+          good's stories[0]'s approvals[0]'s because is "the shop asked for it"
+          good's stories[0] is approved
+
+  example a second approval keeps the first and adds version 2
+    given operator tuan
+          approval a1 with version 1, approved_at 2026-10-01 14:00, rules_text "R1", text "T1"
+          story grown with id "FUL-005", approvals [a1], rules_text "R2", text "T2", file good
+          spec_file good from fixture order
+    when  tuan asks approve(grown) at 2026-10-02 09:00
+    then  done
+          grown's version is 2
+          grown's approvals[0] is a1
+          grown's approvals[1]'s version is 2
+          grown's approvals[1]'s rules_text is "R2"
+          grown's approvals[1]'s because is empty
+          grown is approved
 
   example approving an approved story is refused
     given operator tuan
           approval a1 with version 1, rules_text "R1"
-          story same with id "FUL-005", rules_text "R1", approvals [a1],
-            file good
-          spec_file good with path "fixtures/order.edda", stories [same]
-    when  tuan asks approve(same, "")
+          story same with id "FUL-005", approvals [a1], rules_text "R1", file good
+          spec_file good from fixture order
+    when  tuan asks approve(same)
     then  refused: "nothing to approve: the story matches its newest version"
           same's version is 1
 
+  example a story in a file that does not check is refused
+    given operator tuan
+          spec_file bad from fixture unknown_keyword
+    when  tuan asks approve(bad's stories[0])
+    then  refused: "the file does not check"
+          bad's stories[0]'s version is 0
+
   example the agent may not approve
     given agent bot
-          story fresh with id "FUL-010", rules_text "R1", approvals []
-    when  bot asks approve(fresh, "")
+          spec_file good from fixture order
+    when  bot asks approve(good's stories[0])
     then  refused: "agent may not approve"
+          good's stories[0]'s version is 0
 
-story the operator sees what changed before saying yes               # EDDA-006
-  as a operator
+story the operator sees what changed before saying yes      # EDDA-006
+  as an operator
   i want the difference between the story in the file and its newest
-    approved copy as added, changed and removed sentences
+    approved copy as added and removed lines, in order
   so that I read the change, not the whole story, every time
   epic: VC
   tags: version, diff
 
-  operation diff(story) returns
-    [change for change in sentence_changes(story's approvals[-1]'s text, story's text)]
+  operation diff(story: story) returns story's changes
     who: agent, operator
-    note: sentence_changes is a level 2 helper; a sentence is one line
-      of the story with its indentation removed
+    note: a line of the story, with its indentation and without its
+      comment, is a sentence; a sentence is removed when it is in the
+      newest approved text and not in the story's text, added when the
+      other way round; the same sentence twice counts twice; changes are
+      ordered by line
 
   example an added refusal shows as added
-    given approval a1 with version 1,
-            text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
+    given approval a1 with version 1, text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
           story grown with id "FUL-005", approvals [a1],
             text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\"\n  if the order's units_sent is more than 0,\n    refuse: \"already sent\""
-    when  operator asks diff(grown)
+    when  operator asks diff(grown) as d
     then  done
-          count(diff(grown)) is 2
-          diff(grown)[0]'s kind is added
-          diff(grown)[0]'s sentence is "if the order's units_sent is more than 0,"
+          count(d) is 2
+          d[0]'s kind is added
+          d[0]'s line is 4
+          d[0]'s sentence is "  if the order's units_sent is more than 0,"
+          d[1]'s kind is added
+          d[1]'s sentence is "    refuse: \"already sent\""
+
+  example a changed reason shows as one removed and one added
+    given approval a1 with version 1, text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"already removed\""
+          story reworded with id "FUL-005", approvals [a1],
+            text "operation remove(order)\n  if the order's status is removed,\n    refuse: \"the order is already removed\""
+    when  operator asks diff(reworded) as d
+    then  done
+          count(d) is 2
+          d[0]'s kind is removed
+          d[0]'s sentence is "    refuse: \"already removed\""
+          d[1]'s kind is added
+          d[1]'s sentence is "    refuse: \"the order is already removed\""
+
+  example a comment-only edit shows nothing
+    given approval a1 with version 1, text "operation remove(order)   # frees stock\n  when remove succeeds, ensure:\n    the order's status is removed"
+          story commented with id "FUL-005", approvals [a1],
+            text "operation remove(order)   # frees the held stock\n  when remove succeeds, ensure:\n    the order's status is removed"
+    when  operator asks diff(commented) as d
+    then  done
+          d is []
+
+  example a story never approved shows every line as added
+    given story fresh with id "FUL-010", approvals [],
+            text "operation remove(order)\n  when remove succeeds, ensure:\n    the order's status is removed"
+    when  operator asks diff(fresh) as d
+    then  done
+          count(d) is 3
+          all(c's kind is added for c in d)
+
+story the operator reads a story as sentences               # EDDA-007
+  as an operator
+  i want a story shown as plain sentences in its own order, one per
+    rule, with the ids hidden and the notes in grey
+  so that I read the business meaning, never the syntax
+  epic: VIEW
+  tags: read-view
+
+  operation view(story: story) returns story's sentences
+    who: agent, operator
+    note: a name reads as words: units_sent reads "units sent"
+
+  operation view_at(story: story, version) returns
+    the sentences of story's approvals[version - 1]'s text
+    who: agent, operator
+    if version is more than story's version,
+      refuse: "no such version"
+
+  example the clean fixture reads as six sentences
+    given spec_file good from fixture order
+    when  operator asks view(good's stories[0]) as v
+    then  done
+          count(v) is 6
+          v[0]'s kind is story
+          v[0]'s text is "Remove an order. As a shop user, I want to remove an order, so that the list is clean."
+          v[1]'s kind is permission
+          v[1]'s text is "A shop user may remove an order."
+          v[2]'s kind is refusal
+          v[2]'s text is "IF the order's units sent is more than 0, THEN refuse: already sent."
+          v[3]'s kind is outcome
+          v[3]'s text is "WHEN remove succeeds, the order's status SHALL be removed."
+          v[4]'s kind is example
+          v[4]'s text is "Example: a fresh order is removed."
+          v[5]'s kind is example
+          v[5]'s text is "Given a shop user erik and an order purchase with status incoming and units sent 0, when erik asks to remove purchase, then it is done and purchase's status is removed."
+
+  example a note reads in its place and a question after it
+    given spec_file a from fixture notes_a
+    when  operator asks view(a's stories[0]) as v
+    then  done
+          v[1]'s kind is note
+          v[1]'s text is "the stock feed is refreshed every night"
+
+  example no sentence shows an id
+    given spec_file good from fixture order
+    when  operator asks view(good's stories[0]) as v
+    then  done
+          not any("FIX-001" in s's text for s in v)
+
+  example an older version reads from its approved copy
+    given approval a1 with version 1, text "story remove an order   # FIX-001\n  as a shop_user\n  i want to remove an order\n  so that the list is clean\n  operation remove(order: order)\n    when remove succeeds, ensure:\n      the order's status is removed"
+          story grown with id "FIX-001", approvals [a1],
+            text "story remove an order   # FIX-001\n  as a shop_user\n  i want to remove an order\n  so that the list is clean\n  operation remove(order: order)\n    if the order's units_sent is more than 0,\n      refuse: \"already sent\"\n    when remove succeeds, ensure:\n      the order's status is removed"
+    when  operator asks view_at(grown, 1) as v
+    then  done
+          not any(s's kind is refusal for s in v)
