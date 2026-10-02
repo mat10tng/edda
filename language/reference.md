@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 30, 2 Oct 2026. Replaces revision 29 (kb:9378927). Decisions
+Revision 31, 2 Oct 2026. Replaces revision 30 (kb:9378929). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 7. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 8. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -64,7 +64,8 @@ checker enforces at the source, before the schema:
 
 - free text (`is:`, `story:`, `i_want:`, `so_that:`, `reason:`,
   `means:`, `wording` values, notes, questions, example titles) and
-  every expression is quoted, with double quotes; a single-quoted
+  every expression (an `also_changes` path with them) is quoted, with
+  double quotes; a single-quoted
   scalar is `yaml_feature`; every key is plain, except example titles;
   names, numbers, ids, `True`, `False` and type-phrase words are
   plain (a quoted name is `bad_name`); `DONE` is plain only as the
@@ -86,14 +87,18 @@ checker enforces at the source, before the schema:
   for the line after it; keys are snake_case except
   story ids (`ABC-123`), epic ids (`ABC`) and example titles (quoted
   text);
-- a duplicate key is `declared_twice` at the second key; a declared
+- a duplicate key is `declared_twice` at the second key; so is a
+  role, entity, story or operation name declared twice in one
+  project (at the second, in file-name order) or a given name used
+  twice in one example; a declared
   name or choice value that is a Python keyword (`class`, `in`,
   `None`, ...) is `bad_name`, since an expression could not reach it;
 - `#` starts a comment outside a string; comments carry no rules, are
   invisible to the views and ignored by the version comparison.
 
 **Placement.** A story carries `about: <entity>` and lives in that
-entity's file (`wrong_file` otherwise). `about` is authoritative; the
+entity's file, which for a part is its owner's (`wrong_file`
+otherwise). `about` is authoritative; the
 checker only flags `about_untouched` when the story names that entity
 nowhere else (no input, given, fact or who-line). A part (`part_of:`)
 lives in its owner's file. One home per story; a story with two homes
@@ -125,7 +130,10 @@ roles passes any permission line, condition included. The permission
 refusal reads `"<operation> is not allowed for <roles>"`, roles in the
 order the actor's `roles:` lists them. `ACTOR` is the one asking: it has
 `name` (its given name, text), `roles` (list of role names) and the
-`has:` properties of its roles. Role blocks are versioned and pinned
+`has:` properties of its roles: on a who-line, those of that line's
+role and of the roles it includes; inside an operation's body, those
+every role on its `who:` has; in an example, those of the given
+actor's roles. Role blocks are versioned and pinned
 exactly like entity blocks (section 10).
 
 ## 4. Entities
@@ -221,7 +229,9 @@ entity's own properties; inside an operation its inputs; inside an
 example its given names; inside `ordered_by` the result item, reached
 by its entity's name; on a who-line, as above. A comprehension's
 variable is a root inside that comprehension, with Python's scope.
-Status values are in scope wherever their property is compared. The
+Status values are in scope only where their property is compared:
+beside `==` or `!=`, or as the bare names of a list after `in`; a
+bare status anywhere else is `unknown_name`. The
 fixed names of 7.3 are roots everywhere they are allowed.
 
 ## 5. Stories
@@ -301,7 +311,7 @@ operations:
 | `ensure:` | list of facts true after; a fact is a quoted expression or `{fact, means}`; may use `OLD(...)` | postconditions, each with its meaning when the mechanics do not read |
 | `returns:` | the expression a read operation gives back; never with `ensure` or `also_changes` (`returns_and_ensure`) | one word for reads and writes, command-query separation |
 | `ordered_by:` | list of expressions over one result item, reached by its entity's name, ascending, ties keep input order; only with `returns` (`returns_and_ensure` otherwise) | sorts; without it or an `IN ORDER` source, a positional check on `RESULT` is `not_ordered` |
-| `also_changes:` | property paths (`order.history`) the frame rule allows to change without an `ensure` fact; only with `ensure` (`returns_and_ensure` otherwise) | everything else stays unchanged |
+| `also_changes:` | quoted property paths (`"order.history"`), each segment resolved from an input, that the frame rule allows to change without an `ensure` fact; only with `ensure` (`returns_and_ensure` otherwise) | everything else stays unchanged |
 | `notes:` | free text | as on stories |
 
 - **Order of checks.** Permission, then refusals in the order written,
@@ -385,7 +395,15 @@ checked against its `inputs:`: as many positional arguments as
 required inputs, keywords only for optional inputs, each once, each
 argument of its input's type (`type_mismatch` otherwise); a changing
 operation inside a fact is `not_an_expression`; after a call, `RESULT`
-has the type of the operation's `returns`.
+has the type of the operation's `returns`. A property read on a value
+that is no entity (`order.units_sent.made_up`) is `type_mismatch`. A
+value that may be of two types (`a if c else b`, `x or y`) stands only
+where both fit; `None` stands only for an optional input; a text
+literal stands where a TIME is expected. An ordered list is a `MANY
+..., IN ORDER` property, a list literal, a slice of or a comprehension
+over an ordered list, a `+` of two ordered lists, or the result of an
+operation with `ordered_by`; any other list has no order, and
+`RESULT[n]` on one is `not_ordered`.
 
 ### 7.2 One way per meaning
 
@@ -449,7 +467,7 @@ examples:
 |---|---|---|
 | `examples:` | quoted title to example; one concrete run | the acceptance criteria that run |
 | `given:` | a list of things to make; each item has exactly one key besides `with`: `- <entity>: <name>` or `- actor: <name>` | order-independent, schema-checked; names declared here are used below; the binding makes them; no glue is written |
-| `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` for an actor, `fixture:` for a `spec_file` | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived property is `derived_in_given`; every value is checked against the property's declared type: a plain text or time is `unquoted_text`, the wrong kind `type_mismatch`, a status not in its list `unknown_status`, a name no given declares `unknown_name` |
+| `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` (a list) for an actor, `fixture:` for a `spec_file` only | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived or computed property is `derived_in_given`; every value is checked against the property's declared type: a plain text or time is `unquoted_text`, the wrong kind `type_mismatch`, a status not in its list `unknown_status`, a name no given declares `unknown_name` |
 | `fixture:` | the folder under `fixtures/`; its file, and its history when present, become the given `spec_file` | the whole spec is the given, never a hand-made fragment |
 | `steps:` | a list of `when` and `then`; `when` may be left out to check the given state | a flow is several steps |
 | `when:` | `actor` (a declared given), `call` (a call of a declared operation with its arguments, Python call form; anything else is `not_an_expression`), `at` (optional time) | one fixed shape; every actor is declared (`unknown_name` otherwise) |
@@ -640,20 +658,20 @@ pin's line in the `.vc` for `bad_version`, `bad_pin` and
 | `missing_key` | a required key absent | `<block> needs <key>:`, the block named by kind and name: `operation remove`, `entity order`, `refusal 2`, `step 1`, `file` |
 | `unknown_key` | a key the schema does not name | `unknown key: <key>` |
 | `bad_name` | a name not snake_case, an id not `ABC-123`, a name or choice value that is a Python keyword, a quoted name | `not a name: <text>`; for a quoted name `not a name: "<text>" (a name is plain)` |
-| `declared_twice` | a duplicate key or name, at the second | `declared twice: <name>` |
-| `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status beside a choice property | `unknown name: <name>` |
+| `declared_twice` | a duplicate key, a name declared twice in one project, a given name used twice in one example; at the second | `declared twice: <name>` |
+| `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status compared with a choice property | `unknown name: <name>` |
 | `unknown_status` | a status value not in its property's list: in a comparison, `may_change`, `wording` or a given | `status not in its list: <value>` |
-| `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>` |
-| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation | `not an expression: <text>` |
+| `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>` |
+| `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
 | `second_way` | a form 7.2 spells another way | `write <one way> (not <other>)` |
-| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, a call with the wrong inputs, a given value of another type than its property | `<what> expects <kind>: <text>` |
-| `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
+| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, a given value of another type than its property | `<what> expects <kind>: <text>` |
+| `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `returns and also_changes on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
 | `wrong_file` | a story in another entity's file | `story <id> is about <entity> and belongs in <entity>.edda` |
 | `not_ordered` | `RESULT[n]` on an unordered return | `<operation> gives no order; RESULT[<n>] needs ordered_by or IN ORDER` |
 | `role_cycle` | `includes` reaches itself, at the first role in file order | `role <name> includes itself` |
-| `derived_in_given` | a `with:` value for a derived property | `<property> is derived and cannot be given` |
+| `derived_in_given` | a `with:` value for a derived or computed property | `<property> is derived and cannot be given`, `<property> is computed and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
-| `bad_version` | a `.vc` number out of sequence or an unknown story or block | `<kind> <name> version <n> out of sequence; expected <m>` |
+| `bad_version` | a `.vc` number out of sequence or an unknown story or block | `<kind> <name> version <n> out of sequence; expected <m>`; for an unknown block, `<kind> <name> version <n>: no such <kind>` |
 | `bad_pin` | a pin on a block entry, a story entry without pins, a duplicate `(kind, name)`, a pin to no such block or version | `pin <kind> <name> v<n>: no such version` (and likewise) |
 | `bad_snapshot` | an entry's text that is not already normalised or does not name the entry's block | `text of <kind> <name> v<n> is not a normalised block` |
 
@@ -789,7 +807,28 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 29
+## 14. Changes from revision 30
+
+- From Astra's round 8: `wrong_file` tests the file's name against the
+  `about` entity's home; a value of two possible types stands only
+  where both fit and `None` only for an optional input; a changing
+  operation is allowed only as the step's own call; computed
+  properties and `returns` types resolve together until nothing more
+  resolves; text literals in rewrites are escaped exactly; a name
+  declared twice in a project and a given name used twice are
+  `declared_twice` in the shape layer; `also_changes` paths are quoted
+  and resolved segment by segment; a bare status is in scope only in a
+  comparison, and `ordered_by` sees only the result item; a text
+  literal stands where a TIME is expected; a property read on a
+  non-entity is `type_mismatch`; `ACTOR` has the properties of its
+  roles, not of every role; `fixture:` only on a `spec_file`, `roles:`
+  a list, computed properties cannot be given; a missing key is
+  suppressed per block, not per line; a bad property name is anchored
+  at its key; the message forms with a reason are named. Added to the
+  checker: `not_ordered` through ordered list types, and `bad_version`
+  as the first rule of the history layer.
+
+## 15. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -810,7 +849,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 15. Changes from revision 28
+## 16. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -827,7 +866,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 16. Changes from revision 27
+## 17. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -849,7 +888,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 17. Changes from revision 26
+## 18. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

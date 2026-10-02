@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Check every .edda and .edda.vc file through the source, shape and
-meaning layers of reference section 11: the YAML 1.2 subset and the
-quoting rule, both JSON Schemas mapped to rule names and source lines,
-the type-phrase grammar, names resolved across the files of one folder
-(entities, roles, operations, properties, choice values, givens), the
-Python expression whitelist (7.1) with types from literals and
-declarations, operation signatures, the style rule (7.2) under its
-equivalences, and the operation key rules. A partial checker: the
-history layer, the flags, not_ordered and the running of examples are
-not here. Each folder (specs/, one fixture folder) is one project."""
-import ast, glob, json, os, re, sys
+"""Check every .edda and .edda.vc file through the layers of reference
+section 11: the YAML 1.2 subset and the quoting rule (source), both
+JSON Schemas mapped to rule names and source lines plus duplicate
+names (shape), names resolved across the files of one folder, the
+type-phrase grammar, the Python expression whitelist (7.1) with types
+from literals and declarations, operation signatures, ordering, and the
+style rule (7.2) under its equivalences (meaning), and the version
+sequence of a .edda.vc (history). A partial checker: pins, snapshots,
+the flags and the running of examples are not here. Each folder
+(specs/, one fixture folder) is one project."""
+import ast, copy, glob, json, os, re, sys
 import yaml
 from jsonschema import Draft202012Validator
 
@@ -97,6 +97,7 @@ EXPR_PATHS = [
     "stories/*/operations/*/refuse/#/when",
     "stories/*/operations/*/ensure/#", "stories/*/operations/*/ensure/#/fact",
     "stories/*/operations/*/returns", "stories/*/operations/*/ordered_by/#",
+    "stories/*/operations/*/also_changes/#",
     "stories/*/examples/*/steps/#/when/call",
     "stories/*/examples/*/steps/#/then/#",
 ]
@@ -107,7 +108,7 @@ NAME_PATHS = [
     "entities/*/may_create/#/role", "entities/*/may_read/#/role",
     "entities/*/may_update/#/role", "entities/*/may_delete/#/role",
     "entities/*/may_change/*/*/#",
-    "stories/*/operations/*/who/#/role", "stories/*/operations/*/also_changes/#",
+    "stories/*/operations/*/who/#/role",
     "stories/*/examples/*/given/#/*",
     "stories/*/examples/*/given/#/with/roles/#", "stories/*/examples/*/given/#/with/fixture",
     "stories/*/examples/*/steps/#/when/actor",
@@ -275,7 +276,7 @@ ITEM = {"ensure": "fact", "always": "fact", "refuse": "refusal", "given": "given
 COLLECTION = {"roles": "role", "entities": "entity", "stories": "story", "operations": "operation",
               "examples": "example", "properties": "property", "inputs": "input", "has": "property"}
 KIND_WORD = {"object": "mapping", "array": "list", "string": "text", "integer": "number",
-             "number": "number", "boolean": "yes/no"}
+             "number": "number", "boolean": "yes/no", "null": "value"}
 
 
 def block_name(path, is_vc):
@@ -319,13 +320,13 @@ def yaml_kind(v):
 
 def schema_problems(validator, root, data, source):
     """jsonschema errors mapped to the rules of reference section 11, each
-    with a source line; a missing key is suppressed in a block that has
-    an unknown key"""
+    with a source line; a missing key is suppressed in the block that
+    has an unknown key"""
     out, unknown_in = [], set()
     is_vc = validator is VC
 
     def add(rule, path, msg, key=True):
-        out.append((rule, source.line(path, key), msg))
+        out.append((rule, path, source.line(path, key), msg))
 
     def adapt(err, path):
         v = err.validator
@@ -352,7 +353,7 @@ def schema_problems(validator, root, data, source):
                     found = True
                     adapt(c, path + tuple(c.relative_path))
             if not found:
-                add("wrong_type", path, f"{key} must be a {KIND_WORD.get(inst, inst)} of the right shape", key=False)
+                add("wrong_type", path, f"{key} must be a {KIND_WORD.get(inst, inst)}", key=False)
             return
         if v == "additionalProperties":
             extras = [k for k in err.instance if k not in err.schema.get("properties", {})]
@@ -387,30 +388,50 @@ def schema_problems(validator, root, data, source):
             add("bad_name", path + (name,), f"not a name: {name}")
             return
         if v in ("pattern", "enum"):
-            add("bad_name", path, f"not a name: {err.instance}", key=False)
+            if "propertyNames" in err.schema_path:        # a key failed the name pattern
+                add("bad_name", path + (err.instance,), f"not a name: {err.instance}")
+            else:
+                add("bad_name", path, f"not a name: {err.instance}", key=False)
             return
         if err.context:
             for c in err.context:
                 adapt(c, path + tuple(c.relative_path))
         else:
-            add("wrong_type", path, f"{key} must be a {KIND_WORD.get(yaml_kind(err.instance), 'value')} of the right shape", key=False)
+            add("wrong_type", path, f"{key} must be a {KIND_WORD.get(yaml_kind(err.instance), 'value')}", key=False)
 
     for err in validator.iter_errors(data):
         adapt(err, tuple(err.absolute_path))
-    hidden = {source.line(u) for u in unknown_in}
-    out = [p for p in out if not (p[0] == "missing_key" and p[1] in hidden)]
-    return list(dict.fromkeys(out))
+    out = [p for p in out if not (p[0] == "missing_key" and p[1] in unknown_in)]
+    return list(dict.fromkeys((rule, line, msg) for rule, _, line, msg in out))
+
+
+def shape_names(data):
+    """duplicate given names inside one example: declared_twice, shape layer"""
+    out = []
+    for sid, st in (data.get("stories") or {}).items():
+        for title, exm in (st.get("examples") or {}).items():
+            seen = set()
+            for i, g in enumerate(exm.get("given") or []):
+                if not isinstance(g, dict):
+                    continue
+                for k, v in g.items():
+                    if k != "with" and isinstance(v, str):
+                        if v in seen:
+                            out.append((("stories", sid, "examples", title, "given", i), f"declared twice: {v}"))
+                        seen.add(v)
+    return out
 
 
 # --- types -----------------------------------------------------------------
 # a type is "INTEGER", "NUMBER", "TEXT", "TIME", "YES_NO", "NONE",
-# ("choice", values or None), ("list", element type), ("entity", name),
+# ("choice", values or None), ("list", element type, ordered),
+# ("entity", name), ("actor", spec), ("either", alternatives),
 # or None when unknown
 
 STR_LIT = r'"(?:[^"\\]|\\.)*"'
 TYPE_RE = re.compile(
     rf"(?:DEFAULT (?:-?[0-9]+(?:\.[0-9]+)?|{STR_LIT}|True|False|(?P<dchoice>{NAME}(?: \| {NAME})+))(?:, DERIVED)?"
-    rf"|(?:TEXT|NUMBER|INTEGER|TIME|YES_NO|(?P<choice>{NAME}(?: \| {NAME})+)|(?P<ref>{NAME})|MANY (?P<many>{NAME})(?:, IN ORDER)?)(?:, OPTIONAL)?(?:, DERIVED)?)")
+    rf"|(?:TEXT|NUMBER|INTEGER|TIME|YES_NO|(?P<choice>{NAME}(?: \| {NAME})+)|(?P<ref>{NAME})|MANY (?P<many>{NAME})(?P<ordered>, IN ORDER)?)(?:, OPTIONAL)?(?:, DERIVED)?)")
 SCALARS = ("TEXT", "NUMBER", "INTEGER", "TIME", "YES_NO")
 
 
@@ -446,7 +467,7 @@ def type_of_phrase(v):
     if m.group("choice"):
         return ("choice", tuple(m.group("choice").split(" | ")))
     if m.group("many"):
-        return ("list", ("entity", m.group("many")))
+        return ("list", ("entity", m.group("many")), bool(m.group("ordered")))
     if m.group("ref"):
         return ("entity", m.group("ref"))
     core = re.sub(r", (OPTIONAL|DERIVED)$", "", re.sub(r", (OPTIONAL|DERIVED)$", "", v))
@@ -466,12 +487,37 @@ def is_list(t):
     return isinstance(t, tuple) and t[0] == "list"
 
 
+def ordered(t):
+    return is_list(t) and len(t) > 2 and bool(t[2])
+
+
 def is_entity(t):
     return isinstance(t, tuple) and t[0] == "entity"
 
 
+def is_actor(t):
+    return isinstance(t, tuple) and t[0] == "actor"
+
+
 def is_choice(t):
     return isinstance(t, tuple) and t[0] == "choice"
+
+
+def is_either(t):
+    return isinstance(t, tuple) and t[0] == "either"
+
+
+def as_list(t):
+    """the list type a value of type t certainly is, or None"""
+    if is_list(t):
+        return t
+    if is_either(t) and all(is_list(a) for a in t[1]):
+        e, o = None, True
+        for i, a in enumerate(t[1]):
+            e = a[1] if i == 0 else unify(e, a[1])
+            o = o and ordered(a)
+        return ("list", e, o)
+    return None
 
 
 def unify(a, b):
@@ -487,26 +533,47 @@ def unify(a, b):
     if {a, b} == {"INTEGER", "NUMBER"}:
         return "NUMBER"
     if is_list(a) and is_list(b):
+        o = ordered(a) and ordered(b)
         if a[1] is None:
-            return b
+            return ("list", b[1], o)
         if b[1] is None:
-            return a
+            return ("list", a[1], o)
         e = unify(a[1], b[1])
-        return ("list", e) if e is not None else None
+        return ("list", e, o) if e is not None else None
     if is_choice(a) and is_choice(b):
         return ("choice", None)
-    return None
+    if is_actor(a) and is_actor(b):
+        return ("actor", None)
+    alts = set()
+    for t in (a, b):
+        alts |= set(t[1]) if is_either(t) else {t}
+    return ("either", frozenset(alts))
 
 
-def compatible(given, expected):
+def unify_all(types):
+    t = None
+    for i, x in enumerate(types):
+        t = x if i == 0 else unify(t, x)
+    return t
+
+
+def compatible(given, expected, optional=False, node=None):
     """may a value of type given stand where expected is declared"""
-    if given is None or expected is None or given == "NONE":
+    if given is None or expected is None:
         return True
+    if given == "NONE":
+        return optional
+    if is_either(given):
+        return all(compatible(g, expected, optional) for g in given[1])
     if given == expected:
         return True
+    if expected == "TIME" and isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return True       # a time literal is read as a TIME where a TIME is expected
     if given == "INTEGER" and expected == "NUMBER":
         return True
     if is_choice(given) and is_choice(expected):
+        return True
+    if is_actor(given) and is_actor(expected):
         return True
     if is_list(given) and is_list(expected):
         return given[1] is None or compatible(given[1], expected[1])
@@ -522,6 +589,10 @@ def words(t):
         return ("an " if t[0] in "AEIOU" else "a ") + t
     if is_choice(t):
         return "a choice value"
+    if is_actor(t):
+        return "an actor"
+    if is_either(t):
+        return " or ".join(sorted(words(a) for a in t[1]))
     if is_list(t):
         return "MANY " + (t[1][1] if is_entity(t[1]) else str(t[1]))
     return ("an " if t[1][0] in "aeiou" else "a ") + t[1]
@@ -532,14 +603,22 @@ def words(t):
 class Project:
     def __init__(self, files):
         """files: list of (stem, data) for every .edda that passed the shape layer"""
-        self.entities, self.roles, self.operations, self.epics, self.choices = {}, {}, {}, set(), set()
-        self.actor = {"name": "TEXT", "roles": ("list", "TEXT")}
-        for stem, data in files:
+        self.entities, self.roles, self.operations, self.epics, self.stories = {}, {}, {}, set(), set()
+        self.files = {stem for stem, _ in files}
+        self.dups = {}            # stem -> [(path, name)]: a name declared twice across the project
+        for stem, data in sorted(files, key=lambda f: f[0]):
+            def dup(path, name):
+                self.dups.setdefault(stem, []).append((path, name))
             for rname, role in (data.get("roles") or {}).items():
+                if rname in self.roles or rname in self.entities:
+                    dup(("roles", rname), rname)
+                    continue
                 has = {p: type_of_phrase(v) for p, v in (role.get("has") or {}).items()}
                 self.roles[rname] = {"has": has, "includes": list(role.get("includes") or []), "file": stem}
-                self.actor.update(has)
             for ename, ent in (data.get("entities") or {}).items():
+                if ename in self.entities or ename in self.roles:
+                    dup(("entities", ename), ename)
+                    continue
                 props, derived, computed = {}, set(), {}
                 for p, v in (ent.get("properties") or {}).items():
                     if isinstance(v, dict):
@@ -549,21 +628,28 @@ class Project:
                         props[p] = type_of_phrase(v)
                         if isinstance(v, str) and v.endswith(", DERIVED"):
                             derived.add(p)
-                        if is_choice(props[p]):
-                            self.choices.update(props[p][1])
                 may = {}
                 for key in ("may_create", "may_read", "may_update", "may_delete"):
                     may[key] = [w.get("role") for w in (ent.get(key) or []) if isinstance(w, dict)]
-                self.entities[ename] = {"props": props, "derived": derived, "computed": computed, "may": may, "file": stem}
+                self.entities[ename] = {"props": props, "derived": derived, "computed": computed, "may": may,
+                                        "file": stem, "part_of": ent.get("part_of")}
             self.epics.update((data.get("epics") or {}).keys())
             for sid, st in (data.get("stories") or {}).items():
+                if sid in self.stories:
+                    dup(("stories", sid), sid)
+                    continue
+                self.stories.add(sid)
                 for oname, op in (st.get("operations") or {}).items():
+                    if oname in self.operations:
+                        dup(("stories", sid, "operations", oname), oname)
+                        continue
                     inputs = []
                     for n, v in (op.get("inputs") or {}).items():
                         inputs.append((n, type_of_phrase(v), isinstance(v, str) and ", OPTIONAL" in v))
+                    who = [w.get("role") for w in (op.get("who") or []) if isinstance(w, dict)]
                     self.operations[oname] = {"inputs": inputs, "returns": op.get("returns"), "returns_type": None,
-                                              "story": sid, "file": stem}
-        for _ in range(4):      # computed properties, in dependency order
+                                              "ordered_by": "ordered_by" in op, "who": who, "story": sid, "file": stem}
+        while True:               # computed properties and returns, until nothing more resolves
             changed = False
             for ename, ent in self.entities.items():
                 for p, expr in ent["computed"].items():
@@ -572,11 +658,54 @@ class Project:
                         if t is not None:
                             ent["props"][p] = t
                             changed = True
+            for op in self.operations.values():
+                if op["returns_type"] is None and isinstance(op["returns"], str):
+                    scope = {n: t for n, t, _ in op["inputs"]}
+                    scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op["who"] if isinstance(r, str))))
+                    t = Expr(self, scope, silent=True).run(op["returns"])
+                    if t is not None:
+                        if op["ordered_by"] and is_list(t):
+                            t = ("list", t[1], True)
+                        op["returns_type"] = t
+                        changed = True
             if not changed:
                 break
-        for op in self.operations.values():
-            if isinstance(op["returns"], str):
-                op["returns_type"] = Expr(self, {n: t for n, t, _ in op["inputs"]}, silent=True).run(op["returns"])
+
+    def home(self, ename):
+        """the file an entity lives in: its own name, or its owner's through part_of"""
+        seen = set()
+        while ename in self.entities and self.entities[ename]["part_of"] and ename not in seen:
+            seen.add(ename)
+            ename = self.entities[ename]["part_of"]
+        return ename
+
+    def closure(self, roles):
+        """the roles plus every role they include, transitively"""
+        out, stack = set(), list(roles)
+        while stack:
+            r = stack.pop()
+            if r in out or r not in self.roles:
+                continue
+            out.add(r)
+            stack.extend(self.roles[r]["includes"])
+        return out
+
+    def actor_props(self, spec):
+        """the properties an actor has: name, roles, and the has: of its roles;
+        spec ("all", roles) for a known actor, ("one", roles) for one of them"""
+        base = {"name": "TEXT", "roles": ("list", "TEXT", True)}
+        if not spec or not spec[1]:
+            return base
+        kind, roles = spec
+        sets = [{p: t for r in self.closure([role]) for p, t in self.roles[r]["has"].items()} for role in roles]
+        if kind == "all":
+            for s in sets:
+                base.update(s)
+            return base
+        common = set.intersection(*[set(s) for s in sets]) if sets else set()
+        for p in common:
+            base[p] = sets[0][p]
+        return base
 
     def admitted(self, ename):
         """the roles the entity's permission matrix admits, closed over includes"""
@@ -614,14 +743,29 @@ class Project:
 GEN_ONLY = {"sum", "min", "max", "any", "all"}
 ONE_ARG = {"len", "OLD"}
 OP_WORD = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}
+FIXED = {"ACTOR", "RESULT", "NOW", "TODAY", "OLD"}
+
+
+def quoted(new):
+    """unparse with Edda's double-quoted text literals"""
+    tree = copy.deepcopy(new)
+    literals = []
+    for c in ast.walk(tree):
+        if isinstance(c, ast.Constant) and isinstance(c.value, str):
+            literals.append(c.value)
+            c.value = f"__edda_text_{len(literals) - 1}__"
+    text = ast.unparse(tree)
+    for i, v in enumerate(literals):
+        text = text.replace(f"'__edda_text_{i}__'", json.dumps(v, ensure_ascii=False))
+    return text
 
 
 class Expr:
     """checks one expression and gives its type; problems as (rule, message)"""
 
-    def __init__(self, project, scope, allow_old=False, in_fact=True, silent=False):
-        self.P, self.scope, self.allow_old, self.in_fact, self.silent = project, scope, allow_old, in_fact, silent
-        self.out, self.src = [], ""
+    def __init__(self, project, scope, allow_old=False, silent=False):
+        self.P, self.scope, self.allow_old, self.silent = project, scope, allow_old, silent
+        self.out, self.src, self.outer = [], "", None
 
     def problem(self, rule, msg):
         if not self.silent:
@@ -631,15 +775,11 @@ class Expr:
         return ast.get_source_segment(self.src, n) or "..."
 
     def second(self, new, old):
-        text = ast.unparse(new)
-        for c in ast.walk(new):      # Edda writes text literals with double quotes
-            if isinstance(c, ast.Constant) and isinstance(c.value, str):
-                text = text.replace(repr(c.value), '"' + c.value.replace('"', '\\"') + '"', 1)
-        self.problem("second_way", f"write {text} (not {self.seg(old)})")
+        self.problem("second_way", f"write {quoted(new)} (not {self.seg(old)})")
 
     def quiet(self, n, scope):
         """the type of a node without reporting, for a rewrite's guard"""
-        silent = Expr(self.P, scope, self.allow_old, self.in_fact, silent=True)
+        silent = Expr(self.P, scope, self.allow_old, silent=True)
         silent.src = self.src
         return silent.visit(n, scope)
 
@@ -659,6 +799,7 @@ class Expr:
                 else:
                     self.problem("not_an_expression", f"not an expression (a call of an operation was expected): {text}")
                 return None
+            self.outer = body        # the actor's request may be a changing operation
         return self.visit(body, self.scope)
 
     def status(self, name, other, scope):
@@ -670,22 +811,24 @@ class Expr:
         return self.visit(name, scope)
 
     def comprehension(self, generators, scope):
-        inner = dict(scope)
+        inner, ordered_all = dict(scope), True
         for g in generators:
             it = self.visit(g.iter, inner)
+            lt = as_list(it)
             if g.is_async:
                 self.problem("not_an_expression", f"not an expression (async): {self.src}")
             if not isinstance(g.target, ast.Name):
                 self.problem("not_an_expression", f"not an expression (a comprehension variable is a plain name): {self.src}")
                 continue
-            if it is not None and not is_list(it):
+            if it is not None and lt is None:
                 self.problem("type_mismatch", f"for expects a list: {self.src}")
                 inner[g.target.id] = None
             else:
-                inner[g.target.id] = it[1] if it else None
+                inner[g.target.id] = lt[1] if lt else None
+            ordered_all = ordered_all and ordered(lt)
             for c in g.ifs:
                 self.visit(c, inner)
-        return inner
+        return inner, ordered_all
 
     def visit(self, n, scope):
         P, src = self.P, self.src
@@ -706,15 +849,13 @@ class Expr:
         if isinstance(n, ast.Name):
             i = n.id
             if i == "ACTOR":
-                return ("entity", "actor")
+                return scope.get("ACTOR", ("actor", None))
             if i in ("NOW", "TODAY"):
                 return "TIME"
             if i == "RESULT":
                 return scope.get("RESULT")
-            if i in scope:
+            if i in scope and i != "RESULT_OP":
                 return scope[i]
-            if i in P.choices:
-                return ("choice", None)
             if i in ONE_ARG or i in GEN_ONLY or i in P.operations:
                 self.problem("not_an_expression", f"not an expression (name {i}): {src}")
                 return None
@@ -725,18 +866,24 @@ class Expr:
             return None
         if isinstance(n, ast.Attribute):
             t = self.visit(n.value, scope)
-            if t == ("entity", "actor"):
-                if n.attr not in P.actor:
+            if is_actor(t):
+                props = P.actor_props(t[1])
+                if n.attr not in props:
                     self.problem("unknown_name", f"unknown name: {n.attr}")
-                return P.actor.get(n.attr)
-            if is_entity(t) and t[1] in P.entities:
+                return props.get(n.attr)
+            if is_entity(t):
+                if t[1] not in P.entities:
+                    return None
                 props = P.entities[t[1]]["props"]
                 if n.attr not in props:
                     self.problem("unknown_name", f"unknown name: {n.attr}")
                 return props.get(n.attr)
+            if t is not None:
+                self.problem("type_mismatch", f".{n.attr} expects an entity: {src}")
             return None
         if isinstance(n, ast.Subscript):
             t = self.visit(n.value, scope)
+            lt = as_list(t)
             s = n.slice
             if isinstance(s, ast.Slice):
                 if s.step is not None:
@@ -744,9 +891,9 @@ class Expr:
                 for b in (s.lower, s.upper):
                     if b is not None and self.visit(b, scope) not in (None, "INTEGER"):
                         self.problem("type_mismatch", f"a slice bound expects an INTEGER: {src}")
-                if t is not None and not (is_list(t) or t == "TEXT"):
+                if t is not None and lt is None and t != "TEXT":
                     self.problem("type_mismatch", f"a slice expects a list or a text: {src}")
-                return t if is_list(t) or t == "TEXT" else None
+                return lt if lt else ("TEXT" if t == "TEXT" else None)
             st = self.visit(s, scope)
             if st not in (None, "INTEGER"):
                 self.problem("type_mismatch", f"an index expects an INTEGER: {src}")
@@ -755,8 +902,10 @@ class Expr:
                     and isinstance(s.right, ast.Constant) and s.right.value == 1 and not isinstance(s.right.value, bool) \
                     and ast.dump(s.left.args[0]) == ast.dump(n.value):
                 self.second(ast.Subscript(n.value, ast.UnaryOp(ast.USub(), ast.Constant(1)), ast.Load()), n)
-            if is_list(t):
-                return t[1]
+            if isinstance(n.value, ast.Name) and n.value.id == "RESULT" and lt and not ordered(lt):
+                self.problem("not_ordered", f"{scope.get('RESULT_OP', 'the operation')} gives no order; RESULT[{self.seg(s)}] needs ordered_by or IN ORDER")
+            if lt:
+                return lt[1]
             if t == "TEXT":
                 return "TEXT"
             if t is not None:
@@ -775,23 +924,31 @@ class Expr:
             left, right, op = n.left, n.comparators[0], n.ops[0]
             if isinstance(op, (ast.Is, ast.IsNot)) and not (isinstance(right, ast.Constant) and right.value is None):
                 self.problem("not_an_expression", f"not an expression (is only against None): {src}")
-            # a bare name beside a choice property is a status value: in its list or unknown_status
+
             def bare(b):
                 return isinstance(b, ast.Name) and b.id not in scope and b.id not in P.operations \
-                    and b.id not in ("RESULT", "ACTOR", "NOW", "TODAY") and re.fullmatch(NAME, b.id)
+                    and b.id not in FIXED and re.fullmatch(NAME, b.id)
+
+            def bare_list(b):
+                return isinstance(b, ast.List) and b.elts and all(bare(e) for e in b.elts)
+
+            # a bare name beside a choice property is a status value: in its list or unknown_status
             if bare(right) and not bare(left):
                 lt = self.visit(left, scope)
                 rt = self.status(right, lt, scope)
             elif bare(left) and not bare(right):
                 rt = self.visit(right, scope)
                 lt = self.status(left, rt, scope)
+            elif isinstance(op, (ast.In, ast.NotIn)) and bare_list(right):
+                lt = self.visit(left, scope)
+                rt = ("list", unify_all([self.status(e, lt, scope) for e in right.elts]), True)
             else:
                 lt, rt = self.visit(left, scope), self.visit(right, scope)
             neg = isinstance(op, ast.NotEq)
             # len(x) == 0, len(x) != 0, len(x) > 0, only for a list
             if isinstance(left, ast.Call) and isinstance(left.func, ast.Name) and left.func.id == "len" \
                     and len(left.args) == 1 and isinstance(right, ast.Constant) and right.value == 0 \
-                    and not isinstance(right.value, bool) and is_list(self.quiet(left.args[0], scope)):
+                    and not isinstance(right.value, bool) and as_list(self.quiet(left.args[0], scope)):
                 x = left.args[0]
                 if isinstance(op, ast.Eq):
                     self.second(ast.Compare(x, [ast.Eq()], [ast.List([], ast.Load())]), n)
@@ -819,15 +976,11 @@ class Expr:
                 self.second(ast.UnaryOp(ast.Not(), call) if neg else call, n)
             return "YES_NO"
         if isinstance(n, ast.BoolOp):
-            t = None
-            for i, v in enumerate(n.values):
-                vt = self.visit(v, scope)
-                t = vt if i == 0 else unify(t, vt)
-            return t
+            return unify_all([self.visit(v, scope) for v in n.values])
         if isinstance(n, ast.UnaryOp):
             t = self.visit(n.operand, scope)
             if isinstance(n.op, ast.Not):
-                if is_list(t):
+                if as_list(t):
                     self.second(ast.Compare(n.operand, [ast.Eq()], [ast.List([], ast.Load())]), n)
                 return "YES_NO"
             if isinstance(n.op, ast.USub):
@@ -841,11 +994,15 @@ class Expr:
             if type(n.op) not in OP_WORD:
                 self.problem("not_an_expression", f"not an expression ({type(n.op).__name__}): {src}")
                 return None
-            if isinstance(n.op, ast.Add) and (is_list(lt) or is_list(rt)):
-                if lt is not None and rt is not None and not (is_list(lt) and is_list(rt)):
+            ll, rl = as_list(lt), as_list(rt)
+            if isinstance(n.op, ast.Add) and (ll or rl):
+                if lt is not None and rt is not None and not (ll and rl):
                     self.problem("type_mismatch", f"+ expects two lists or two numbers: {src}")
                     return None
-                return unify(lt, rt) if (lt is not None and rt is not None) else (lt or rt)
+                if ll and rl:
+                    u = unify(ll, rl)
+                    return ("list", u[1], ordered(ll) and ordered(rl)) if u else None
+                return ll or rl
             for t in (lt, rt):
                 if t not in (None, "INTEGER", "NUMBER"):
                     self.problem("type_mismatch", f"{OP_WORD[type(n.op)]} expects numbers: {src}")
@@ -861,14 +1018,10 @@ class Expr:
             self.visit(n.test, scope)
             return unify(self.visit(n.body, scope), self.visit(n.orelse, scope))
         if isinstance(n, ast.List):
-            t = None
-            for i, e in enumerate(n.elts):
-                et = self.visit(e, scope)
-                t = et if i == 0 else unify(t, et)
-            return ("list", t)
+            return ("list", unify_all([self.visit(e, scope) for e in n.elts]) if n.elts else None, True)
         if isinstance(n, ast.ListComp):
-            inner = self.comprehension(n.generators, scope)
-            return ("list", self.visit(n.elt, inner))
+            inner, o = self.comprehension(n.generators, scope)
+            return ("list", self.visit(n.elt, inner), o)
         if isinstance(n, ast.GeneratorExp):
             self.problem("not_an_expression", f"not an expression (a generator only inside {', '.join(sorted(GEN_ONLY))}): {src}")
             return None
@@ -896,7 +1049,7 @@ class Expr:
                         self.visit(a, scope)
                     return None
                 g = n.args[0]
-                inner = self.comprehension(g.generators, scope)
+                inner, _ = self.comprehension(g.generators, scope)
                 et = self.visit(g.elt, inner)
                 if f.id == "sum" and isinstance(g.elt, ast.Constant) and g.elt.value == 1 and len(g.generators) == 1 \
                         and not g.generators[0].ifs:
@@ -915,7 +1068,7 @@ class Expr:
                     return "INTEGER" if f.id == "len" else None
                 at = self.visit(n.args[0], scope)
                 if f.id == "len":
-                    if at is not None and not (is_list(at) or at == "TEXT"):
+                    if at is not None and not (as_list(at) or at == "TEXT"):
                         self.problem("type_mismatch", f"len expects a list or a text: {src}")
                     return "INTEGER"
                 if not self.allow_old:
@@ -929,23 +1082,23 @@ class Expr:
                     self.problem("type_mismatch", f"{f.id} expects {len(req)} input{'s' if len(req) != 1 else ''} by position: {src}")
                 for a, (iname, itype, _) in zip(n.args, req):
                     at = self.visit(a, scope)
-                    if not compatible(at, itype):
+                    if not compatible(at, itype, False, a):
                         self.problem("type_mismatch", f"{f.id} input {iname} expects {words(itype)}: {src}")
                 for a in n.args[len(req):]:
                     self.visit(a, scope)
                 seen = set()
                 for kw in n.keywords:
                     if kw.arg is None or kw.arg not in opt:
-                        self.problem("type_mismatch", f"{f.id} has no optional input {kw.arg}: {src}")
+                        self.problem("type_mismatch", f"{f.id} expects no input named {kw.arg}: {src}")
                         self.visit(kw.value, scope)
                     elif kw.arg in seen:
-                        self.problem("type_mismatch", f"{f.id} input {kw.arg} given twice: {src}")
+                        self.problem("type_mismatch", f"{f.id} expects {kw.arg} once: {src}")
                     else:
                         seen.add(kw.arg)
                         at = self.visit(kw.value, scope)
-                        if not compatible(at, opt[kw.arg]):
+                        if not compatible(at, opt[kw.arg], True, kw.value):
                             self.problem("type_mismatch", f"{f.id} input {kw.arg} expects {words(opt[kw.arg])}: {src}")
-                if self.in_fact and op["returns"] is None:
+                if op["returns"] is None and n is not self.outer:
                     self.problem("not_an_expression", f"not an expression (a changing operation inside a fact): {src}")
                 return op["returns_type"] if op["returns"] is not None else "NONE"
             for a in n.args:
@@ -969,7 +1122,7 @@ def walk_meaning(data, stem, P, source):
     def tp(v, where):
         if isinstance(v, str):
             if v == "":
-                yield "wrong_type", where, "a type phrase was expected, nothing was given"
+                yield "wrong_type", where, f"{where[-1]} expects a text, nothing was given"
                 return
             for rule, p in type_phrase_problems(v):
                 yield rule, where, p
@@ -977,12 +1130,12 @@ def walk_meaning(data, stem, P, source):
             if e and e not in P.entities:
                 yield "unknown_name", where, f"unknown name: {e}"
 
-    def ex(v, where, scope, allow_old=False, in_fact=True, call_slot=False):
+    def ex(v, where, scope, allow_old=False, call_slot=False):
         if isinstance(v, str):
             if v == "":
-                yield "wrong_type", where, "an expression was expected, nothing was given"
+                yield "wrong_type", where, f"{key_name(where)} expects a text, nothing was given"
                 return
-            c = Expr(P, scope, allow_old, in_fact)
+            c = Expr(P, scope, allow_old)
             c.run(v, call_slot=call_slot)
             for rule, p in c.out:
                 yield rule, where, p
@@ -996,6 +1149,9 @@ def walk_meaning(data, stem, P, source):
     def role_ok(r, where):
         if isinstance(r, str) and r not in P.roles:
             yield "unknown_name", where, f"unknown name: {r}"
+
+    def one_of(roles):
+        return ("actor", ("one", frozenset(r for r in roles if isinstance(r, str))))
 
     cycles = P.role_cycles()
     for rname, role in (data.get("roles") or {}).items():
@@ -1052,13 +1208,14 @@ def walk_meaning(data, stem, P, source):
             for i, w in enumerate(ent.get(key) or []):
                 yield from role_ok(w.get("role"), ("entities", ename, key, i))
                 if "when" in w:
-                    yield from ex(w["when"], ("entities", ename, key, i, "when"), {ename: ("entity", ename)})
+                    scope = {ename: ("entity", ename), "ACTOR": one_of([w.get("role")])}
+                    yield from ex(w["when"], ("entities", ename, key, i, "when"), scope)
     for sid, st in (data.get("stories") or {}).items():
         about = st.get("about")
         if about not in P.entities:
             yield "unknown_name", ("stories", sid, "about"), f"unknown name: {about}"
-        elif P.entities[about]["file"] != stem:
-            yield "wrong_file", ("stories", sid), f"story {sid} is about {about} and belongs in {about}.edda"
+        elif P.home(about) != stem:
+            yield "wrong_file", ("stories", sid), f"story {sid} is about {about} and belongs in {P.home(about)}.edda"
         yield from role_ok(st.get("as_a"), ("stories", sid, "as_a"))
         if "epic" in st and st["epic"] not in P.epics:
             yield "unknown_name", ("stories", sid, "epic"), f"unknown name: {st['epic']}"
@@ -1079,37 +1236,48 @@ def walk_meaning(data, stem, P, source):
                     yield "bad_name", where + ("inputs", n), f"not a name: {n}"
                 yield from tp(v, where + ("inputs", n))
                 inputs[n] = type_of_phrase(v)
+            who_roles = [w.get("role") for w in (op.get("who") or []) if isinstance(w, dict)]
+            body = dict(inputs, ACTOR=one_of(who_roles))
             for i, w in enumerate(op.get("who") or []):
                 r = w.get("role")
                 yield from role_ok(r, where + ("who", i))
                 if admitted is not None and r in P.roles and r not in admitted:
                     yield "wider_than_entity", where + ("who", i), f"{oname} admits {r}, which {about} does not"
                 if "when" in w:
-                    yield from ex(w["when"], where + ("who", i, "when"), inputs)
+                    yield from ex(w["when"], where + ("who", i, "when"), dict(inputs, ACTOR=one_of([r])))
             for i, r in enumerate(op.get("refuse") or []):
-                yield from ex(r.get("when"), where + ("refuse", i, "when"), inputs)
+                yield from ex(r.get("when"), where + ("refuse", i, "when"), body)
             for i, f in enumerate(op.get("ensure") or []):
-                yield from fact(f, where + ("ensure", i), inputs, allow_old=True)
-            yield from ex(op.get("returns"), where + ("returns",), inputs)
+                yield from fact(f, where + ("ensure", i), body, allow_old=True)
+            yield from ex(op.get("returns"), where + ("returns",), body)
             rt = P.operations.get(oname, {}).get("returns_type")
-            item_scope = dict(inputs)
+            item_scope = {"ACTOR": body["ACTOR"]}
             if is_list(rt) and is_entity(rt[1]):
                 item_scope[rt[1][1]] = rt[1]
             for i, o in enumerate(op.get("ordered_by") or []):
                 yield from ex(o, where + ("ordered_by", i), item_scope)
             for i, p in enumerate(op.get("also_changes") or []):
-                root = p.split(".")[0] if isinstance(p, str) else ""
-                if root not in inputs:
-                    yield "unknown_name", where + ("also_changes", i), f"unknown name: {root}"
+                pw = where + ("also_changes", i)
+                try:
+                    node = ast.parse(p, mode="eval").body if isinstance(p, str) else None
+                except SyntaxError:
+                    node = None
+                chain = node
+                while isinstance(chain, ast.Attribute):
+                    chain = chain.value
+                if not (isinstance(node, ast.Attribute) and isinstance(chain, ast.Name)):
+                    yield "not_an_expression", pw, f"not an expression (a property path was expected): {p}"
+                else:
+                    yield from ex(p, pw, inputs)
         for title, exm in (st.get("examples") or {}).items():
             where = ("stories", sid, "examples", title)
             givens, names = {}, {}
             for i, g in enumerate(exm.get("given") or []):      # names first: givens are order-independent
                 for k, v in g.items():
-                    if k != "with" and isinstance(v, str):
-                        if v in givens:
-                            yield "declared_twice", where + ("given", i), f"declared twice: {v}"
-                        givens[v] = ("entity", "actor") if k == "actor" else ("entity", k)
+                    if k != "with" and isinstance(v, str) and v not in givens:
+                        roles = (g.get("with") or {}).get("roles") if k == "actor" else None
+                        roles = roles if isinstance(roles, list) else ([roles] if isinstance(roles, str) else [])
+                        givens[v] = ("actor", ("all", frozenset(roles))) if k == "actor" else ("entity", k)
                         names[v] = k
             for i, g in enumerate(exm.get("given") or []):
                 gw = where + ("given", i)
@@ -1120,23 +1288,30 @@ def walk_meaning(data, stem, P, source):
                 if k != "actor" and k not in P.entities:
                     yield "unknown_name", gw, f"unknown name: {k}"
                     continue
-                props = P.actor if k == "actor" else P.entities[k]["props"]
+                props = P.actor_props(("all", frozenset())) if k == "actor" else P.entities[k]["props"]
                 derived = set() if k == "actor" else P.entities[k]["derived"]
+                computed = set() if k == "actor" else set(P.entities[k]["computed"])
                 for p, v in (g.get("with") or {}).items():
                     pw = gw + ("with", p)
-                    if p == "fixture" and k != "actor":
+                    if p == "fixture" and k == "spec_file":
                         if not os.path.isdir(f"{ROOT}/fixtures/{v}"):
                             yield "unknown_name", pw, f"unknown name: {v}"
                         continue
                     if p == "roles" and k == "actor":
-                        for j, r in enumerate(v if isinstance(v, list) else [v]):
-                            yield from role_ok(r, pw + ((j,) if isinstance(v, list) else ()))
+                        if not isinstance(v, list):
+                            yield "type_mismatch", pw, f"roles expects a list of roles: {v}"
+                            continue
+                        for j, r in enumerate(v):
+                            yield from role_ok(r, pw + (j,))
                         continue
                     if p not in props:
                         yield "unknown_name", pw, f"unknown name: {p}"
                         continue
                     if p in derived:
                         yield "derived_in_given", pw, f"{p} is derived and cannot be given"
+                        continue
+                    if p in computed:
+                        yield "derived_in_given", pw, f"{p} is computed and cannot be given"
                         continue
                     yield from given_value(v, props[p], p, pw, givens, names, source)
             scope = dict(givens)
@@ -1148,13 +1323,14 @@ def walk_meaning(data, stem, P, source):
                     actor = w.get("actor")
                     if actor not in givens or names.get(actor) != "actor":
                         yield "unknown_name", sw + ("when", "actor"), f"unknown name: {actor}"
-                    c = Expr(P, scope, in_fact=False)
+                    c = Expr(P, scope)
                     rt = c.run(w["call"], call_slot=True) if isinstance(w.get("call"), str) else None
                     for rule, p in c.out:
                         yield rule, sw + ("when", "call"), p
                     outcome_first = True
                     then = step.get("then") or []
                     scope["RESULT"] = "NONE" if (then and isinstance(then[0], dict)) else rt
+                    scope["RESULT_OP"] = c.outer.func.id if c.outer else "the operation"
                 for j, item in enumerate(step.get("then") or []):
                     if j == 0 and outcome_first:
                         continue
@@ -1206,9 +1382,32 @@ def given_value(v, t, p, pw, givens, names, source):
         yield "type_mismatch", pw, f"{p} expects {words(t)}: {v}"
 
 
+# --- the history layer ----------------------------------------------------------
+
+def history_problems(entries, P, source):
+    """bad_version: the entries of a .edda.vc numbered 1, 2, 3 per block, in file order"""
+    out, count = [], {}
+    for i, e in enumerate(entries if isinstance(entries, list) else []):
+        if not isinstance(e, dict):
+            continue
+        kind = "story" if "story" in e else "entity" if "entity" in e else "role"
+        name, n = e.get(kind), e.get("number")
+        line = source.line((i, "number"))
+        known = {"story": P.stories, "entity": P.entities, "role": P.roles}[kind]
+        if name not in known:
+            out.append(("bad_version", line, f"{kind} {name} version {n}: no such {kind}"))
+            continue
+        expected = count.get((kind, name), 0) + 1
+        if n != expected:
+            out.append(("bad_version", line, f"{kind} {name} version {n} out of sequence; expected {expected}"))
+        count[(kind, name)] = n if isinstance(n, int) else expected
+    return out
+
+
 # --- run ---------------------------------------------------------------------
 
 KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "role_cycle", "wider_than_entity", "declared_twice"}
+
 
 def load(path):
     """(source, data or None); data only when the file is YAML"""
@@ -1227,21 +1426,29 @@ def load(path):
 
 
 def check(path, P):
-    """returns (source, shape, meaning): lists of (rule, line, message), each sorted"""
+    """returns (source, shape, meaning, history): lists of (rule, line, message), each sorted"""
     stem = os.path.basename(path).split(".")[0]
     source, data = load(path)
     if source.src:
-        return sorted(set(source.src), key=lambda p: (p[1], p[0])), [], []
+        return sorted(set(source.src), key=lambda p: (p[1], p[0])), [], [], []
     is_vc = path.endswith(".vc")
     shape = list(source.style) + [("declared_twice", ln, f"declared twice: {k}") for k, ln in source.duplicates]
     shape += schema_problems(VC if is_vc else V, VC_SCHEMA if is_vc else SCHEMA, data, source)
+    if not is_vc:
+        shape += [("declared_twice", source.line(where), msg) for where, msg in shape_names(data)]
+        shape += [("declared_twice", source.line(where), f"declared twice: {name}") for where, name in P.dups.get(stem, [])]
     shape = sorted(set(shape), key=lambda p: (p[1], p[0]))
-    meaning = []
-    if not is_vc and not shape:
+    meaning, history = [], []
+    if shape:
+        return [], shape, [], []
+    if is_vc:
+        if stem in P.files:
+            history = sorted(set(history_problems(data, P, source)), key=lambda p: (p[1], p[0]))
+    else:
         meaning = [(rule, source.line(where, key=rule in KEY_LINE_RULES), msg)
                    for rule, where, msg in walk_meaning(data, stem, P, source)]
         meaning = sorted(set(meaning), key=lambda p: (p[1], p[0]))
-    return [], shape, meaning
+    return [], shape, meaning, history
 
 
 def project_of(folder):
@@ -1257,21 +1464,21 @@ if __name__ == "__main__":
     ok = True
     P = project_of(f"{ROOT}/specs")
     for path in sorted(glob.glob(f"{ROOT}/specs/*.edda") + glob.glob(f"{ROOT}/specs/*.edda.vc")):
-        src, shape, meaning = check(path, P)
-        problems = src + shape + meaning
+        problems = sum(check(path, P), [])
         print(os.path.relpath(path, ROOT), "OK" if not problems else "")
         for rule, line, msg in problems:
             ok = False
             print(f"    {line}: {rule}: {msg}")
 
     print()
-    print("fixtures: which the source, shape and meaning layers catch")
+    print("fixtures: which layer catches each file")
+    LAYERS = ("source", "shape", "meaning", "history")
     for folder in sorted(os.listdir(f"{ROOT}/fixtures")):
         FP = project_of(f"{ROOT}/fixtures/{folder}")
         for path in sorted(glob.glob(f"{ROOT}/fixtures/{folder}/*")):
-            src, shape, meaning = check(path, FP)
-            layer = "source" if src else "shape" if shape else "meaning" if meaning else None
-            print(f"  {folder}/{os.path.basename(path)}: {'caught by ' + layer if layer else 'passes'}")
-            for rule, line, msg in src + shape + meaning:
+            layers = check(path, FP)
+            caught = [name for name, found in zip(LAYERS, layers) if found]
+            print(f"  {folder}/{os.path.basename(path)}: {'caught by ' + caught[0] if caught else 'passes'}")
+            for rule, line, msg in sum(layers, []):
                 print(f"      {line}: {rule}: {msg}")
     sys.exit(0 if ok else 1)

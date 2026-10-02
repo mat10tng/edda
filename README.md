@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 30
+language/   reference.md    the language reference, revision 31
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -49,8 +49,9 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             names resolved across a folder, the Python
                             expression whitelist with types from
                             literals and declarations, operation
-                            signatures, and the style rule under its
-                            equivalences
+                            signatures, ordering, the style rule under
+                            its equivalences, and the version sequence
+                            of a history
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
@@ -59,5 +60,5 @@ snake_case. Tell your editor the extension is YAML and point it at
 `language/schema.json`.
 
 Nothing is built beyond the validator, which is a partial checker:
-the history layer, the flags, `not_ordered` and the running of the
-examples are not there yet. `python3 tools/validate.py` needs PyYAML and jsonschema.
+pins and snapshots (`bad_pin`, `bad_snapshot`), the flags and the
+running of the examples are not there yet. `python3 tools/validate.py` needs PyYAML and jsonschema.
