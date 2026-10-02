@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 49, 2 Oct 2026. Replaces revision 48 (kb:9378947). Decisions
+Revision 50, 2 Oct 2026. Replaces revision 49 (kb:9378948). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 26. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 27. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -373,7 +373,7 @@ form are Python's.
 | form | means | from |
 |---|---|---|
 | `order.status`, `order.shop.name`, `story.versions[-1].text` | reach into an entity or a list element; chains allowed | Python |
-| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; `==` and `!=` take two values of one kind, every value one side may be against every value the other may be (`None` beside anything; a time literal beside a TIME, inside a list too; two lists whose positions are known position by position, any other pair of lists every element against every element, an `IN ORDER` list beside an unordered one; a list's positions are known when it is written out, sliced or joined from such lists with whole-number bounds, `-1` included, or a computed property of one, and a conditional of such lists keeps each branch's positions, a slice, a join and a constant index applying to each branch on its own; a slice of such a list has only the elements it keeps, and a constant index gives the element as written, a computed property's literals included and each branch of a conditional on its own, in a comparison, as an input, inside another written-out list and under `OLD` alike, an optional value among them standing only where `None` fits; a comprehension whose projection is a text literal is a list of such literals of unknown length, compared, indexed and passed as an input like one; a join, a slice with a variable bound and an index that is not a constant keep what the elements may be, literals included, their positions then unknown, an index into a conditional of lists giving what each branch's element may be; a comprehension's variable keeps what the elements of its list may be, literals included, and so do `min` and `max` of them), `<` and the rest two numbers, two texts or two times (`type_mismatch` otherwise) | Python syntax, Edda type rule |
+| `x == v`, `x != v`, `x < v`, `x > v`, `x <= v`, `x >= v` | compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; `==` and `!=` take two values of one kind, every value one side may be against every value the other may be (`None` beside anything; a time literal beside a TIME, inside a list too; two lists whose positions are known position by position, any other pair of lists every element against every element, an `IN ORDER` list beside an unordered one; a list's positions are known when it is written out, sliced or joined from such lists with whole-number bounds, `-1` included, or a computed property of one, and a conditional of such lists keeps each branch's positions, a slice, a join and a constant index applying to each branch on its own; a slice of such a list has only the elements it keeps, and a constant index gives the element as written, a computed property's literals included and each branch of a conditional on its own, in a comparison, as an input, inside another written-out list and under `OLD` alike, an optional value among them standing only where `None` fits; a comprehension whose projection is a text literal is a list of such literals of unknown length, compared, indexed and passed as an input like one; a join, a slice with a variable bound and an index that is not a constant keep what the elements may be, literals included, their positions then unknown, an index into a conditional of lists giving what each branch's element may be; a comprehension's variable keeps what the elements of its list may be, literals included, and so do `min` and `max` of them; a computed property, an operation's result and `RESULT` keep the literal markers of their expression, so naming a calculation changes nothing), `<` and the rest two numbers, two texts or two times (`type_mismatch` otherwise) | Python syntax, Edda type rule |
 | `a and b`, `a or b`, `not a` | logic; `not` binds tightest, then `and`, then `or`; short-circuit; `and` and `or` give one of their operands, as in Python, so `[1] or []` is a list | Python |
 | `x is None`, `x is not None` | an optional value has no value, has a value | Python |
 | `x in list`, `x not in list` | membership in a list; every value `x` may be is of the kind of every element (`type_mismatch` otherwise); a bare status in a literal list belongs to the compared property, the other elements are typed as usual | Python syntax, Edda type rule |
@@ -836,14 +836,23 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 48
+## 14. Changes from revision 49
+
+- From Astra's round 27: a computed property, an operation's result
+  and `RESULT` keep the literal markers of their expression, so with
+  `earliest` computed as `min(d for d in days)`, `earliest == NOW`
+  passes like `min(d for d in days) == NOW` does, and a read
+  operation returning it compares and passes as an input the same
+  way; naming a calculation changes nothing.
+
+## 15. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 15. Changes from revision 47
+## 16. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -853,7 +862,7 @@ are build step 4 and get their own stories then.
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 16. Changes from revision 46
+## 17. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -862,7 +871,7 @@ are build step 4 and get their own stories then.
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 17. Changes from revision 45
+## 18. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -872,7 +881,7 @@ are build step 4 and get their own stories then.
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 18. Changes from revision 44
+## 19. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -881,7 +890,7 @@ are build step 4 and get their own stories then.
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 19. Changes from revision 43
+## 20. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -890,7 +899,7 @@ are build step 4 and get their own stories then.
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 20. Changes from revision 42
+## 21. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -901,7 +910,7 @@ are build step 4 and get their own stories then.
   an optional value among them still standing only where `None`
   fits.
 
-## 21. Changes from revision 41
+## 22. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -910,21 +919,21 @@ are build step 4 and get their own stories then.
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 22. Changes from revision 40
+## 23. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 23. Changes from revision 39
+## 24. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 24. Changes from revision 38
+## 25. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -932,7 +941,7 @@ are build step 4 and get their own stories then.
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 25. Changes from revision 37
+## 26. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -941,7 +950,7 @@ are build step 4 and get their own stories then.
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 26. Changes from revision 36
+## 27. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -952,7 +961,7 @@ are build step 4 and get their own stories then.
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 27. Changes from revision 35
+## 28. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -965,7 +974,7 @@ are build step 4 and get their own stories then.
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 28. Changes from revision 34
+## 29. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -978,7 +987,7 @@ are build step 4 and get their own stories then.
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 29. Changes from revision 33
+## 30. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -994,7 +1003,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 30. Changes from revision 32
+## 31. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1012,7 +1021,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 31. Changes from revision 31
+## 32. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1031,7 +1040,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 32. Changes from revision 30
+## 33. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1052,7 +1061,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 33. Changes from revision 29
+## 34. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1073,7 +1082,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 34. Changes from revision 28
+## 35. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1090,7 +1099,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 35. Changes from revision 27
+## 36. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1112,7 +1121,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 36. Changes from revision 26
+## 37. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

@@ -851,7 +851,7 @@ class Project:
                         for key in ("may_create", "may_read", "may_update", "may_delete"):
                             may[key] = [w.get("role") for w in listing(mapping(ent).get(key)) if isinstance(w, dict)]
                         self.entities[ename] = {"props": props, "derived": derived, "computed": computed, "may": may,
-                                                "file": stem, "part_of": mapping(ent).get("part_of")}
+                                                "marks": {}, "file": stem, "part_of": mapping(ent).get("part_of")}
                 elif section == "epics":
                     self.epics.update(mapping(block).keys())
                 elif section == "stories":
@@ -868,23 +868,27 @@ class Project:
                             for n, v in mapping(mapping(op).get("inputs")).items():
                                 inputs.append((n, type_of_phrase(v), isinstance(v, str) and ", OPTIONAL" in v))
                             who = [w.get("role") for w in listing(mapping(op).get("who")) if isinstance(w, dict)]
-                            self.operations[oname] = {"inputs": inputs, "returns": mapping(op).get("returns"), "returns_type": None,
+                            self.operations[oname] = {"inputs": inputs, "returns": mapping(op).get("returns"), "returns_type": None, "returns_mark": None,
                                                       "ordered_by": "ordered_by" in mapping(op), "who": who, "story": sid, "file": stem}
         while True:               # computed properties and returns, until no type gets more precise
             changed = False
             for ename, ent in self.entities.items():
                 for p, expr in ent["computed"].items():
                     if isinstance(expr, str) and unknowns(ent["props"][p]):
-                        t = Expr(self, dict(ent["props"]), silent=True).run(expr)
+                        E = Expr(self, self.scope_of(ename), silent=True)
+                        t = E.run(expr)
                         if t is not None and (ent["props"][p] is None or unknowns(t) < unknowns(ent["props"][p])):
                             ent["props"][p] = t
+                            ent["marks"][p] = E.root_mark(t)
                             changed = True
             for op in self.operations.values():
                 if isinstance(op["returns"], str) and unknowns(op["returns_type"]):
                     scope = {n: t for n, t, _ in op["inputs"]}
                     scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op["who"] if isinstance(r, str))))
-                    t = Expr(self, scope, silent=True).run(op["returns"])
+                    E = Expr(self, scope, silent=True)
+                    t = E.run(op["returns"])
                     if t is not None and (op["returns_type"] is None or unknowns(t) < unknowns(op["returns_type"])):
+                        op["returns_mark"] = E.root_mark(t)
                         if op["ordered_by"] and as_list(t):     # each alternative ordered, positions kept
                             ts = [("list", a[1], True) + tuple(a[3:]) for a in list_alts(t)]
                             t = ts[0] if len(ts) == 1 else ("either", frozenset(ts))
@@ -907,6 +911,13 @@ class Project:
             return self.stories.get(name)
         block = (self.entities if kind == "entity" else self.roles).get(name)
         return block["file"] if block else None
+
+    def scope_of(self, ename):
+        """an entity's properties as a scope, each property's literal markers beside it"""
+        ent = self.entities[ename]
+        scope = dict(ent["props"])
+        scope.update({("lit", p): m for p, m in ent["marks"].items() if m is not None})
+        return scope
 
     def find_cycles(self):
         """the first declared role of each cycle of includes, in file-name then file order"""
@@ -1019,7 +1030,8 @@ class Expr:
         self.P, self.scope, self.allow_old, self.silent = project, scope, allow_old, silent
         self.out, self.src, self.outer = [], "", None
         self.types = {}           # id(node) -> its type, for fits()
-        self.marks = {}           # id(node) -> what a comprehension variable may be, literal markers kept
+        self.marks = {}           # id(node) -> what a value may be, literal markers kept (section 7.1)
+        self.root = None          # the expression's top node, for root_mark()
 
     def problem(self, rule, msg):
         if not self.silent:
@@ -1054,7 +1066,14 @@ class Expr:
                     self.problem("not_an_expression", f"not an expression (a call of an operation was expected): {text}")
                 return None
             self.outer = body        # the actor's request may be a changing operation
+        self.root = body
         return self.visit(body, self.scope)
+
+    def root_mark(self, t):
+        """the literal markers of the whole expression, of type t, when it has any:
+        kept beside a computed property's or a result's type"""
+        m = self.lit_type(self.root, t) if self.root is not None else None
+        return m if m is not None and LIT in alts(m) else None
 
     def status(self, name, other, scope):
         """type a bare name compared with a value of type other"""
@@ -1303,6 +1322,8 @@ class Expr:
                 if "RESULT" not in scope:
                     self.problem("not_an_expression", f"not an expression (RESULT only after a call): {src}")
                     return None
+                if ("lit", "RESULT") in scope:
+                    self.marks[id(n)] = scope[("lit", "RESULT")]
                 return scope["RESULT"]
             if i in scope and i != "RESULT_OP":
                 if ("lit", i) in scope:
@@ -1320,7 +1341,7 @@ class Expr:
             t = self.visit(n.value, scope)
             if t is None:
                 return None
-            outs = []
+            outs, marks = [], []
             for a in alts(t):
                 if a is None:
                     outs.append(None)
@@ -1337,9 +1358,15 @@ class Expr:
                     if n.attr not in props:
                         self.problem("unknown_name", f"unknown name: {n.attr}")
                     outs.append(props.get(n.attr))
+                    marks.append(P.entities[a[1]]["marks"].get(n.attr) or outs[-1])
+                    continue
                 else:
                     self.problem("type_mismatch", f".{n.attr} expects an entity: {src}")
                     return None
+                marks.append(outs[-1])
+            m = unify_all(marks)
+            if m is not None and LIT in alts(m):
+                self.marks[id(n)] = m
             return unify_all(outs)
         if isinstance(n, ast.Subscript):
             t = self.visit(n.value, scope)
@@ -1606,6 +1633,8 @@ class Expr:
                             self.problem("type_mismatch", f"{f.id} input {kw.arg} expects {words(opt[kw.arg])}: {src}")
                 if op["returns"] is None and n is not self.outer:
                     self.problem("not_an_expression", f"not an expression (a changing operation inside a fact): {src}")
+                if op.get("returns_mark") is not None:
+                    self.marks[id(n)] = op["returns_mark"]
                 return op["returns_type"] if op["returns"] is not None else "NONE"
             for a in n.args:
                 self.visit(a, scope)
@@ -1668,7 +1697,7 @@ def walk_meaning(data, stem, P, source):
             yield "role_cycle", ("roles", rname, "includes"), f"role {rname} includes itself"
     for ename, ent in mapping(data.get("entities")).items():
         props = P.entities.get(ename, {}).get("props", {})
-        own = dict(props)
+        own = P.scope_of(ename) if ename in P.entities else dict(props)
         if "part_of" in ent and ent["part_of"] not in P.entities:
             yield "unknown_name", ("entities", ename, "part_of"), f"unknown name: {ent['part_of']}"
         elif "part_of" in ent and ename in P.entities and P.home(ename) != stem:
@@ -1837,7 +1866,7 @@ def walk_meaning(data, stem, P, source):
                         yield "unknown_name", sw + ("when", "actor"), f"unknown name: {actor}"
                     else:
                         scope["ACTOR"] = givens[actor]
-                    c = Expr(P, {k: v for k, v in scope.items() if k not in ("RESULT", "RESULT_OP")})
+                    c = Expr(P, {k: v for k, v in scope.items() if k not in ("RESULT", "RESULT_OP", ("lit", "RESULT"))})
                     rt = c.run(w["call"], call_slot=True) if isinstance(w.get("call"), str) else None
                     for rule, p in c.out:
                         yield rule, sw + ("when", "call"), p
@@ -1845,6 +1874,10 @@ def walk_meaning(data, stem, P, source):
                     then = listing(step.get("then"))
                     scope["RESULT"] = "NONE" if (then and isinstance(then[0], dict)) else rt
                     scope["RESULT_OP"] = c.outer.func.id if c.outer else "the operation"
+                    scope.pop(("lit", "RESULT"), None)
+                    m = P.operations.get(c.outer.func.id, {}).get("returns_mark") if c.outer else None
+                    if m is not None and scope["RESULT"] != "NONE":
+                        scope[("lit", "RESULT")] = m
                 for j, item in enumerate(listing(step.get("then"))):
                     if j == 0 and outcome_first:
                         continue
