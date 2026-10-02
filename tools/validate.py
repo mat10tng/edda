@@ -552,15 +552,33 @@ def int_lit(node):
     return None
 
 
+LIT = ("lit", "TEXT")           # a text literal's position: it may stand for a time
+LIT_NODE = ast.Constant("")     # the node such a position is given, so is_time_literal holds
+
+
+def unlit(p):
+    """a position's type as a plain type"""
+    if p == LIT:
+        return "TEXT"
+    if is_either(p):
+        alts_ = frozenset(unlit(a) for a in p[1])
+        return next(iter(alts_)) if len(alts_) == 1 else ("either", alts_)
+    return p
+
+
 def positions_of(t):
-    """the element types of a list by position, when known"""
+    """the element types of a list by position, when known; a text literal's
+    position is LIT"""
     return t[3] if is_list(t) and len(t) > 3 else None
 
 
 def typed_positions(t):
-    """positions_of as (node, type) leaves per position, for pair()"""
+    """positions_of as (node, type) leaves per position, for pair() and fits();
+    a literal position keeps a literal node"""
     ps = positions_of(t)
-    return [[(None, x)] for x in ps] if ps is not None else None
+    if ps is None:
+        return None
+    return [[(LIT_NODE if a == LIT else None, unlit(a)) for a in alts(x) if a != "NONE"] or [(None, "NONE")] for x in ps]
 
 
 def ordered(t):
@@ -1003,7 +1021,11 @@ class Expr:
 
     def fits(self, node, t, expected, optional=False):
         """may the value of node, of type t, stand where expected is declared;
-        each branch of a conditional and each operand of and/or is checked on its own"""
+        each branch of a conditional and each operand of and/or is checked on its
+        own, and an element a constant index picks is checked as written"""
+        L = self.index_leaf(node)
+        if L is not None:
+            return all(compatible(a, expected, optional, n) for n, a in L)
         if isinstance(node, ast.IfExp):
             return all(self.fits(b, self.types.get(id(b)), expected, optional) for b in (node.body, node.orelse))
         if isinstance(node, ast.BoolOp):
@@ -1057,6 +1079,9 @@ class Expr:
         L = self.index_leaf(node)
         if L is not None and len(L) == 1 and L[0][0] is not None:
             return self.elts(L[0][0], T(L[0][0]))
+        tp = typed_positions(t)                   # known positions, literals remembered
+        if tp is not None:
+            return sum(tp, [])
         return [(None, t[1] if is_list(t) else None)]
 
     def positions(self, node):
@@ -1191,7 +1216,7 @@ class Expr:
                     self.problem("type_mismatch", f"a slice expects a list: {src}")
                 if positions_of(lt) is not None and all(b is None or int_lit(b) is not None for b in (s.lower, s.upper)):
                     ps = lt[3][int_lit(s.lower) if s.lower else None:int_lit(s.upper) if s.upper else None]
-                    return ("list", unify_all(ps) if ps else "ANY", ordered(lt), ps)
+                    return ("list", unify_all([unlit(x) for x in ps]) if ps else "ANY", ordered(lt), ps)
                 return ("list", lt[1], ordered(lt)) if lt else None
             st = self.visit(s, scope)
             if not all_alts(st, lambda a: a == "INTEGER"):
@@ -1206,7 +1231,7 @@ class Expr:
             if lt:
                 ps, i = positions_of(lt), int_lit(s)
                 if ps is not None and i is not None and -len(ps) <= i < len(ps):
-                    return ps[i]
+                    return unlit(ps[i])
                 return lt[1] if lt[1] != "ANY" else None
             if t is not None:
                 self.problem("type_mismatch", f"an index expects a list: {src}")
@@ -1351,7 +1376,8 @@ class Expr:
             return unify(self.visit(n.body, scope), self.visit(n.orelse, scope))
         if isinstance(n, ast.List):
             types = [self.visit(e, scope) for e in n.elts]
-            return ("list", unify_all(types) if n.elts else "ANY", True, tuple(types))
+            ps = tuple(LIT if isinstance(e, ast.Constant) and isinstance(e.value, str) else t for e, t in zip(n.elts, types))
+            return ("list", unify_all(types) if n.elts else "ANY", True, ps)
         if isinstance(n, ast.ListComp):
             inner, o = self.comprehension(n.generators, scope)
             return ("list", self.visit(n.elt, inner), o)

@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 40).
+# Edda keyword registry, generated from language/reference.md (revision 41).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -281,7 +281,7 @@ forms:
     means: 'reach into an entity or a list element; chains allowed'
     from: 'Python'
   - form: 'x == v, x != v, x < v, x > v, x <= v, x >= v'
-    means: 'compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; == and != take two values of one kind, every value one side may be against every value the other may be (None beside anything; a time literal beside a TIME, inside a list too; two lists whose positions are known position by position, any other pair of lists every element against every element, an IN ORDER list beside an unordered one; a list''s positions are known when it is written out, sliced or joined from such lists with whole-number bounds, -1 included, or a computed property of one; a slice of such a list has only the elements it keeps, and a constant index gives the element as written), < and the rest two numbers, two texts or two times (type_mismatch otherwise)'
+    means: 'compare numbers, times, text, choice values, references and lists; two lists are equal when they have the same elements in the same order; one operator per comparison; == and != take two values of one kind, every value one side may be against every value the other may be (None beside anything; a time literal beside a TIME, inside a list too; two lists whose positions are known position by position, any other pair of lists every element against every element, an IN ORDER list beside an unordered one; a list''s positions are known when it is written out, sliced or joined from such lists with whole-number bounds, -1 included, or a computed property of one; a slice of such a list has only the elements it keeps, and a constant index gives the element as written, a computed property''s literals included, in a comparison and as an input alike), < and the rest two numbers, two texts or two times (type_mismatch otherwise)'
     from: 'Python syntax, Edda type rule'
   - form: 'a and b, a or b, not a'
     means: 'logic; not binds tightest, then and, then or; short-circuit; and and or give one of their operands, as in Python, so [1] or [] is a list'
