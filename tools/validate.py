@@ -115,6 +115,7 @@ NAME_PATHS = [
     "stories/*/examples/*/steps/#/when/actor",
 ]
 TITLE_PATHS = ["stories/*/examples/*"]
+TITLE_REF_PATHS = ["stories/*/rules/#/shown_by/#"]     # an example title as a value
 VC_TEXT_PATHS = ["#/because", "#/approved_at"]
 VC_NAME_PATHS = ["#/story", "#/entity", "#/role", "#/approved_by", "#/pins/#/entity", "#/pins/#/role"]
 
@@ -269,6 +270,8 @@ class Source:
                 self.style.append(("bad_name", line, f'not a name: "{node.value}" (a name is plain)'))
             if (is_expr or is_type) and multiline:
                 self.src.append(("yaml_feature", line, "an expression or type phrase is one line"))
+            if any_match(path, TITLE_REF_PATHS) and multiline:
+                self.src.append(("yaml_feature", line, "an example title is one line"))
 
     def line(self, path, key=True):
         """the source line of a path: its key line, or its value line"""

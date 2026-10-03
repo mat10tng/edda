@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 52, 3 Oct 2026. Replaces revision 51 (kb:9378967). Decisions
+Revision 53, 3 Oct 2026. Replaces revision 52 (kb:9378998). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 29. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 30. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -78,8 +78,9 @@ checker enforces at the source, before the schema:
   quoted name); an unquoted ` #` would silently drop the rest of
   the line;
 - one physical line per expression, per type phrase and per example
-  title; a block scalar (`|`, never `>`) is allowed only for `text:` in
-  `.edda.vc`; free text may wrap onto further lines as YAML allows;
+  title, as a key and under `shown_by:`; a block scalar (`|`, never
+  `>`) is allowed only for `text:` in `.edda.vc`; other free text, a
+  `rule:` sentence with it, may wrap onto further lines as YAML allows;
 - repeated things are lists (`- `): refusals, ensures, givens, steps,
   then items, always-rules, notes, questions, who-lists, pins; mapping
   order is never a meaning, with two stated exceptions: the order of
@@ -701,7 +702,7 @@ the pin's line for every other `bad_pin`.
 | rule | when | message |
 |---|---|---|
 | `not_yaml` | the file does not parse | `not YAML: <parser message>` |
-| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or title on more than one line, a quoted key, or `DONE` anywhere but first under `then` | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item` |
+| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or example title (as a key or under `shown_by:`) on more than one line, a quoted key, or `DONE` anywhere but first under `then` | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item` |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
 | `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, example, tag or role |
 | `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `then must start with DONE or refused` for a first `then` item under a `when` that is neither; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
@@ -862,7 +863,23 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 51
+## 14. Changes from revision 52
+
+- From Astra's round 30, findings 1 and 2, the wording decided by the
+  operator: EDDA-001's `i_want` is "every fault that stops a file from
+  checking refused, with its file, line and one plain message"; rules
+  1, 2, 4 and 6 are reworded to say what their examples show; the
+  `no_rule` example moves to a new rule 8, "when a story has rules,
+  every example belongs to exactly one of them".
+- From finding 3: a title under `shown_by:` is one physical line, like
+  an example title as a key; a wrapped one is `yaml_feature` at its
+  first line (`an example title is one line`), since YAML would fold
+  it into a title that may name an example. A wrapped `rule:` sentence
+  stays free text and may wrap.
+- A new fixture, `wrapped_title`, and its EDDA-001 example, "an
+  example title wrapped over two lines is refused", under rule 3.
+
+## 15. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -884,7 +901,7 @@ are build step 4 and get their own stories then.
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 15. Changes from revision 50
+## 16. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -894,7 +911,7 @@ are build step 4 and get their own stories then.
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 16. Changes from revision 49
+## 17. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -903,14 +920,14 @@ are build step 4 and get their own stories then.
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 17. Changes from revision 48
+## 18. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 18. Changes from revision 47
+## 19. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -920,7 +937,7 @@ are build step 4 and get their own stories then.
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 19. Changes from revision 46
+## 20. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -929,7 +946,7 @@ are build step 4 and get their own stories then.
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 20. Changes from revision 45
+## 21. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -939,7 +956,7 @@ are build step 4 and get their own stories then.
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 21. Changes from revision 44
+## 22. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -948,7 +965,7 @@ are build step 4 and get their own stories then.
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 22. Changes from revision 43
+## 23. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -957,7 +974,7 @@ are build step 4 and get their own stories then.
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 23. Changes from revision 42
+## 24. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -968,7 +985,7 @@ are build step 4 and get their own stories then.
   an optional value among them still standing only where `None`
   fits.
 
-## 24. Changes from revision 41
+## 25. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -977,21 +994,21 @@ are build step 4 and get their own stories then.
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 25. Changes from revision 40
+## 26. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 26. Changes from revision 39
+## 27. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 27. Changes from revision 38
+## 28. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -999,7 +1016,7 @@ are build step 4 and get their own stories then.
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 28. Changes from revision 37
+## 29. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -1008,7 +1025,7 @@ are build step 4 and get their own stories then.
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 29. Changes from revision 36
+## 30. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -1019,7 +1036,7 @@ are build step 4 and get their own stories then.
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 30. Changes from revision 35
+## 31. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -1032,7 +1049,7 @@ are build step 4 and get their own stories then.
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 31. Changes from revision 34
+## 32. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -1045,7 +1062,7 @@ are build step 4 and get their own stories then.
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 32. Changes from revision 33
+## 33. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -1061,7 +1078,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 33. Changes from revision 32
+## 34. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1079,7 +1096,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 34. Changes from revision 31
+## 35. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1098,7 +1115,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 35. Changes from revision 30
+## 36. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1119,7 +1136,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 36. Changes from revision 29
+## 37. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1140,7 +1157,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 37. Changes from revision 28
+## 38. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1157,7 +1174,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 38. Changes from revision 27
+## 39. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1179,7 +1196,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 39. Changes from revision 26
+## 40. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

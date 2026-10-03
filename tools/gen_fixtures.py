@@ -321,6 +321,14 @@ def no_rule(ls):
     return find(ls, '      "a removed order is not removed again":')
 edit("no_rule", no_rule)
 
+def wrapped_title(ls):
+    i = find(ls, '    so_that: "the list is clean"')
+    ls[i + 1:i + 1] = ["    rules:", '      - rule: "an order is removed once, and only before it is sent"',
+                       "        shown_by:", '          - "a fresh order', '            is removed"',
+                       '          - "a sent order is not removed"', '          - "a removed order is not removed again"']
+    return i + 4
+edit("wrapped_title", wrapped_title)
+
 # bad_version: approved file whose history numbers the entity 2 first
 edit("bad_version", lambda ls: None)
 vc = vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1)

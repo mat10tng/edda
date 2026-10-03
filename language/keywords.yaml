@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 52).
+# Edda keyword registry, generated from language/reference.md (revision 53).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -436,7 +436,7 @@ refusals:
     when: 'the file does not parse'
     message: 'not YAML: <parser message>'
   - rule: 'yaml_feature'
-    when: 'an anchor (its aliases with it), tag, directive, <<, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside .vc text, an odd or jumping indentation, an expression, type phrase or title on more than one line, a quoted key, or DONE anywhere but first under then'
+    when: 'an anchor (its aliases with it), tag, directive, <<, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside .vc text, an odd or jumping indentation, an expression, type phrase or example title (as a key or under shown_by:) on more than one line, a quoted key, or DONE anywhere but first under then'
     message: 'anchors and aliases are not allowed (and likewise for each feature); a key is plain, not quoted; DONE is allowed only as the first then item'
   - rule: 'unquoted_text'
     when: 'free text or an expression written plain'

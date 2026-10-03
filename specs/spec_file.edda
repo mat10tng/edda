@@ -69,7 +69,7 @@ stories:
     story: "the checker refuses what it cannot read"
     about: spec_file
     as_a: agent
-    i_want: "every problem the checker finds refused, with its file, line and one plain message"
+    i_want: "every fault that stops a file from checking refused, with its file, line and one plain message"
     so_that: "a file that passes has one reading and nothing hidden in it"
     epic: CHK
     tags: [checker, static]
@@ -77,10 +77,10 @@ stories:
       - "EDDA-001 and EDDA-002 are the static checks of build step 1; links, examples run, rules wrapped and done are later stories"
       - "the four layers of reference section 11 decide which problems are reported together; each fixture here holds one problem in the first failing layer"
     rules:
-      - rule: "a file that keeps these rules passes with no problem"
+      - rule: "a file that keeps these rules has no refusal"
         shown_by:
           - "a clean file has no problems"
-      - rule: "every word is one the language knows"
+      - rule: "every key is one the language knows, every required key is there, and every value has the shape its key asks for"
         shown_by:
           - "an unknown key is refused"
           - "an operation without is: is refused"
@@ -91,7 +91,8 @@ stories:
           - "unquoted free text is refused"
           - "a YAML anchor is refused once, at the anchor"
           - "a file that is not YAML is refused"
-      - rule: "a condition is an allowed expression, written the one allowed way, comparing like with like"
+          - "an example title wrapped over two lines is refused"
+      - rule: "a condition is an allowed expression and a type phrase keeps to its grammar; each is written the one allowed way, comparing like with like"
         shown_by:
           - "a string that is not an expression is refused"
           - "a type phrase outside the grammar is refused"
@@ -107,8 +108,7 @@ stories:
           - "a name that is not snake_case is refused"
           - "an actor's fixed name given in an example is refused"
           - "an operation admitting a role its entity does not is refused"
-          - "an example that belongs to no rule is refused"
-      - rule: "an operation promises only what it gives"
+      - rule: "an operation either changes things or answers a question, never both; a positional check needs an ordered result"
         shown_by:
           - "returns and ensure on one operation is refused"
           - "a positional check on an unordered result is refused"
@@ -117,6 +117,9 @@ stories:
           - "a history out of sequence is refused in the history file"
           - "a pin to a version that does not exist is refused in the history file"
           - "a snapshot that is not a normalised block is refused in the history file"
+      - rule: "when a story has rules, every example belongs to exactly one of them"
+        shown_by:
+          - "an example that belongs to no rule is refused"
     operations:
       check:
         is: "reads a spec file and its history and lists every problem"
@@ -444,6 +447,20 @@ stories:
               - "RESULT[0].rule == no_rule"
               - "RESULT[0].line == 57"
               - "RESULT[0].message == \"example \\\"a removed order is not removed again\\\" belongs to no rule\""
+      "an example title wrapped over two lines is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: wrapped_title}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == yaml_feature"
+              - "RESULT[0].line == 26"
+              - "RESULT[0].message == \"an example title is one line\""
       "a history out of sequence is refused in the history file":
         given:
           - actor: bot
