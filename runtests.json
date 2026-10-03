@@ -1,0 +1,7 @@
+{
+  "development_policy": {
+    "policy_version": 1,
+    "stage": "standard",
+    "default_lane": "fast"
+  }
+}
