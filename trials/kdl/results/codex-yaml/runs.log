@@ -1,0 +1,2 @@
+{"time": "2026-10-03T23:05:04+02:00", "format": "yaml", "files": ["epics.edda", "fulfillment.edda", "glossary.edda", "part.edda"], "problems": [{"rule": "declared_twice", "file": "part.edda", "line": 2}]}
+{"time": "2026-10-03T23:05:15+02:00", "format": "yaml", "files": ["epics.edda", "fulfillment.edda", "glossary.edda", "part.edda"], "problems": []}

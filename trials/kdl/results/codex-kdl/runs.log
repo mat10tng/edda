@@ -1,0 +1,4 @@
+{"time": "2026-10-03T23:05:20+02:00", "format": "kdl", "files": ["fulfillment.kdl", "glossary.kdl", "part.kdl"], "problems": [{"rule": "kdl_feature", "file": "fulfillment.kdl", "line": 65}]}
+{"time": "2026-10-03T23:06:05+02:00", "format": "kdl", "files": ["fulfillment.kdl", "glossary.kdl", "part.kdl"], "problems": []}
+{"time": "2026-10-03T23:06:26+02:00", "format": "kdl", "files": ["fulfillment.kdl", "glossary.kdl", "part.kdl"], "problems": []}
+{"time": "2026-10-03T23:07:41+02:00", "format": "kdl", "files": ["fulfillment.kdl", "glossary.kdl", "part.kdl"], "problems": []}

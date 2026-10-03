@@ -1,0 +1,60 @@
+entities:
+  part:
+    is: "an auto part carried by the warehouse"
+    properties:
+      code: TEXT
+      description: TEXT
+      stock: DEFAULT 0
+      minimum: DEFAULT 1
+      status: DEFAULT active | discontinued
+    may_change:
+      status: {active: [discontinued]}
+    may_create:
+      - {role: warehouse_staff}
+    may_read:
+      - {role: buyer}
+      - {role: warehouse_staff}
+    may_update:
+      - {role: warehouse_staff}
+
+stories:
+  FUL-001:
+    story: "maintain the parts carried by the warehouse"
+    about: part
+    as_a: warehouse_staff
+    i_want: "to add and change parts and discontinue parts we no longer carry"
+    so_that: "buyers can see the parts and stock available for repair jobs"
+    epic: FUL
+    operations:
+      discontinue:
+        is: "marks a part discontinued"
+        inputs: {part: part}
+        who:
+          - {role: warehouse_staff}
+        refuse:
+          - when: "part.status == discontinued"
+            reason: "part is discontinued"
+        ensure:
+          - "part.status == discontinued"
+    examples:
+      "Discontinue an active part":
+        given:
+          - actor: marta
+            with: {roles: [warehouse_staff]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 8}
+        steps:
+          - when: {actor: marta, call: "discontinue(brake_pad)"}
+            then:
+              - DONE
+              - "brake_pad.status == discontinued"
+      "A discontinued part stays discontinued":
+        given:
+          - actor: marta
+            with: {roles: [warehouse_staff]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", status: discontinued}
+        steps:
+          - when: {actor: marta, call: "discontinue(brake_pad)"}
+            then:
+              - refused: "part is discontinued"

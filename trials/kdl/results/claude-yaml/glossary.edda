@@ -1,0 +1,8 @@
+roles:
+  warehouse_staff:
+    is: "a person in the warehouse who receives and ships parts"
+  buyer:
+    is: "a person who requests parts for repair jobs"
+
+epics:
+  FUL: "manage the auto parts inventory and fulfil requests"

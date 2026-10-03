@@ -1,0 +1,350 @@
+entities {
+  fulfillment {
+    is "a buyer's request for a quantity of one part for a repair job"
+    properties {
+      job TEXT
+      part part
+      quantity INTEGER
+      status DEFAULT draft | pending | shipped | cancelled
+    }
+    may_change {
+      status {
+        draft { - pending; - cancelled }
+        pending { - shipped; - cancelled }
+      }
+    }
+    may_create { - role=buyer }
+    may_read { - role=buyer; - role=warehouse_staff }
+    may_update { - role=buyer; - role=warehouse_staff }
+  }
+}
+
+stories {
+  FUL-001 {
+    story "request parts for a job"
+    about fulfillment
+    as_a buyer
+    i_want "to submit a draft request"
+    so_that "the warehouse knows what to prepare"
+    epic FUL
+    operations {
+      submit {
+        is "turns a draft request into a pending one"
+        inputs fulfillment=fulfillment
+        who { - role=buyer }
+        refuse {
+          - when="fulfillment.quantity <= 0" reason="quantity must be positive"
+          - when="fulfillment.part.status == discontinued" reason="part is discontinued"
+          - when="fulfillment.status in [pending, shipped]" reason="fulfillment is already submitted"
+        }
+        ensure {
+          - "fulfillment.status == pending"
+        }
+      }
+    }
+    examples {
+      "Buyer submits a draft" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=draft
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="submit(req)"
+              then {
+                - DONE
+                - "req.status == pending"
+              }
+            }
+        }
+      }
+      "Zero quantity is refused" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=0 status=draft
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="submit(req)"
+              then {
+                - refused="quantity must be positive"
+                - "req.status == draft"
+              }
+            }
+        }
+      }
+      "Discontinued part is refused" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=old_pad {
+              with code="W-003" description="Old pad" stock=5 status=discontinued
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=old_pad quantity=2 status=draft
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="submit(req)"
+              then {
+                - refused="part is discontinued"
+                - "req.status == draft"
+              }
+            }
+        }
+      }
+      "Submitting twice is refused" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=draft
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="submit(req)"
+              then { - DONE }
+            }
+          - {
+              when actor=bea call="submit(req)"
+              then {
+                - refused="fulfillment is already submitted"
+                - "req.status == pending"
+              }
+            }
+        }
+      }
+    }
+  }
+
+  FUL-002 {
+    story "ship a request"
+    about fulfillment
+    as_a warehouse_staff
+    i_want "to ship a pending request"
+    so_that "the buyer gets the parts and the stock count stays right"
+    epic FUL
+    operations {
+      ship {
+        is "ships a pending request and takes its quantity off the part's stock"
+        inputs fulfillment=fulfillment
+        who { - role=warehouse_staff }
+        refuse {
+          - when="fulfillment.status != pending" reason="fulfillment is not pending"
+          - when="fulfillment.part.stock < fulfillment.quantity" reason="insufficient stock"
+        }
+        ensure {
+          - "fulfillment.status == shipped"
+          - "fulfillment.part.stock == OLD(fulfillment.part.stock) - fulfillment.quantity"
+        }
+      }
+    }
+    examples {
+      "Staff ships a pending request" {
+        given {
+          - actor=walt {
+              with { roles { - warehouse_staff } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=pending
+            }
+        }
+        steps {
+          - {
+              when actor=walt call="ship(req)"
+              then {
+                - DONE
+                - "req.status == shipped"
+                - "brake_pad.stock == 3"
+              }
+            }
+        }
+      }
+      "Shipping a draft is refused" {
+        given {
+          - actor=walt {
+              with { roles { - warehouse_staff } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=draft
+            }
+        }
+        steps {
+          - {
+              when actor=walt call="ship(req)"
+              then {
+                - refused="fulfillment is not pending"
+                - "brake_pad.stock == 5"
+              }
+            }
+        }
+      }
+      "Shipping more than the stock is refused" {
+        given {
+          - actor=walt {
+              with { roles { - warehouse_staff } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=1
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=pending
+            }
+        }
+        steps {
+          - {
+              when actor=walt call="ship(req)"
+              then {
+                - refused="insufficient stock"
+                - "req.status == pending"
+                - "brake_pad.stock == 1"
+              }
+            }
+        }
+      }
+    }
+  }
+
+  FUL-003 {
+    story "cancel a request"
+    about fulfillment
+    as_a buyer
+    i_want "to cancel a request I no longer need"
+    so_that "the warehouse does not prepare it"
+    epic FUL
+    operations {
+      cancel {
+        is "cancels a draft or pending request"
+        inputs fulfillment=fulfillment
+        who { - role=buyer }
+        refuse {
+          - when="fulfillment.status in [shipped, cancelled]" reason="fulfillment cannot be cancelled"
+        }
+        ensure {
+          - "fulfillment.status == cancelled"
+        }
+      }
+    }
+    examples {
+      "Buyer cancels a draft" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=draft
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="cancel(req)"
+              then {
+                - DONE
+                - "req.status == cancelled"
+              }
+            }
+        }
+      }
+      "Buyer cancels a pending request" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=pending
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="cancel(req)"
+              then {
+                - DONE
+                - "req.status == cancelled"
+              }
+            }
+        }
+      }
+      "Cancelling a shipped request is refused" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=shipped
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="cancel(req)"
+              then {
+                - refused="fulfillment cannot be cancelled"
+                - "req.status == shipped"
+              }
+            }
+        }
+      }
+      "Cancelling twice is refused" {
+        given {
+          - actor=bea {
+              with { roles { - buyer } }
+            }
+          - part=brake_pad {
+              with code="W-002" description="Brake pad" stock=5
+            }
+          - fulfillment=req {
+              with job="JOB-101" part=brake_pad quantity=2 status=draft
+            }
+        }
+        steps {
+          - {
+              when actor=bea call="cancel(req)"
+              then { - DONE }
+            }
+          - {
+              when actor=bea call="cancel(req)"
+              then {
+                - refused="fulfillment cannot be cancelled"
+                - "req.status == cancelled"
+              }
+            }
+        }
+      }
+    }
+  }
+}

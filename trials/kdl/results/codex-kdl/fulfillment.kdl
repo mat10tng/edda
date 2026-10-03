@@ -1,0 +1,356 @@
+entities {
+  fulfillment {
+    is "a request for a part for a repair job"
+    properties {
+      job_reference TEXT
+      part part
+      quantity INTEGER
+      status DEFAULT draft | pending | shipped | cancelled
+    }
+    may_change {
+      status {
+        draft { - pending; - cancelled }
+        pending { - shipped; - cancelled }
+      }
+    }
+    may_create { - role=buyer }
+    may_read {
+      - role=buyer
+      - role=warehouse_staff
+    }
+    may_update {
+      - role=buyer
+      - role=warehouse_staff
+    }
+  }
+}
+
+stories {
+  FUL-001 {
+    story "submit a fulfillment request"
+    about fulfillment
+    as_a buyer
+    i_want "to submit a draft request for a repair job"
+    so_that "the warehouse knows what parts to prepare"
+    epic FUL
+    rules {
+      - rule="a valid draft becomes pending and invalid submissions are refused" {
+        shown_by {
+          - "Submit moves draft to pending"
+          - "Submit refuses zero quantity"
+          - "Submit refuses negative quantity"
+          - "Submit refuses discontinued part"
+          - "Submit refuses an already submitted request"
+        }
+      }
+    }
+    operations {
+      submit {
+        is "submits a draft fulfillment request"
+        inputs fulfillment=fulfillment
+        who { - role=buyer }
+        refuse {
+          - when="fulfillment.quantity <= 0" reason="quantity must be positive"
+          - when="fulfillment.part.status == discontinued" reason="part is discontinued"
+          - when="fulfillment.status != draft" reason="fulfillment is already submitted"
+        }
+        ensure {
+          - "fulfillment.status == pending"
+        }
+      }
+    }
+    examples {
+      "Submit moves draft to pending" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=2
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="submit(request)"
+            then { - DONE; - "request.status == pending" }
+          }
+        }
+      }
+      "Submit refuses zero quantity" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=0
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="submit(request)"
+            then { - refused="quantity must be positive"; - "request.status == draft" }
+          }
+        }
+      }
+      "Submit refuses negative quantity" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=-1
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="submit(request)"
+            then { - refused="quantity must be positive"; - "request.status == draft" }
+          }
+        }
+      }
+      "Submit refuses discontinued part" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8 status=discontinued
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=2
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="submit(request)"
+            then { - refused="part is discontinued"; - "request.status == draft" }
+          }
+        }
+      }
+      "Submit refuses an already submitted request" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=2 status=pending
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="submit(request)"
+            then { - refused="fulfillment is already submitted"; - "request.status == pending" }
+          }
+        }
+      }
+    }
+  }
+
+  FUL-002 {
+    story "ship a fulfillment request"
+    about fulfillment
+    as_a warehouse_staff
+    i_want "to ship a pending request"
+    so_that "the requested quantity is taken from stock"
+    epic FUL
+    rules {
+      - rule="shipping a pending request deducts stock and other requests are refused" {
+        shown_by {
+          - "Ship deducts stock"
+          - "Ship refuses a request that is not pending"
+          - "Ship refuses insufficient stock"
+        }
+      }
+    }
+    operations {
+      ship {
+        is "ships a pending fulfillment request and deducts its quantity from stock"
+        inputs fulfillment=fulfillment
+        who { - role=warehouse_staff }
+        refuse {
+          - when="fulfillment.status != pending" reason="fulfillment is not pending"
+          - when="fulfillment.part.stock < fulfillment.quantity" reason="insufficient stock"
+        }
+        ensure {
+          - "fulfillment.status == shipped"
+          - "fulfillment.part.stock == OLD(fulfillment.part.stock) - fulfillment.quantity"
+        }
+      }
+    }
+    examples {
+      "Ship deducts stock" {
+        given {
+          - actor=staff_one { with { roles { - warehouse_staff } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=3 status=pending
+          }
+        }
+        steps {
+          - {
+            when actor=staff_one call="ship(request)"
+            then {
+              - DONE
+              - "request.status == shipped"
+              - "filter.stock == 5"
+            }
+          }
+        }
+      }
+      "Ship refuses a request that is not pending" {
+        given {
+          - actor=staff_one { with { roles { - warehouse_staff } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=3 status=draft
+          }
+        }
+        steps {
+          - {
+            when actor=staff_one call="ship(request)"
+            then {
+              - refused="fulfillment is not pending"
+              - "request.status == draft"
+              - "filter.stock == 8"
+            }
+          }
+        }
+      }
+      "Ship refuses insufficient stock" {
+        given {
+          - actor=staff_one { with { roles { - warehouse_staff } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=2
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=3 status=pending
+          }
+        }
+        steps {
+          - {
+            when actor=staff_one call="ship(request)"
+            then {
+              - refused="insufficient stock"
+              - "request.status == pending"
+              - "filter.stock == 2"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  FUL-003 {
+    story "cancel a fulfillment request"
+    about fulfillment
+    as_a buyer
+    i_want "to cancel a request I no longer need"
+    so_that "the warehouse does not prepare it"
+    epic FUL
+    rules {
+      - rule="draft and pending requests can be cancelled, while shipped and cancelled requests cannot" {
+        shown_by {
+          - "Cancel a draft request"
+          - "Cancel a pending request"
+          - "Cancel refuses a shipped request"
+          - "Cancel refuses an already cancelled request"
+        }
+      }
+    }
+    operations {
+      cancel {
+        is "cancels a draft or pending fulfillment request"
+        inputs fulfillment=fulfillment
+        who { - role=buyer }
+        refuse {
+          - when="fulfillment.status == shipped or fulfillment.status == cancelled" reason="fulfillment cannot be cancelled"
+        }
+        ensure {
+          - "fulfillment.status == cancelled"
+        }
+      }
+    }
+    examples {
+      "Cancel a draft request" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=2
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="cancel(request)"
+            then { - DONE; - "request.status == cancelled" }
+          }
+        }
+      }
+      "Cancel a pending request" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=2 status=pending
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="cancel(request)"
+            then { - DONE; - "request.status == cancelled" }
+          }
+        }
+      }
+      "Cancel refuses a shipped request" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=2 status=shipped
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="cancel(request)"
+            then {
+              - refused="fulfillment cannot be cancelled"
+              - "request.status == shipped"
+            }
+          }
+        }
+      }
+      "Cancel refuses an already cancelled request" {
+        given {
+          - actor=buyer_one { with { roles { - buyer } } }
+          - part=filter {
+            with code="W-002" description="Oil filter" stock=8
+          }
+          - fulfillment=request {
+            with job_reference="JOB-101" part=filter quantity=2 status=cancelled
+          }
+        }
+        steps {
+          - {
+            when actor=buyer_one call="cancel(request)"
+            then {
+              - refused="fulfillment cannot be cancelled"
+              - "request.status == cancelled"
+            }
+          }
+        }
+      }
+    }
+  }
+}
