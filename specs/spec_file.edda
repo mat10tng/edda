@@ -59,7 +59,7 @@ entities:
     part_of: spec_file
     properties:
       kind: refused | flagged
-      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | no_rule | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
+      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | no_rule | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | question_on_approved | wording_drift
       file: TEXT
       line: INTEGER
       message: TEXT
@@ -511,12 +511,12 @@ stories:
     story: "the checker flags what is allowed but doubtful"
     about: spec_file
     as_a: operator
-    i_want: "a status nothing reaches, a story with no example, a singular name on a list, a story that never names its about entity and a question on an approved story shown as flags, not refusals"
+    i_want: "a status nothing reaches, a story with no example and a question on an approved story shown as flags, not refusals"
     so_that: "the file still passes and I decide what to do"
     epic: CHK
     tags: [checker, static]
     notes:
-      - "approved_against_older and wording_drift are flags too; they need versions and sit with EDDA-004 and EDDA-008"
+      - "wording_drift is a flag too; it needs versions and sits with EDDA-004"
     examples:
       "a status nothing reaches is flagged":
         given:
@@ -548,36 +548,6 @@ stories:
               - "RESULT[0].rule == no_example"
               - "RESULT[0].line == 17"
               - "RESULT[0].message == \"story FIX-001 has no example\""
-      "a MANY property with a singular name is flagged":
-        given:
-          - actor: bot
-            with: {roles: [agent]}
-          - spec_file: odd
-            with: {fixture: plural_name}
-        steps:
-          - when: {actor: bot, call: "check(odd)"}
-            then:
-              - DONE
-              - "len(RESULT) == 1"
-              - "RESULT[0].kind == flagged"
-              - "RESULT[0].rule == plural_name"
-              - "RESULT[0].line == 18"
-              - "RESULT[0].message == \"line holds MANY and should be plural\""
-      "a story that never names its about entity is flagged":
-        given:
-          - actor: bot
-            with: {roles: [agent]}
-          - spec_file: odd
-            with: {fixture: about_untouched}
-        steps:
-          - when: {actor: bot, call: "check(odd)"}
-            then:
-              - DONE
-              - "len(RESULT) == 1"
-              - "RESULT[0].kind == flagged"
-              - "RESULT[0].rule == about_untouched"
-              - "RESULT[0].line == 23"
-              - "RESULT[0].message == \"story FIX-002 is about order but never names it\""
       "a question on an approved story is flagged":
         given:
           - actor: bot

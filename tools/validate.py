@@ -6,9 +6,9 @@ names (shape), names resolved across the files of one folder, the
 type-phrase grammar, the Python expression whitelist (7.1) with types
 from literals and declarations, operation signatures, ordering, and the
 style rule (7.2) under its equivalences (meaning), and the version
-sequence, the pins and the snapshots of a .edda.vc (history). A
-partial checker: the flags and the running of examples are not here.
-Each folder (specs/, one fixture folder) is one project."""
+sequence, the pins and the snapshots of a .edda.vc (history), then the
+flags of a .edda that passed them. A partial checker: the running of
+examples is not here. Each folder (specs/, one fixture folder) is one project."""
 import ast, copy, glob, json, os, re, sys
 import yaml
 from jsonschema import Draft202012Validator
@@ -169,6 +169,7 @@ class Source:
         self.src, self.style, self.marks, self.styles, self.raw = [], [], {}, {}, {}
         self.duplicates = []
         self.is_vc = is_vc
+        self.text = text
         if "\t" in text:
             self.src.append(("yaml_feature", text[:text.index("\t")].count("\n") + 1, "tabs are not allowed"))
         try:
@@ -2087,59 +2088,72 @@ def history_problems(entries, P, source, stem):
 
 KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "role_cycle", "wider_than_entity", "declared_twice", "no_rule"}
 
-ENTITY_WORD = re.compile(r'\b[a-z][a-z0-9_]*\b')
+def block_text(text, line):
+    """the normalised text (section 10) of the block whose key line is line
+    (counted from 1) in a file's text"""
+    return normalise("\n".join(text.split("\n")[line - 1:]))
 
 
-def story_rules_dict(st):
-    """dict used for rules_text comparison: about/as_a/rules/operations/examples, notes removed"""
-    if not isinstance(st, dict):
-        return {}
-    out = {}
-    for k in ("about", "as_a", "rules"):
-        if k in st:
-            out[k] = st[k]
-    for k in ("operations", "examples"):
-        if k in st:
-            filtered = {}
-            for n2, blk in mapping(st[k]).items():
-                filtered[n2] = {kk: vv for kk, vv in mapping(blk).items() if kk != "notes"}
-            out[k] = filtered
-    return out
+def _children(lines, lo, hi):
+    """(start, end) of each child block in lines[lo:hi], all at one indent:
+    a key line and the lines normalise keeps with it, and the list items
+    written at the key's own indent under a key with no value"""
+    def span(i):
+        return max(len(normalise("\n".join(lines[i:hi]) + "\n").split("\n")) - 1, 1)
+    i = lo
+    while i < hi:
+        j = i + span(i)
+        if lines[i].endswith(":"):
+            indent = len(lines[i]) - len(lines[i].lstrip(" "))
+            while j < hi and lines[j].startswith(" " * indent + "-"):
+                j += span(j)
+        yield i, j
+        i = j
 
 
-def _story_names_entity(st, entity):
-    """true when the story names the entity in an input type, a given, or any expression"""
-    for oname, op in mapping(mapping(st).get("operations", {})).items():
-        for n, v in mapping(mapping(op).get("inputs", {})).items():
-            if isinstance(v, str):
-                m = TYPE_RE.fullmatch(v)
-                if m and (m.group("ref") == entity or m.group("many") == entity):
-                    return True
-    for title, exm in mapping(mapping(st).get("examples", {})).items():
-        for g in listing(mapping(exm).get("given", [])):
-            if isinstance(g, dict) and entity in g:
-                return True
+def _key(line):
+    m = re.match(r" *([a-z_]+):", line)
+    return m.group(1) if m else None
 
-    def scan(v):
-        if isinstance(v, str):
-            return bool(re.search(rf'\b{re.escape(entity)}\b', v))
-        if isinstance(v, dict):
-            return any(scan(x) for x in v.values())
-        if isinstance(v, list):
-            return any(scan(x) for x in v)
-        return False
 
-    return scan(mapping(st).get("operations")) or scan(mapping(st).get("examples"))
+RULES_KEYS = ("about", "as_a", "rules", "operations", "examples")
+
+
+def rules_text(text):
+    """a story's rules_text (section 10) from its normalised text: the key
+    line, then only about:, as_a:, rules:, operations: and examples:, with
+    every notes: entry under an operation or an example removed"""
+    lines = text.split("\n")[:-1]
+    if not lines:
+        return ""
+    out = [lines[0]]
+    for lo, hi in _children(lines, 1, len(lines)):
+        key = _key(lines[lo])
+        if key not in RULES_KEYS:
+            continue
+        out.append(lines[lo])
+        if key not in ("operations", "examples") or not lines[lo].endswith(":"):
+            out += lines[lo + 1:hi]
+            continue
+        for ilo, ihi in _children(lines, lo + 1, hi):
+            out.append(lines[ilo])
+            if not lines[ilo].endswith(":"):      # flow form: kept whole
+                out += lines[ilo + 1:ihi]
+                continue
+            for klo, khi in _children(lines, ilo + 1, ihi):
+                if _key(lines[klo]) != "notes":
+                    out += lines[klo:khi]
+    return "\n".join(out) + "\n"
 
 
 def _wording_drift_flags(sid, st, approved_st, source):
-    """wording_drift flags for one draft story; yields (rule, line, msg)"""
+    """wording_drift for one draft story (section 10): a refusal's when and
+    reason, a fact and its means, matched by position; yields (rule, line, msg)"""
     out = []
     for oname, op in mapping(mapping(st).get("operations", {})).items():
         app_op = mapping(mapping(approved_st).get("operations", {})).get(oname)
         if not isinstance(app_op, dict):
             continue
-        op_flags = []
         curr_ref = listing(mapping(op).get("refuse", []))
         app_ref = listing(mapping(app_op).get("refuse", []))
         for i, (cr, ar) in enumerate(zip(curr_ref, app_ref)):
@@ -2149,11 +2163,11 @@ def _wording_drift_flags(sid, st, approved_st, source):
             crr, arr = cr.get("reason"), ar.get("reason")
             if cw == aw and crr != arr:
                 p = ("stories", sid, "operations", oname, "refuse", i, "reason")
-                op_flags.append(("wording_drift", source.line(p, key=False),
+                out.append(("wording_drift", source.line(p, key=False),
                     f"{sid} {oname}: reason changed, when did not"))
             elif cw != aw and crr == arr:
                 p = ("stories", sid, "operations", oname, "refuse", i, "when")
-                op_flags.append(("wording_drift", source.line(p, key=False),
+                out.append(("wording_drift", source.line(p, key=False),
                     f"{sid} {oname}: when changed, reason did not"))
         curr_ens = listing(mapping(op).get("ensure", []))
         app_ens = listing(mapping(app_op).get("ensure", []))
@@ -2164,40 +2178,12 @@ def _wording_drift_flags(sid, st, approved_st, source):
             am = ae.get("means") if isinstance(ae, dict) else None
             if cf == af and cm != am and am is not None:
                 p = ("stories", sid, "operations", oname, "ensure", i, "means")
-                op_flags.append(("wording_drift", source.line(p, key=False),
+                out.append(("wording_drift", source.line(p, key=False),
                     f"{sid} {oname}: means changed, fact did not"))
             elif cf != af and cm == am and am is not None:
                 p = ("stories", sid, "operations", oname, "ensure", i)
-                op_flags.append(("wording_drift", source.line(p),
-                    f"{sid} {oname}: fact changed, means did not"))
-        if op_flags:
-            out.extend(op_flags)
-        else:
-            def op_body(o):
-                return {k: v for k, v in mapping(o).items() if k not in ("is", "notes")}
-            c_body, a_body = op_body(op), op_body(app_op)
-            c_is, a_is = mapping(op).get("is"), mapping(app_op).get("is")
-            if c_body != a_body and c_is == a_is:
-                p = ("stories", sid, "operations", oname)
                 out.append(("wording_drift", source.line(p),
-                    f"{sid} {oname}: body changed, sentence did not"))
-            elif c_body == a_body and c_is != a_is:
-                p = ("stories", sid, "operations", oname, "is")
-                out.append(("wording_drift", source.line(p, key=False),
-                    f"{sid} {oname}: sentence changed, body did not"))
-    if not out:
-        curr_rules = story_rules_dict(mapping(st))
-        app_rules = story_rules_dict(mapping(approved_st))
-        c_sent = mapping(st).get("story")
-        a_sent = mapping(approved_st).get("story")
-        if curr_rules != app_rules and c_sent == a_sent:
-            p = ("stories", sid)
-            out.append(("wording_drift", source.line(p),
-                f"{sid}: rules changed, story sentence did not"))
-        elif curr_rules == app_rules and c_sent != a_sent:
-            p = ("stories", sid, "story")
-            out.append(("wording_drift", source.line(p, key=False),
-                f"{sid}: story sentence changed, rules did not"))
+                    f"{sid} {oname}: fact changed, means did not"))
     return out
 
 
@@ -2205,7 +2191,7 @@ def flag_problems(data, stem, P, source):
     """flags for a .edda file that passed all three refusal layers"""
     out = []
 
-    # unreachable_status
+    # unreachable_status: a choice with DEFAULT, its first value the default
     for ename, ent in mapping(data.get("entities", {})).items():
         for prop, phrase in mapping(mapping(ent).get("properties", {})).items():
             if not isinstance(phrase, str):
@@ -2232,62 +2218,27 @@ def flag_problems(data, stem, P, source):
             out.append(("no_example", source.line(("stories", sid)),
                 f"story {sid} has no example"))
 
-    # plural_name
-    for ename, ent in mapping(data.get("entities", {})).items():
-        for prop, phrase in mapping(mapping(ent).get("properties", {})).items():
-            if not isinstance(phrase, str):
-                continue
-            m = TYPE_RE.fullmatch(phrase)
-            if m and m.group("many") and not prop.endswith("s"):
-                path = ("entities", ename, "properties", prop)
-                out.append(("plural_name", source.line(path),
-                    f"{prop} holds MANY and should be plural"))
-
-    # about_untouched
-    for sid, st in mapping(data.get("stories", {})).items():
-        about = mapping(st).get("about")
-        if about not in P.entities:
-            continue
-        if not _story_names_entity(st, about):
-            out.append(("about_untouched", source.line(("stories", sid)),
-                f"story {sid} is about {about} but never names it"))
-
-    # flags that need history
+    # flags that need history: approved when rules_text equals the newest entry's
     for sid, st in mapping(data.get("stories", {})).items():
         entry = P.newest_entry.get(("story", sid))
-        if not entry:
+        if not entry or not isinstance(entry.get("text"), str):
             continue
-
-        # approved_against_older: any pin older than the block's current max version
-        for pin in listing(entry.get("pins", [])):
-            if not isinstance(pin, dict):
-                continue
-            pk = "entity" if "entity" in pin else "role"
-            pname, pn = pin.get(pk), pin.get("number")
-            cur_max = max(P.versions.get((pk, pname), set()) or {0})
-            if isinstance(pn, int) and cur_max > pn:
-                out.append(("approved_against_older", source.line(("stories", sid)),
-                    f"{sid} approved against {pk} {pname} v{pn}, {pname} is now v{cur_max}"))
-
-        # parse approved text to compare
-        text = entry.get("text", "")
-        try:
-            app_data = yaml.load(text, Loader=Core)
-        except Exception:
-            continue
-        if not isinstance(app_data, dict) or sid not in app_data:
-            continue
-        approved_st = app_data[sid]
-        is_approved = (story_rules_dict(mapping(st)) == story_rules_dict(mapping(approved_st)))
+        current = block_text(source.text, source.line(("stories", sid)))
+        is_approved = rules_text(current) == rules_text(entry["text"])
 
         # question_on_approved
         if is_approved and listing(mapping(st).get("questions", [])):
             out.append(("question_on_approved", source.line(("stories", sid)),
                 f"story {sid} is approved and still has a question"))
 
-        # wording_drift (only for drafts)
+        # wording_drift (only for drafts), over the parsed newest entry
         if not is_approved:
-            out.extend(_wording_drift_flags(sid, st, approved_st, source))
+            try:
+                app_data = yaml.load(entry["text"], Loader=Core)
+            except Exception:
+                continue
+            if isinstance(app_data, dict) and sid in app_data:
+                out.extend(_wording_drift_flags(sid, st, app_data[sid], source))
 
     return sorted(set(out), key=lambda p: (p[1], p[0]))
 

@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 53, 3 Oct 2026. Replaces revision 52 (kb:9378998). Decisions
+Revision 54, 3 Oct 2026. Replaces revision 53 (kb:9379025). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
 rounds 4 to 30. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
@@ -107,9 +107,7 @@ checker enforces at the source, before the schema:
 
 **Placement.** A story carries `about: <entity>` and lives in that
 entity's file, which for a part is its owner's (`wrong_file`
-otherwise). `about` is authoritative; the
-checker only flags `about_untouched` when the story names that entity
-nowhere else (no input, given, fact or who-line). A part (`part_of:`)
+otherwise). `about` is authoritative. A part (`part_of:`)
 lives in its owner's file, through the whole chain of owners
 (`wrong_file` otherwise). One home per story; a story with two homes
 is two stories under one epic.
@@ -227,9 +225,6 @@ section 11 named `<entity>.<property>`; it cannot be given
 (`derived_in_given`). Anything else is `bad_type_phrase`. A computed
 property is always `{computed: "<expression>"}`; one whose expression is
 a condition is yes/no and is used as a condition (`order.approved`).
-
-**Naming convention, flagged not refused:** a `MANY` property has a
-plural name, a single reference a singular one (`plural_name`).
 
 **Who-lines.** A who-line is `{role: <role>}` or `{role: <role>, when:
 "<condition>"}`. The roots in scope in the condition are `ACTOR`, the
@@ -605,10 +600,10 @@ a re-read is the binding's test, not a level 1 fact.
   does verify that every pin points at an existing version of a block
   that exists, that no `(kind, name)` repeats, that a story entry has
   pins and a block entry has none (`bad_pin` otherwise). A newer block
-  version than the pin in the story's newest entry flags the story
-  `approved_against_older`: "FUL-005 approved against entity order v2,
-  order is now v3". A flag, not a draft; older entries are never
-  flagged.
+  version than the pin in the story's newest entry makes the pins
+  stale (`story.pins_stale`), shown on the story's status line as
+  "pins stale". Not a draft and not a flag; older entries are never
+  looked at.
 - **Approve a story.** Refused when the file does not check ("the file
   does not check"), when a named block is not approved, that is has no
   version or is itself a draft ("approve its blocks first"), or when
@@ -623,19 +618,14 @@ a re-read is the binding's test, not a level 1 fact.
   version"). Otherwise the history becomes exactly the old entries
   followed by one entry, without pins.
 - **Wording drift.** In a draft, a pair whose one side differs from the
-  newest version while the other does not. The pairs, smallest first:
-  `fact`/`means` and `when`/`reason`, matched by position in their
-  list (the first refusal with the first refusal) and only when both
-  versions have an item at that position; a rule's `shown_by` examples
-  (their text) against its `rule` sentence, matched by position in the
-  `rules` list and only when both versions have an item at that
-  position; an operation's body (inputs,
-  who, refuse, ensure, returns, ordered_by, also_changes; not notes)
-  against its `is:`; the story's `rules_text` against its `story:`
-  sentence. Flagged `wording_drift` at the smallest pair that holds
-  it; an operation is flagged only when none of its pairs is, the story
-  only when none of its operations or rules is. Shown side by side in
-  the diff
+  newest version while the other does not. There are two pairs: a
+  refusal's `when` and `reason`, and an ensure item's `fact` and
+  `means`, both in an operation of the same name in both versions,
+  matched by position in their list (the first refusal with the first
+  refusal) and only when both versions have an item at that position;
+  the `fact`/`means` pair only when the newest version's item has a
+  `means`. Flagged `wording_drift` at the changed side. Shown side by
+  side in the diff
   view, in the warning shade in the read view. The agent's standing
   rule is to re-read the meaning against the mechanics and fix or
   justify; approval clears it.
@@ -684,14 +674,14 @@ hold no history policy: sequence, pins and snapshots are layer 4.
 message names: the key for `unknown_key` and `missing_key` (the block's
 key line), the second declaration for `declared_twice`, the
 expression's line, the property's line for `unknown_status`,
-`bad_type_phrase`, `unreachable_status` and `plural_name`, the first
+`bad_type_phrase` and `unreachable_status`, the first
 role's `includes:` line for `role_cycle`, the `then` item's line for
 `not_ordered`, the operation's key line for `returns_and_ensure`, the
 entity's key line for `wrong_file` on a part, the example's title
 line for `no_rule`, the title's line under `shown_by:` for
 `unknown_name` on a title, the
-story's key line for `wrong_file`, `no_example`, `about_untouched`,
-`question_on_approved` and `approved_against_older`, the changed
+story's key line for `wrong_file`, `no_example` and
+`question_on_approved`, the changed
 side's line for `wording_drift`, and in the `.vc` the entry's
 `number:` line for `bad_version`, `bad_snapshot` and a story entry
 without pins, the entry's `pins:` line for pins on a block entry, and
@@ -731,13 +721,10 @@ the pin's line for every other `bad_pin`.
 
 | rule | when | message |
 |---|---|---|
-| `unreachable_status` | a status that is neither the default nor the target of a `may_change` arrow | `no change reaches status: <value>` |
+| `unreachable_status` | a value of a `DEFAULT` choice that is neither its default nor the target of a `may_change` arrow; a choice without `DEFAULT` has no default and is not looked at | `no change reaches status: <value>` |
 | `no_example` | a story with no example | `story <id> has no example` |
-| `approved_against_older` | a pin older than its block | `<id> approved against <kind> <name> v<n>, <name> is now v<m>` |
 | `question_on_approved` | a question on an approved story | `story <id> is approved and still has a question` |
-| `wording_drift` | section 10 | `<id> <operation>: <side> changed, <other> did not`; for a rule pair, `<n>` counted from 1, `<id> rule <n>: examples changed, rule did not` and `<id> rule <n>: rule changed, examples did not`; for the story pair `<id>: rules changed, story sentence did not` |
-| `plural_name` | a `MANY` property with a singular name, or a reference with a plural one | `<property> holds MANY and should be plural` |
-| `about_untouched` | a story that never names its `about` entity | `story <id> is about <entity> but never names it` |
+| `wording_drift` | section 10 | `<id> <operation>: <side> changed, <other> did not` |
 
 Level 2 adds: code with no story; code behind the spec or at an
 unapproved version.
@@ -768,8 +755,8 @@ unapproved version.
   collected entity; every role reached through `includes` of a
   collected role; each once; ordered by file name, then file order.
 - `story.versions`, `block.versions`: the history's entries for this
-  story or block, oldest first. `pins_stale` and
-  `approved_against_older` look at the newest entry only.
+  story or block, oldest first. `pins_stale` looks at the newest
+  entry only.
 - `pin.block`: the block of the pin's kind and name, looked up across
   the project's files.
 - `story.changes`: walk the newest version's `text` (no lines when
@@ -863,7 +850,29 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 52
+## 14. Changes from revision 53
+
+Operator decisions after the review on Fable (kb:9379090) and its
+removal audit (kb:9379093):
+
+- `rules_text` is text, as this reference already defined it: the
+  normalised story with only `about:`, `as_a:`, `rules:`,
+  `operations:` and `examples:` kept and every `notes:` entry removed.
+  The checker had compared parsed values, so a story with two keys
+  swapped counted as approved.
+- `wording_drift` keeps two pairs, `when`/`reason` and `fact`/`means`.
+  The operation-body pair fired on nearly every draft, the story pair
+  could not fire, and the rules pair was never built.
+- `about_untouched` is removed: "names" was never defined and it
+  flagged EDDA-004 wrongly; `wrong_file` already covers placement.
+- `plural_name` is removed: a naming habit, not a modelling mistake,
+  and it missed the singular-reference case.
+- `approved_against_older` is removed: a stale pin shows on the
+  story's status line as "pins stale" instead (`story.pins_stale`).
+- `unreachable_status` stays and says that it looks only at a choice
+  with `DEFAULT`.
+
+## 15. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -879,7 +888,7 @@ are build step 4 and get their own stories then.
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 15. Changes from revision 51
+## 16. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -901,7 +910,7 @@ are build step 4 and get their own stories then.
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 16. Changes from revision 50
+## 17. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -911,7 +920,7 @@ are build step 4 and get their own stories then.
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 17. Changes from revision 49
+## 18. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -920,14 +929,14 @@ are build step 4 and get their own stories then.
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 18. Changes from revision 48
+## 19. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 19. Changes from revision 47
+## 20. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -937,7 +946,7 @@ are build step 4 and get their own stories then.
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 20. Changes from revision 46
+## 21. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -946,7 +955,7 @@ are build step 4 and get their own stories then.
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 21. Changes from revision 45
+## 22. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -956,7 +965,7 @@ are build step 4 and get their own stories then.
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 22. Changes from revision 44
+## 23. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -965,7 +974,7 @@ are build step 4 and get their own stories then.
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 23. Changes from revision 43
+## 24. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -974,7 +983,7 @@ are build step 4 and get their own stories then.
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 24. Changes from revision 42
+## 25. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -985,7 +994,7 @@ are build step 4 and get their own stories then.
   an optional value among them still standing only where `None`
   fits.
 
-## 25. Changes from revision 41
+## 26. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -994,21 +1003,21 @@ are build step 4 and get their own stories then.
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 26. Changes from revision 40
+## 27. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 27. Changes from revision 39
+## 28. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 28. Changes from revision 38
+## 29. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -1016,7 +1025,7 @@ are build step 4 and get their own stories then.
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 29. Changes from revision 37
+## 30. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -1025,7 +1034,7 @@ are build step 4 and get their own stories then.
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 30. Changes from revision 36
+## 31. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -1036,7 +1045,7 @@ are build step 4 and get their own stories then.
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 31. Changes from revision 35
+## 32. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -1049,7 +1058,7 @@ are build step 4 and get their own stories then.
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 32. Changes from revision 34
+## 33. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -1062,7 +1071,7 @@ are build step 4 and get their own stories then.
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 33. Changes from revision 33
+## 34. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -1078,7 +1087,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 34. Changes from revision 32
+## 35. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1096,7 +1105,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 35. Changes from revision 31
+## 36. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1115,7 +1124,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 36. Changes from revision 30
+## 37. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1136,7 +1145,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 37. Changes from revision 29
+## 38. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1157,7 +1166,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 38. Changes from revision 28
+## 39. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1174,7 +1183,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 39. Changes from revision 27
+## 40. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1196,7 +1205,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 40. Changes from revision 26
+## 41. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

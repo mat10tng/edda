@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 53).
+# Edda keyword registry, generated from language/reference.md (revision 54).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -510,26 +510,17 @@ refusals:
 
 flags:
   - rule: 'unreachable_status'
-    when: 'a status that is neither the default nor the target of a may_change arrow'
+    when: 'a value of a DEFAULT choice that is neither its default nor the target of a may_change arrow; a choice without DEFAULT has no default and is not looked at'
     message: 'no change reaches status: <value>'
   - rule: 'no_example'
     when: 'a story with no example'
     message: 'story <id> has no example'
-  - rule: 'approved_against_older'
-    when: 'a pin older than its block'
-    message: '<id> approved against <kind> <name> v<n>, <name> is now v<m>'
   - rule: 'question_on_approved'
     when: 'a question on an approved story'
     message: 'story <id> is approved and still has a question'
   - rule: 'wording_drift'
     when: 'section 10'
-    message: '<id> <operation>: <side> changed, <other> did not; for a rule pair, <n> counted from 1, <id> rule <n>: examples changed, rule did not and <id> rule <n>: rule changed, examples did not; for the story pair <id>: rules changed, story sentence did not'
-  - rule: 'plural_name'
-    when: 'a MANY property with a singular name, or a reference with a plural one'
-    message: '<property> holds MANY and should be plural'
-  - rule: 'about_untouched'
-    when: 'a story that never names its about entity'
-    message: 'story <id> is about <entity> but never names it'
+    message: '<id> <operation>: <side> changed, <other> did not'
 
 sentences:
   - kind: 'story'

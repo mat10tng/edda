@@ -18,7 +18,7 @@ stories:
     story: "an entity or role block has versions, and a story is pinned to them"
     about: block
     as_a: operator
-    i_want: "each entity and role block approved like a story, each story approval to pin the block versions it was approved against, and a story approved against an older block flagged until I approve it again"
+    i_want: "each entity and role block approved like a story, each story approval to pin the block versions it was approved against, and a story approved against an older block shown with stale pins until I approve it again"
     so_that: "a permission or a property cannot change under an approved story unnoticed"
     epic: VC
     tags: [version, approval]
@@ -111,7 +111,7 @@ stories:
             then:
               - refused: "approve_block is not allowed for agent"
               - "good.blocks[1].version == 0"
-      "a story approved against an older block version is flagged":
+      "a story approved against an older block version is approved with stale pins":
         given:
           - actor: bot
             with: {roles: [agent]}
@@ -121,11 +121,7 @@ stories:
           - when: {actor: bot, call: "check(pinned)"}
             then:
               - DONE
-              - "len(RESULT) == 1"
-              - "RESULT[0].kind == flagged"
-              - "RESULT[0].rule == approved_against_older"
-              - "RESULT[0].line == 18"
-              - "RESULT[0].message == \"FIX-001 approved against entity order v1, order is now v2\""
+              - "RESULT == []"
               - "pinned.stories[0].approved"
               - "pinned.stories[0].pins_stale"
       "a block edited after its approval blocks the story until it is approved again":
@@ -140,7 +136,7 @@ stories:
             then:
               - refused: "approve its blocks first"
               - "edited.stories[0].version == 1"
-      "approving the story again refreshes its pins and clears the flag":
+      "approving the story again refreshes its pins and clears the stale pins":
         given:
           - actor: bot
             with: {roles: [agent]}

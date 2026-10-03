@@ -362,32 +362,6 @@ def no_example(ls):
     i = find(ls, "    examples:"); del ls[i:]; return find(ls, "  FIX-001:")
 edit("no_example", no_example)
 
-def plural_name(ls):
-    i = find(ls, "entities:")
-    ls[i + 1:i + 1] = ["  line:", '    is: "one row of an order"', "    properties:",
-                       "      units: DEFAULT 0", ""]
-    j = find(ls, "      units_sent: DEFAULT 0"); ls.insert(j + 1, "      line: MANY line"); return j + 1
-edit("plural_name", plural_name)
-
-def about_untouched(ls):
-    i = find(ls, "entities:")
-    ls[i + 1:i + 1] = ["  shop:", '    is: "a shop that orders"', "    properties:",
-                       "      name: TEXT", '    may_update: [{role: shop_user}]', ""]
-    s = find(ls, "stories:")
-    del ls[s + 1:]
-    ls += ["  FIX-002:", '    story: "rename a shop"', "    about: order", "    as_a: shop_user",
-           '    i_want: "to rename my shop"', '    so_that: "the name is right"',
-           "    operations:", "      rename:", '        is: "gives the shop a new name"',
-           "        inputs: {shop: shop, name: TEXT}", '        who: [{role: shop_user}]',
-           "        ensure:", '          - "shop.name == name"',
-           "    examples:", '      "a shop is renamed":', "        given:",
-           "          - actor: erik", "            with: {roles: [shop_user]}",
-           "          - shop: butik", '            with: {name: "Butik"}', "        steps:",
-           '          - when: {actor: erik, call: "rename(butik, \\"Boden\\")"}',
-           '            then: [DONE, "butik.name == \\"Boden\\""]']
-    return s + 1
-edit("about_untouched", about_untouched)
-
 # --- notes ---------------------------------------------------------------
 
 def notes_a(ls):
