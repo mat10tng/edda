@@ -180,6 +180,10 @@ class Source:
             self.src.append(("not_yaml", getattr(getattr(e, "problem_mark", None), "line", 0) + 1,
                              f"not YAML: {str(e).splitlines()[0]}"))
             return
+        self.explicit = set()           # where a key written after an explicit ? starts
+        for t, nxt in zip(tokens, tokens[1:]):
+            if isinstance(t, yaml.KeyToken) and text[t.start_mark.index:t.start_mark.index + 1] == "?":
+                self.explicit.add(nxt.start_mark.index)
         for t in tokens:
             n = type(t).__name__
             line = t.start_mark.line + 1
@@ -220,7 +224,8 @@ class Source:
                     continue
                 if k.value == "<<":
                     self.src.append(("yaml_feature", kline, "the << key is not allowed"))
-                if self.text[k.end_mark.index:k.end_mark.index + 1] != ":":
+                if (k.start_mark.index in self.explicit
+                        or self.text[k.end_mark.index:k.end_mark.index + 1] != ":"):
                     self.src.append(("yaml_feature", kline, "a key is written name: with no ? and no space before the colon"))
                 kpath = path + (k.value,)
                 self.marks[kpath] = (kline, v.start_mark.line + 1)
