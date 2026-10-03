@@ -849,6 +849,7 @@ class Project:
         self.files = {stem for stem, _ in files}
         self.dups = {}            # stem -> [(path, name)]: a name declared twice across the project
         self.role_order = []
+        self.block_order = []     # (kind, name) of every role and entity block, by file name, then file order
         for stem, data in sorted(files, key=lambda f: f[0]):
             for section, block in mapping(data).items():     # in source order, so the second is reported
                 if section == "roles":
@@ -859,6 +860,7 @@ class Project:
                         has = {p: type_of_phrase(v) for p, v in mapping(mapping(role).get("has")).items()}
                         self.roles[rname] = {"has": has, "includes": listing(mapping(role).get("includes")), "file": stem}
                         self.role_order.append(rname)
+                        self.block_order.append(("role", rname))
                 elif section == "entities":
                     for ename, ent in mapping(block).items():
                         if ename in self.entities or ename in self.roles:
@@ -878,6 +880,7 @@ class Project:
                             may[key] = [w.get("role") for w in listing(mapping(ent).get(key)) if isinstance(w, dict)]
                         self.entities[ename] = {"props": props, "derived": derived, "computed": computed, "may": may,
                                                 "marks": {}, "file": stem, "part_of": mapping(ent).get("part_of")}
+                        self.block_order.append(("entity", ename))
                 elif section == "epics":
                     self.epics.update(mapping(block).keys())
                 elif section == "stories":
@@ -1034,6 +1037,7 @@ ONE_ARG = {"len", "OLD"}
 OP_WORD = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}
 CMP_WORD = {ast.Lt: "<", ast.Gt: ">", ast.LtE: "<=", ast.GtE: ">="}
 FIXED = {"ACTOR", "RESULT", "NOW", "TODAY", "OLD"}
+REACHED = set()   # the entities a dot path has reached, the declared type of each step (story.blocks)
 
 
 def quoted(new):
@@ -1398,6 +1402,10 @@ class Expr:
             m = unify_all(marks)
             if m is not None and LIT in alts(m):
                 self.marks[id(n)] = m
+            for a in alts(t) + [x for o in outs for x in alts(o)]:     # story.blocks: each step's declared type
+                e = a[1] if is_list(a) else a
+                if is_entity(e):
+                    REACHED.add(e[1])
             return unify_all(outs)
         if isinstance(n, ast.Subscript):
             t = self.visit(n.value, scope)
@@ -2275,14 +2283,30 @@ def changes(old, new):
     return out
 
 
+def pins_stale(entry, P):
+    """story.pins_stale (section 10): a pin of the newest entry older than
+    its block's newest version"""
+    def newest(kind, name):
+        return max((n for n in P.versions.get((kind, name), ()) if isinstance(n, int)), default=0)
+    pins = [p for p in listing(entry.get("pins")) if isinstance(p, dict)]
+    return any(isinstance(p.get("number"), int) and p["number"] < newest(k, p.get(k)) for p in pins
+               for k in ["entity" if "entity" in p else "role"])
+
+
+def approved(kind, current, entry):
+    """block.approved, story.approved (section 10): current, the normalised
+    text, against the newest entry; False when there is none"""
+    old = entry.get("text") if entry else None
+    if not isinstance(old, str):
+        return False
+    return rules_text(current) == rules_text(old) if kind == "story" else current == old
+
+
 def status_lines(data, P, source):
     """the status of every role, entity and story of a .edda that checks,
     its history included (section 11), roles, then entities, then stories,
     each in file order: approved or draft with its version, pins stale on
     an approved story, and under a story with a version its changes"""
-    def newest(kind, name):
-        return max((n for n in P.versions.get((kind, name), ()) if isinstance(n, int)), default=0)
-
     out = []
     for section, kind in (("roles", "role"), ("entities", "entity"), ("stories", "story")):
         for name in mapping(data.get(section, {})):
@@ -2293,13 +2317,10 @@ def status_lines(data, P, source):
             if not isinstance(old, str):
                 out.append(f"{kind} {name}: draft v{n}")
             elif kind != "story":
-                out.append(f"{kind} {name}: {'approved' if current == old else 'draft'} v{n}")
+                out.append(f"{kind} {name}: {'approved' if approved(kind, current, entry) else 'draft'} v{n}")
             else:
-                pins = [p for p in listing(entry.get("pins")) if isinstance(p, dict)]
-                stale = any(isinstance(p.get("number"), int) and p["number"] < newest(k, p.get(k)) for p in pins
-                            for k in ["entity" if "entity" in p else "role"])
-                if rules_text(current) == rules_text(old):
-                    out.append(f"story {name}: approved v{n}" + (", pins stale" if stale else ""))
+                if approved(kind, current, entry):
+                    out.append(f"story {name}: approved v{n}" + (", pins stale" if pins_stale(entry, P) else ""))
                 else:
                     out.append(f"story {name}: draft v{n}")
                 out += [f"  {'-' if k == 'removed' else '+'} {line}: {s}" for k, line, s in changes(old, current)]

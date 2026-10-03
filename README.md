@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 55
+language/   reference.md    the language reference, revision 56
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -55,6 +55,8 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             of a history; under a file that checks, each
                             block and story as draft or approved with
                             its version, and a story's changed lines
+            approve.py      the operator's approval of one story or
+                            block, appended to its .edda.vc
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
@@ -62,6 +64,8 @@ in quoted Python expressions limited to a whitelist, names in
 snake_case. Tell your editor the extension is YAML and point it at
 `language/schema.json`.
 
-Nothing is built beyond the validator, which is a partial checker:
-the running of the examples is not there yet.
+Nothing is built beyond the validator, a partial checker, and the
+approve command; the running of the examples is not there yet.
 `python3 tools/validate.py` needs PyYAML and jsonschema.
+`python3 tools/approve.py NAME --by PERSON [--because TEXT] [--dry-run]`
+records an approval (reference section 10).

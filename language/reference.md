@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 55, 3 Oct 2026. Replaces revision 54 (kb:9379116). Decisions
+Revision 56, 3 Oct 2026. Replaces revision 55 (kb:9379125). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
 review rounds. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
@@ -574,8 +574,8 @@ a re-read is the binding's test, not a level 1 fact.
   a story, an entity block or a role block of that file (role blocks in
   `glossary.edda.vc`; an entry for a block of another file is
   `bad_version`, and a pin sees only the versions in the history
-  beside the block's file); only the operator's approve command writes
-  it; a repository guard keeps the agent out.
+  beside the block's file); only the operator's approve command,
+  `tools/approve.py`, writes it; a repository guard keeps the agent out.
 - **Normalised text.** A block's `text` is its lines from its key line
   (`order:`, `FUL-005:`) to its last line, with comments, blank lines
   and trailing spaces removed and re-indented so the key line starts at
@@ -625,6 +625,30 @@ a re-read is the binding's test, not a level 1 fact.
   block is approved ("nothing to approve: the block matches its newest
   version"). Otherwise the history becomes exactly the old entries
   followed by one entry, without pins.
+- **The approve command** is `tools/approve.py`:
+
+  ```
+  python3 tools/approve.py NAME --by PERSON [--because TEXT]
+      [--at "YYYY-MM-DD HH:MM"] [--dry-run] [--folder DIR]
+  ```
+
+  `NAME` is a story id or a role or entity name, looked up across the
+  project folder (`specs/` unless `--folder` names another); `--by` is
+  `approved_by`; `--at` is `approved_at`, now in local time when left
+  out; `because:` is written only when `--because` is given. It refuses
+  as the two items above say, in that order, with those messages; a
+  file does not check when it or its history has a refusal, flags
+  aside. Otherwise it appends one entry to the `.edda.vc` beside the
+  block's file (creating it when there is none): the next number, the
+  normalised text, and for a story a pin on every block of
+  `story.blocks`, in that order, at its version. The old bytes are kept
+  as they are; before writing, the file and its history are checked as
+  they would be, on a copy of the folder: no refusal, the entry's text
+  and pins as above, and the story or block approved with its pins
+  current, or nothing is written. The file is
+  written through a temporary file and a rename. `--dry-run` prints the
+  entry and writes nothing. Who runs the command is not checked by it:
+  that is the repository guard's.
 - **Wording drift.** In a draft, a pair whose one side differs from the
   newest version while the other does not. There are two pairs: a
   refusal's `when` and `reason`, and an ensure item's `fact` and
@@ -871,7 +895,23 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 54
+## 14. Changes from revision 55
+
+Operator decisions for the build (task 2568):
+
+- The approve command of section 10 is `tools/approve.py`, which
+  settles the open question of its name. It computes the entry that
+  was typed by hand before: the next number, the normalised text and,
+  for a story, the pins in `story.blocks` order, worked out with the
+  checker's own types for the dot paths. It refuses with the messages
+  of EDDA-005 and EDDA-008.
+- `because` is optional on the command, as in the history: without
+  `--because` the entry has no `because:` key.
+- The history stays append-only: the new file is the old bytes and one
+  entry, checked on a copy before it is written, and written through a
+  temporary file and a rename. Nothing in the language changes.
+
+## 15. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -886,7 +926,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 15. Changes from revision 53
+## 16. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -921,7 +961,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 16. Changes from revision 52
+## 17. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -937,7 +977,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 17. Changes from revision 51
+## 18. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -959,7 +999,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 18. Changes from revision 50
+## 19. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -969,7 +1009,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 19. Changes from revision 49
+## 20. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -978,14 +1018,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 20. Changes from revision 48
+## 21. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 21. Changes from revision 47
+## 22. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -995,7 +1035,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 22. Changes from revision 46
+## 23. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -1004,7 +1044,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 23. Changes from revision 45
+## 24. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -1014,7 +1054,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 24. Changes from revision 44
+## 25. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -1023,7 +1063,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 25. Changes from revision 43
+## 26. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -1032,7 +1072,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 26. Changes from revision 42
+## 27. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -1043,7 +1083,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 27. Changes from revision 41
+## 28. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -1052,21 +1092,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 28. Changes from revision 40
+## 29. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 29. Changes from revision 39
+## 30. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 30. Changes from revision 38
+## 31. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -1074,7 +1114,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 31. Changes from revision 37
+## 32. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -1083,7 +1123,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 32. Changes from revision 36
+## 33. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -1094,7 +1134,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 33. Changes from revision 35
+## 34. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -1107,7 +1147,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 34. Changes from revision 34
+## 35. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -1120,7 +1160,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 35. Changes from revision 33
+## 36. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -1136,7 +1176,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 36. Changes from revision 32
+## 37. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1154,7 +1194,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 37. Changes from revision 31
+## 38. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1173,7 +1213,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 38. Changes from revision 30
+## 39. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1194,7 +1234,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 39. Changes from revision 29
+## 40. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1215,7 +1255,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 40. Changes from revision 28
+## 41. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1232,7 +1272,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 41. Changes from revision 27
+## 42. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1254,7 +1294,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 42. Changes from revision 26
+## 43. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names
