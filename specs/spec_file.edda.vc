@@ -1,0 +1,95 @@
+- entity: spec_file
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    spec_file:
+      is: "one .edda file; a fixture is one whole spec in one folder"
+      properties:
+        name: TEXT, DERIVED
+        text: TEXT
+        history: history
+        blocks: MANY block, IN ORDER, DERIVED
+        stories: MANY story, IN ORDER, DERIVED
+        notes: MANY note, IN ORDER, DERIVED
+        problems: MANY problem, IN ORDER, DERIVED
+      may_create: [{role: agent}]
+      may_read: [{role: agent}, {role: operator}]
+      may_update: [{role: agent}]
+- entity: history
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    history:
+      is: "the .edda.vc file beside a spec file: its approved versions, append-only, empty until the first approval"
+      part_of: spec_file
+      properties:
+        text: DEFAULT ""
+        versions: MANY version, IN ORDER, DERIVED
+      may_create: [{role: operator}]
+      may_read: [{role: agent}, {role: operator}]
+      may_update: [{role: operator}]
+- entity: version
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    version:
+      is: "one entry in a history: a story or a block as approved"
+      part_of: history
+      properties:
+        number: INTEGER
+        approved_at: TIME
+        approved_by: TEXT
+        because: TEXT, OPTIONAL
+        text: TEXT
+        rules_text: TEXT, DERIVED
+        pins: MANY pin, IN ORDER
+        sentences: MANY sentence, IN ORDER, DERIVED
+- entity: pin
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    pin:
+      is: "one block version a story was approved against"
+      part_of: version
+      properties:
+        kind: entity | role
+        name: TEXT
+        number: INTEGER
+        block: block, DERIVED
+- entity: note
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    note:
+      is: "one note entry under a story, an operation or an example"
+      part_of: spec_file
+      properties:
+        file: spec_file
+        story_id: TEXT
+        line: INTEGER
+        text: TEXT
+- entity: problem
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    problem:
+      is: "one thing the checker found in a file or its history"
+      part_of: spec_file
+      properties:
+        kind: refused | flagged
+        rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
+        file: TEXT
+        line: INTEGER
+        message: TEXT

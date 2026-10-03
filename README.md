@@ -33,7 +33,8 @@ language/   reference.md    the language reference, revision 51
                             sentence kind, with what it means, why, and
                             where it is from; plain YAML, not a spec
 specs/      *.edda          Edda's own stories, YAML, one file per entity
-            *.edda.vc       approved versions, append-only (none yet)
+            *.edda.vc       approved versions, append-only; the blocks
+                            so far, the stories still drafts
 fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
                             under its own file name, one deliberate
                             problem or one history each; the examples

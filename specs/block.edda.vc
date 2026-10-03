@@ -1,0 +1,19 @@
+- entity: block
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    block:
+      is: "the definition of one entity or role in a spec_file, versioned like a story"
+      properties:
+        file: spec_file
+        kind: entity | role, DERIVED
+        name: TEXT, DERIVED
+        text: TEXT, DERIVED
+        versions: MANY version, IN ORDER, DERIVED
+        version: {computed: "len(versions)"}
+        approved: {computed: "versions != [] and text == versions[-1].text"}
+      may_create: [{role: agent}]
+      may_read: [{role: agent}, {role: operator}]
+      may_update: [{role: agent}, {role: operator}]
