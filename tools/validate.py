@@ -1528,7 +1528,7 @@ class Expr:
                     return None
                 if ll and rl:
                     return unify_all([joined(a, b) for a in list_alts(lt) for b in list_alts(rt)])
-                return ll or rl
+                return None       # one side unresolved: the join waits for it
             for t in (lt, rt):
                 if not all_alts(t, lambda a: a in ("INTEGER", "NUMBER")):
                     self.problem("type_mismatch", f"{OP_WORD[type(n.op)]} expects numbers: {src}")
