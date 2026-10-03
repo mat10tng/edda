@@ -288,6 +288,39 @@ def role_cycle(ls):
     return i + 1
 edit("role_cycle", role_cycle)
 
+def not_yaml(ls):
+    i = find(ls, '    so_that: "the list is clean"'); ls[i] = "    so_that: the list is clean: no removed orders"; return i
+edit("not_yaml", not_yaml)
+
+def bad_name(ls):
+    i = find(ls, "    about: order"); ls[i] = "    about: Order"; return i
+edit("bad_name", bad_name)
+
+def second_way(ls):
+    i = find(ls, 'when: "order.units_sent > 0"'); ls[i] = ls[i].replace('"order.units_sent > 0"', '"0 < order.units_sent <= 99"'); return i
+edit("second_way", second_way)
+
+def type_mismatch(ls):
+    i = find(ls, 'when: "order.units_sent > 0"'); ls[i] = ls[i].replace('"order.units_sent > 0"', '"order.units_sent == NOW"'); return i
+edit("type_mismatch", type_mismatch)
+
+def derived_in_given(ls):
+    i = find(ls, "with: {roles: [shop_user]}"); ls[i] = ls[i].replace("{roles: [shop_user]}", '{roles: [shop_user], name: "Erik"}'); return i
+edit("derived_in_given", derived_in_given)
+
+def wider_than_entity(ls):
+    i = find(ls, '    is: "a person at a shop"')
+    ls[i + 1:i + 1] = ["  admin:", '    is: "a person who runs the shop"']
+    j = find(ls, "        who: [{role: shop_user}]"); ls[j] = "        who: [{role: shop_user}, {role: admin}]"; return j
+edit("wider_than_entity", wider_than_entity)
+
+def no_rule(ls):
+    i = find(ls, '    so_that: "the list is clean"')
+    ls[i + 1:i + 1] = ["    rules:", '      - rule: "an order is removed once, and only before it is sent"',
+                       '        shown_by: ["a fresh order is removed", "a sent order is not removed"]']
+    return find(ls, '      "a removed order is not removed again":')
+edit("no_rule", no_rule)
+
 # bad_version: approved file whose history numbers the entity 2 first
 edit("bad_version", lambda ls: None)
 vc = vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1)

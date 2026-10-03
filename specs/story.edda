@@ -24,7 +24,7 @@ entities:
   sentence:
     is: "one line of the read view"
     properties:
-      kind: story | note | question | operation | permission | refusal | outcome | read | invariant | example | given | when | then
+      kind: story | note | question | operation | permission | refusal | outcome | read | invariant | rule | example | given | when | then
       text: TEXT
       line: INTEGER
       shade: plain | grey | warning

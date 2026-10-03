@@ -79,6 +79,7 @@ Core.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, dup_mapping
 TEXT_PATHS = [
     "roles/*/is", "entities/*/is", "epics/*", "entities/*/wording/*/*/*",
     "stories/*/story", "stories/*/i_want", "stories/*/so_that",
+    "stories/*/rules/#/rule", "stories/*/rules/#/shown_by/#",
     "stories/*/notes/#", "stories/*/questions/#",
     "stories/*/operations/*/is", "stories/*/operations/*/notes/#",
     "stories/*/operations/*/refuse/#/reason", "stories/*/operations/*/ensure/#/means",
@@ -284,7 +285,7 @@ ITEM = {"ensure": "fact", "always": "fact", "refuse": "refusal", "given": "given
         "then": "item", "notes": "note", "questions": "question", "who": "who-line",
         "may_create": "who-line", "may_read": "who-line", "may_update": "who-line", "may_delete": "who-line",
         "pins": "pin", "ordered_by": "expression", "also_changes": "path", "while": "rule",
-        "tags": "tag", "includes": "role", "roles": "role"}
+        "tags": "tag", "includes": "role", "roles": "role", "rules": "rule", "shown_by": "example"}
 COLLECTION = {"roles": "role", "entities": "entity", "stories": "story", "operations": "operation",
               "examples": "example", "properties": "property", "inputs": "input", "has": "property"}
 KIND_WORD = {"object": "mapping", "array": "list", "string": "text", "integer": "number",
@@ -428,9 +429,10 @@ def schema_problems(validator, root, data, source):
 
 
 def shape_extra(data, source=None):
-    """shape-layer checks beside the schema: a given name used twice, has:
-    redeclaring name or roles, a role-list item that is no name, a Python
-    keyword as a choice value; yields (rule, path, message, at_key)"""
+    """shape-layer checks beside the schema: a given name used twice, an
+    example named twice under rules, has: redeclaring name or roles, a
+    role-list item that is no name, a Python keyword as a choice value;
+    yields (rule, path, message, at_key)"""
     out = []
 
     def phrase(v, path):
@@ -452,6 +454,13 @@ def shape_extra(data, source=None):
         for oname, op in mapping(mapping(st).get("operations")).items():
             for n, v in mapping(mapping(op).get("inputs")).items():
                 phrase(v, ("stories", sid, "operations", oname, "inputs", n))
+        named = set()
+        for i, r in enumerate(listing(mapping(st).get("rules"))):
+            for j, t in enumerate(listing(mapping(r).get("shown_by"))):
+                if isinstance(t, str):
+                    if t in named:
+                        out.append(("declared_twice", ("stories", sid, "rules", i, "shown_by", j), f"declared twice: {t}", True))
+                    named.add(t)
         for title, exm in mapping(mapping(st).get("examples")).items():
             seen = set()
             for i, g in enumerate(listing(mapping(exm).get("given"))):
@@ -1760,6 +1769,16 @@ def walk_meaning(data, stem, P, source):
         yield from role_ok(st.get("as_a"), ("stories", sid, "as_a"))
         if "epic" in st and st["epic"] not in P.epics:
             yield "unknown_name", ("stories", sid, "epic"), f"unknown name: {st['epic']}"
+        if "rules" in st:          # every example under exactly one rule; twice is the shape layer's
+            titles, named = mapping(st.get("examples")), set()
+            for i, r in enumerate(listing(st.get("rules"))):
+                for j, t in enumerate(listing(r.get("shown_by"))):
+                    if t not in titles:
+                        yield "unknown_name", ("stories", sid, "rules", i, "shown_by", j), f"unknown example: {t}"
+                    named.add(t)
+            for title in titles:
+                if title not in named:
+                    yield "no_rule", ("stories", sid, "examples", title), f'example "{title}" belongs to no rule'
         admitted = P.admitted(about)
         for oname, op in mapping(st.get("operations")).items():
             where = ("stories", sid, "operations", oname)
@@ -2058,7 +2077,7 @@ def history_problems(entries, P, source, stem):
 
 # --- run ---------------------------------------------------------------------
 
-KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "role_cycle", "wider_than_entity", "declared_twice"}
+KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "role_cycle", "wider_than_entity", "declared_twice", "no_rule"}
 
 
 def load(path):

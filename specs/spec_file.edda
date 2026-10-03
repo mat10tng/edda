@@ -59,7 +59,7 @@ entities:
     part_of: spec_file
     properties:
       kind: refused | flagged
-      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
+      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | no_rule | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
       file: TEXT
       line: INTEGER
       message: TEXT
@@ -69,13 +69,54 @@ stories:
     story: "the checker refuses what it cannot read"
     about: spec_file
     as_a: agent
-    i_want: "every key the schema does not allow, every string Python or the whitelist does not allow, every history out of sequence, every pin to a version that does not exist and every snapshot that is not a normalised block refused, with its file, line and one plain message"
+    i_want: "every problem the checker finds refused, with its file, line and one plain message"
     so_that: "a file that passes has one reading and nothing hidden in it"
     epic: CHK
     tags: [checker, static]
     notes:
       - "EDDA-001 and EDDA-002 are the static checks of build step 1; links, examples run, rules wrapped and done are later stories"
       - "the four layers of reference section 11 decide which problems are reported together; each fixture here holds one problem in the first failing layer"
+    rules:
+      - rule: "a file that keeps these rules passes with no problem"
+        shown_by:
+          - "a clean file has no problems"
+      - rule: "every word is one the language knows"
+        shown_by:
+          - "an unknown key is refused"
+          - "an operation without is: is refused"
+          - "a list where a mapping is expected is refused"
+          - "a repeated thing written as one value is refused"
+      - rule: "free text is quoted and YAML tricks are refused, so nothing is dropped or copied unseen"
+        shown_by:
+          - "unquoted free text is refused"
+          - "a YAML anchor is refused once, at the anchor"
+          - "a file that is not YAML is refused"
+      - rule: "a condition is an allowed expression, written the one allowed way, comparing like with like"
+        shown_by:
+          - "a string that is not an expression is refused"
+          - "a type phrase outside the grammar is refused"
+          - "a condition written a second way is refused"
+          - "a condition comparing a number with a time is refused"
+      - rule: "every name is declared once and every use of it fits its declaration"
+        shown_by:
+          - "an unknown name is refused"
+          - "a status not in its list is refused"
+          - "a name declared twice is refused at the second"
+          - "a role that includes itself is refused"
+          - "a story in the wrong file is refused"
+          - "a name that is not snake_case is refused"
+          - "an actor's fixed name given in an example is refused"
+          - "an operation admitting a role its entity does not is refused"
+          - "an example that belongs to no rule is refused"
+      - rule: "an operation promises only what it gives"
+        shown_by:
+          - "returns and ensure on one operation is refused"
+          - "a positional check on an unordered result is refused"
+      - rule: "the history holds exactly what was approved"
+        shown_by:
+          - "a history out of sequence is refused in the history file"
+          - "a pin to a version that does not exist is refused in the history file"
+          - "a snapshot that is not a normalised block is refused in the history file"
     operations:
       check:
         is: "reads a spec file and its history and lists every problem"
@@ -305,6 +346,104 @@ stories:
               - "RESULT[0].rule == role_cycle"
               - "RESULT[0].line == 6"
               - "RESULT[0].message == \"role shop_user includes itself\""
+      "a file that is not YAML is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: not_yaml}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_yaml"
+              - "RESULT[0].line == 22"
+              - "RESULT[0].message == \"not YAML: mapping values are not allowed here\""
+      "a name that is not snake_case is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_name}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_name"
+              - "RESULT[0].line == 19"
+              - "RESULT[0].message == \"not a name: Order\""
+      "a condition written a second way is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: second_way}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == second_way"
+              - "RESULT[0].line == 31"
+              - "RESULT[0].message == \"write 0 < order.units_sent and order.units_sent <= 99 (not 0 < order.units_sent <= 99)\""
+      "a condition comparing a number with a time is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: type_mismatch}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == type_mismatch"
+              - "RESULT[0].line == 31"
+              - "RESULT[0].message == \"== expects two values of one kind: order.units_sent == NOW\""
+      "an actor's fixed name given in an example is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: derived_in_given}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == derived_in_given"
+              - "RESULT[0].line == 39"
+              - "RESULT[0].message == \"name is fixed and cannot be given\""
+      "an operation admitting a role its entity does not is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: wider_than_entity}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == wider_than_entity"
+              - "RESULT[0].line == 29"
+              - "RESULT[0].message == \"remove admits admin, which order does not\""
+      "an example that belongs to no rule is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: no_rule}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == no_rule"
+              - "RESULT[0].line == 57"
+              - "RESULT[0].message == \"example \\\"a removed order is not removed again\\\" belongs to no rule\""
       "a history out of sequence is refused in the history file":
         given:
           - actor: bot

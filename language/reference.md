@@ -1,8 +1,8 @@
 # Edda: language reference
 
-Revision 51, 3 Oct 2026. Replaces revision 50 (kb:9378949). Decisions
+Revision 52, 3 Oct 2026. Replaces revision 51 (kb:9378967). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 28. The skeleton is YAML; the words are keys; the logic is
+rounds 4 to 29. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -27,6 +27,10 @@ so the subset below does not apply to it).
   an expression is Python 3, parsed by Python's own `ast` and limited
   to the whitelist of section 7. Nothing is invented; one way per
   meaning is kept by the whitelist.
+- **Meaning above examples.** A story's `rules:` say in one sentence
+  each what a group of its examples shows, as Gherkin's `Rule:` does;
+  the checker holds every example to exactly one rule. Conditions stay
+  in `refuse:` and `ensure:`, Design by Contract's form.
 - **Shape tells words apart.** Declared names are snake_case; YAML keys
   are snake_case; ids are `ABC-123`; the fixed names `OLD`, `ACTOR`,
   `RESULT`, `NOW`, `TODAY` and the type-phrase words (`MANY`,
@@ -63,7 +67,8 @@ A `.edda` file is YAML 1.2, core schema, in this subset, which the
 checker enforces at the source, before the schema:
 
 - free text (`is:`, `story:`, `i_want:`, `so_that:`, `reason:`,
-  `means:`, `wording` values, notes, questions, example titles) and
+  `means:`, `rule:`, `wording` values, notes, questions, example
+  titles, as keys and under `shown_by:`) and
   every expression (an `also_changes` path with them) is quoted, with
   double quotes; a single-quoted
   scalar is `yaml_feature`; every key is plain, except example titles;
@@ -261,6 +266,9 @@ stories:
     tags: [ordering, shop]
     notes: ["the shop asked for undo; no rule yet"]
     questions: ["may a removed order be restored?"]
+    rules:
+      - rule: "a removed order gives its held stock back"
+        shown_by: ["Ta bort frees held stock"]
     operations: ...
     examples: ...
 ```
@@ -276,9 +284,15 @@ stories:
 | `epic:` `tags:` | labels | grouping; changeable without a new version |
 | `notes:` | what the grammar cannot say, on a story, an operation or an example; ignored by the checker, grey in the view, collected across files | nothing the customer said is lost; repeated notes are the evidence for a new key |
 | `questions:` | the undecided | a flag on an approved story, never a block |
+| `rules:` | optional; a list of rules, each a `rule:` sentence and the examples that show it; when present, every example of the story is named by exactly one rule (`no_rule` for one named by none, `declared_twice` for one named twice, `unknown_name` for a title that names no example of the story) | Gherkin's Rule:, with one check: every example belongs to exactly one rule; the layer between the story's meaning and its examples; decision kb:9378274 entry 100 |
+| `rule:` | inside `rules:`, what the examples under it show, one sentence of free text | the read view heads the examples with it |
+| `shown_by:` | inside `rules:`, the titles of the examples the rule groups, a list of quoted text | each example tied to the meaning it shows |
 
 The acceptance criteria of a story are its operations and examples.
-There is no separate list. `examples:` absent or empty is one flag,
+`rules:` is no second list of criteria: each rule is a sentence over
+examples already there, as Gherkin's `Rule:` holds its scenarios, and
+the checker holds the grouping, every example under exactly one rule.
+`examples:` absent or empty is one flag,
 `no_example`.
 
 ## 6. Operations
@@ -575,8 +589,9 @@ a re-read is the binding's test, not a level 1 fact.
   is never compared with the current block by the checker; `approved`
   does that, and only against the newest entry.
 - **Draft, story.** Its `rules_text` differs from the newest version's:
-  `rules_text` is `text` with only `about:`, `as_a:`, `operations:` and
-  `examples:` kept and every `notes:` entry removed. The sentence,
+  `rules_text` is `text` with only `about:`, `as_a:`, `rules:`,
+  `operations:` and `examples:` kept and every `notes:` entry removed.
+  The sentence,
   `i_want`, `so_that`, `epic`, `tags`, notes, questions, comments and
   blank lines change freely. **Draft, block.** Its `text` differs from
   the newest version's.
@@ -610,12 +625,16 @@ a re-read is the binding's test, not a level 1 fact.
   newest version while the other does not. The pairs, smallest first:
   `fact`/`means` and `when`/`reason`, matched by position in their
   list (the first refusal with the first refusal) and only when both
-  versions have an item at that position; an operation's body (inputs,
+  versions have an item at that position; a rule's `shown_by` examples
+  (their text) against its `rule` sentence, matched by position in the
+  `rules` list and only when both versions have an item at that
+  position; an operation's body (inputs,
   who, refuse, ensure, returns, ordered_by, also_changes; not notes)
   against its `is:`; the story's `rules_text` against its `story:`
   sentence. Flagged `wording_drift` at the smallest pair that holds
   it; an operation is flagged only when none of its pairs is, the story
-  only when none of its operations is. Shown side by side in the diff
+  only when none of its operations or rules is. Shown side by side in
+  the diff
   view, in the warning shade in the read view. The agent's standing
   rule is to re-read the meaning against the mechanics and fix or
   justify; approval clears it.
@@ -643,7 +662,7 @@ anchor and its aliases are one problem, at the anchor.
 3. meaning: `unknown_name`, `unknown_status`, `bad_type_phrase`,
    `not_an_expression`, `second_way`, `type_mismatch`,
    `returns_and_ensure`, `wrong_file`, `not_ordered`, `role_cycle`,
-   `derived_in_given`, `wider_than_entity`;
+   `derived_in_given`, `wider_than_entity`, `no_rule`;
 4. history and flags: `bad_version`, `bad_pin`, `bad_snapshot`, then
    every flag.
 
@@ -667,7 +686,9 @@ expression's line, the property's line for `unknown_status`,
 `bad_type_phrase`, `unreachable_status` and `plural_name`, the first
 role's `includes:` line for `role_cycle`, the `then` item's line for
 `not_ordered`, the operation's key line for `returns_and_ensure`, the
-entity's key line for `wrong_file` on a part, the
+entity's key line for `wrong_file` on a part, the example's title
+line for `no_rule`, the title's line under `shown_by:` for
+`unknown_name` on a title, the
 story's key line for `wrong_file`, `no_example`, `about_untouched`,
 `question_on_approved` and `approved_against_older`, the changed
 side's line for `wording_drift`, and in the `.vc` the entry's
@@ -682,13 +703,13 @@ the pin's line for every other `bad_pin`.
 | `not_yaml` | the file does not parse | `not YAML: <parser message>` |
 | `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or title on more than one line, a quoted key, or `DONE` anywhere but first under `then` | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item` |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
-| `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, tag or role |
+| `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, example, tag or role |
 | `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `then must start with DONE or refused` for a first `then` item under a `when` that is neither; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
 | `missing_key` | a required key absent | `<block> needs <key>:`, the block named by kind and name: `operation remove`, `entity order`, `refusal 2`, `step 1`, `file` |
 | `unknown_key` | a key the schema does not name | `unknown key: <key>` |
 | `bad_name` | a name not snake_case, an id not `ABC-123`, a name, choice value or role-list item that is a Python keyword (`True` and `False` as keys included), a quoted name, a quoted `DONE` as the first `then` item, a role-list item that is no name | `not a name: <text>`, the text as written; for a quoted name `not a name: "<text>" (a name is plain)` |
-| `declared_twice` | a duplicate key, a name declared twice in one project, a given name used twice in one example, a `has:` entry named `name` or `roles`; at the second | `declared twice: <name>` |
-| `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status compared with a choice property | `unknown name: <name>` |
+| `declared_twice` | a duplicate key, a name declared twice in one project, a given name used twice in one example, a `has:` entry named `name` or `roles`, an example named twice under a story's `rules:`; at the second | `declared twice: <name>`; for an example, `declared twice: <title>` |
+| `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a status compared with a choice property; a `shown_by` title that names no example of the story | `unknown name: <name>`; for a `shown_by` title, `unknown example: <title>` |
 | `unknown_status` | a status value not in its property's list: in a comparison, `may_change`, `wording` or a given | `status not in its list: <value>` |
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>` |
 | `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation, `RESULT` outside a `then` item after a call (a `call` itself never sees it) | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
@@ -700,6 +721,7 @@ the pin's line for every other `bad_pin`.
 | `role_cycle` | `includes` reaches itself; each cycle once, at its first role in file order | `role <name> includes itself` |
 | `derived_in_given` | a `with:` value for a derived or computed property, or for an actor's `name` | `<property> is derived and cannot be given`, `<property> is computed and cannot be given`, `name is fixed and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
+| `no_rule` | a story with `rules:` has an example no rule names | `example "<title>" belongs to no rule` |
 | `bad_version` | a `.vc` number out of sequence, an unknown story or block, or an entry for a block of another file | `<kind> <name> version <n> out of sequence; expected <m>`; for an unknown block, `<kind> <name> version <n>: no such <kind>`; for another file's block, `<kind> <name> version <n>: belongs in <file>.edda.vc` |
 | `bad_pin` | a pin on a block entry, a story entry without pins, a duplicate `(kind, name)`, a pin to no such block or version; a version exists when a history of the project holds it | `pin <kind> <name> v<n>: no such version`, `pin <kind> <name> v<n>: no such <kind>`, `pin <kind> <name> v<n>: pinned twice`, `story <id> version <n>: no pins`, `<kind> <name> version <n>: a block entry has no pins` |
 | `bad_snapshot` | an entry's text that is not already normalised, is outside the subset of section 2 or fails the shape layer (a bad name, a wrong key, a duplicate), does not read as one block under the entry's name, or does not name it on its first line | `text of <kind> <name> v<n> is not a normalised block` |
@@ -712,7 +734,7 @@ the pin's line for every other `bad_pin`.
 | `no_example` | a story with no example | `story <id> has no example` |
 | `approved_against_older` | a pin older than its block | `<id> approved against <kind> <name> v<n>, <name> is now v<m>` |
 | `question_on_approved` | a question on an approved story | `story <id> is approved and still has a question` |
-| `wording_drift` | section 10 | `<id> <operation>: <side> changed, <other> did not`; for the story pair `<id>: rules changed, story sentence did not` |
+| `wording_drift` | section 10 | `<id> <operation>: <side> changed, <other> did not`; for a rule pair, `<n>` counted from 1, `<id> rule <n>: examples changed, rule did not` and `<id> rule <n>: rule changed, examples did not`; for the story pair `<id>: rules changed, story sentence did not` |
 | `plural_name` | a `MANY` property with a singular name, or a reference with a plural one | `<property> holds MANY and should be plural` |
 | `about_untouched` | a story that never names its `about` entity | `story <id> is about <entity> but never names it` |
 
@@ -775,7 +797,9 @@ for every test in the suite. Never in production.
 **Read view.** Generated from the checked tree, never edited. A
 `sentence` has `kind`, `text`, `line` (where it comes from) and
 `shade` (`plain`, `grey` for notes, `warning` for questions and
-drifted pairs). Sentences come in file order, one per rule:
+drifted pairs). Sentences come in file order, one per rule, except
+that a story with `rules:` shows its examples grouped under their
+rule:
 
 | kind | template |
 |---|---|
@@ -787,6 +811,7 @@ drifted pairs). Sentences come in file order, one per rule:
 | outcome | `When <name> succeeds, <means>.` or, without `means`, `When <name> succeeds, <fact in words>.` |
 | read | `<Name> gives <returns in words>[, ordered by <keys>].` |
 | invariant | `Always, <fact>.` and `While <condition>, <fact>.` |
+| rule | `Rule: <sentence>.` as a heading line before its examples; with `rules:`, the rules come where the examples stood, in `rules` order, each followed by its examples in `shown_by` order; without `rules:`, no rule sentence and the examples in file order |
 | example | `Example: <title>.` |
 | given | one sentence for all givens: `Given <item>, and <item>.`; an actor reads `<name>, a <role>`; an entity `<name>, a <entity> with <property> <value> and <property> <value>`; items are joined with `, ` and the last with `, and ` (the comma stays because each item carries its own apposition) |
 | when | `When <actor> asks to <name> <arguments>.` |
@@ -819,7 +844,8 @@ text with the wording and permissions of its pinned blocks.
 the note's or question's text line; the operation's key line; the
 who-line for `permission`; the `when` line for `refusal`; the fact's
 line for `outcome`; the `returns` line for `read`; the fact's line for
-`invariant`; the title line for `example`; the `given:` line for
+`invariant`; the `rule:` line for `rule`; the title line for
+`example`; the `given:` line for
 `given`; the step's `when` line for `when`; the step's `then` line for
 `then`.
 
@@ -836,7 +862,29 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 50
+## 14. Changes from revision 51
+
+- The rules layer, Gherkin's `Rule:` with one check (decision
+  kb:9378274 entry 100): a story may carry `rules:`, each item a
+  `rule:` sentence and the `shown_by:` titles of the examples it
+  groups; when present, every example belongs to exactly one rule,
+  `no_rule` for one in none and `unknown_name` (`unknown example:
+  <title>`) for a title that names no example, both in the meaning
+  layer, and `declared_twice` for one named twice, in the shape layer
+  like a given name used twice, so each rule keeps one layer.
+  `rules:` is part of `rules_text`; a rule's examples against its
+  sentence is a new wording-drift pair; the read view shows the
+  examples under a `Rule:` heading.
+- Seven new fixtures, one problem each: the six refusals that had no
+  fixture and no example, `not_yaml`, `bad_name`, `second_way`,
+  `type_mismatch`, `derived_in_given` and `wider_than_entity`, and
+  `no_rule`.
+- EDDA-001 rewritten: `i_want` covers every problem the checker finds;
+  seven rules group its examples, with seven new examples for the
+  seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
+  and the entity `sentence`'s `kind` list gains `rule`.
+
+## 15. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -846,7 +894,7 @@ are build step 4 and get their own stories then.
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 15. Changes from revision 49
+## 16. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -855,14 +903,14 @@ are build step 4 and get their own stories then.
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 16. Changes from revision 48
+## 17. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 17. Changes from revision 47
+## 18. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -872,7 +920,7 @@ are build step 4 and get their own stories then.
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 18. Changes from revision 46
+## 19. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -881,7 +929,7 @@ are build step 4 and get their own stories then.
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 19. Changes from revision 45
+## 20. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -891,7 +939,7 @@ are build step 4 and get their own stories then.
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 20. Changes from revision 44
+## 21. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -900,7 +948,7 @@ are build step 4 and get their own stories then.
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 21. Changes from revision 43
+## 22. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -909,7 +957,7 @@ are build step 4 and get their own stories then.
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 22. Changes from revision 42
+## 23. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -920,7 +968,7 @@ are build step 4 and get their own stories then.
   an optional value among them still standing only where `None`
   fits.
 
-## 23. Changes from revision 41
+## 24. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -929,21 +977,21 @@ are build step 4 and get their own stories then.
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 24. Changes from revision 40
+## 25. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 25. Changes from revision 39
+## 26. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 26. Changes from revision 38
+## 27. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -951,7 +999,7 @@ are build step 4 and get their own stories then.
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 27. Changes from revision 37
+## 28. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -960,7 +1008,7 @@ are build step 4 and get their own stories then.
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 28. Changes from revision 36
+## 29. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -971,7 +1019,7 @@ are build step 4 and get their own stories then.
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 29. Changes from revision 35
+## 30. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -984,7 +1032,7 @@ are build step 4 and get their own stories then.
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 30. Changes from revision 34
+## 31. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -997,7 +1045,7 @@ are build step 4 and get their own stories then.
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 31. Changes from revision 33
+## 32. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -1013,7 +1061,7 @@ are build step 4 and get their own stories then.
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 32. Changes from revision 32
+## 33. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1031,7 +1079,7 @@ are build step 4 and get their own stories then.
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 33. Changes from revision 31
+## 34. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1050,7 +1098,7 @@ are build step 4 and get their own stories then.
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 34. Changes from revision 30
+## 35. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1071,7 +1119,7 @@ are build step 4 and get their own stories then.
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 35. Changes from revision 29
+## 36. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1092,7 +1140,7 @@ are build step 4 and get their own stories then.
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 36. Changes from revision 28
+## 37. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1109,7 +1157,7 @@ are build step 4 and get their own stories then.
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 37. Changes from revision 27
+## 38. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1131,7 +1179,7 @@ are build step 4 and get their own stories then.
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 38. Changes from revision 26
+## 39. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names
