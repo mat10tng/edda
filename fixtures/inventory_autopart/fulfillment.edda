@@ -1,0 +1,254 @@
+entities:
+  fulfillment:
+    is: "a request to issue parts to a repair job"
+    properties:
+      reference: TEXT
+      part: part
+      quantity: INTEGER
+      status: DEFAULT draft | pending | shipped | cancelled
+    may_change: {status: {draft: [pending, cancelled], pending: [shipped, cancelled]}}
+    may_create: [{role: buyer}]
+    may_read: [{role: buyer}, {role: warehouse_staff}]
+    may_update: [{role: buyer}, {role: warehouse_staff}]
+
+stories:
+  FUL-002:
+    story: "request parts for a job"
+    about: fulfillment
+    as_a: buyer
+    i_want: "to place a fulfillment request for the parts I need"
+    so_that: "the warehouse knows what to prepare and ship"
+    epic: FUL
+    rules:
+      - rule: "submitting a valid draft creates a pending fulfillment"
+        shown_by:
+          - "submitting a draft fulfillment creates a request"
+      - rule: "a zero or negative quantity is refused"
+        shown_by:
+          - "submitting a fulfillment with zero quantity is refused"
+      - rule: "a discontinued part cannot be requested"
+        shown_by:
+          - "submitting a request for a discontinued part is refused"
+      - rule: "only a draft fulfillment may be submitted"
+        shown_by:
+          - "submitting an already-submitted fulfillment is refused"
+    operations:
+      submit:
+        is: "marks a draft fulfillment as pending so the warehouse can act on it"
+        inputs: {f: fulfillment}
+        who: [{role: buyer}]
+        refuse:
+          - when: "f.quantity <= 0"
+            reason: "quantity must be positive"
+          - when: "f.part.status == discontinued"
+            reason: "part is discontinued"
+          - when: "f.status != draft"
+            reason: "fulfillment is already submitted"
+        ensure:
+          - "f.status == pending"
+    examples:
+      "submitting a draft fulfillment creates a request":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: order_one
+            with: {reference: "JOB-101", part: filter, quantity: 3, status: draft}
+        steps:
+          - when: {actor: alice, call: "submit(order_one)"}
+            then: [DONE, "order_one.status == pending"]
+      "submitting a fulfillment with zero quantity is refused":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: order_one
+            with: {reference: "JOB-101", part: filter, quantity: 0, status: draft}
+        steps:
+          - when: {actor: alice, call: "submit(order_one)"}
+            then: [{refused: "quantity must be positive"}, "order_one.status == draft"]
+      "submitting a request for a discontinued part is refused":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Old filter", stock_count: 0, min_stock: 1, status: discontinued}
+          - fulfillment: order_one
+            with: {reference: "JOB-101", part: filter, quantity: 1, status: draft}
+        steps:
+          - when: {actor: alice, call: "submit(order_one)"}
+            then: [{refused: "part is discontinued"}, "order_one.status == draft"]
+      "submitting an already-submitted fulfillment is refused":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: order_one
+            with: {reference: "JOB-101", part: filter, quantity: 3, status: pending}
+        steps:
+          - when: {actor: alice, call: "submit(order_one)"}
+            then: [{refused: "fulfillment is already submitted"}, "order_one.status == pending"]
+
+  FUL-003:
+    story: "ship a fulfillment"
+    about: fulfillment
+    as_a: warehouse_staff
+    i_want: "to mark a fulfillment as shipped and deduct the parts from stock"
+    so_that: "stock levels stay accurate after each shipment"
+    epic: FUL
+    rules:
+      - rule: "shipping a pending fulfillment marks it shipped and reduces stock"
+        shown_by:
+          - "shipping a fulfillment marks it shipped and deducts stock"
+      - rule: "a fulfillment with more parts than are in stock cannot be shipped"
+        shown_by:
+          - "shipping when stock is insufficient is refused"
+      - rule: "only a pending fulfillment may be shipped"
+        shown_by:
+          - "shipping a draft fulfillment is refused"
+          - "shipping an already-shipped fulfillment is refused"
+          - "shipping a cancelled fulfillment is refused"
+    operations:
+      ship:
+        is: "marks a pending fulfillment shipped and deducts its quantity from stock"
+        inputs: {f: fulfillment}
+        who: [{role: warehouse_staff}]
+        refuse:
+          - when: "f.status != pending"
+            reason: "fulfillment is not pending"
+          - when: "f.quantity > f.part.stock_count"
+            reason: "insufficient stock"
+        ensure:
+          - "f.status == shipped"
+          - "f.part.stock_count == OLD(f.part.stock_count) - f.quantity"
+    examples:
+      "shipping a fulfillment marks it shipped and deducts stock":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-102", part: filter, quantity: 3, status: pending}
+        steps:
+          - when: {actor: sam, call: "ship(job_order)"}
+            then: [DONE, "job_order.status == shipped", "filter.stock_count == 7"]
+      "shipping when stock is insufficient is refused":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 2, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-102", part: filter, quantity: 5, status: pending}
+        steps:
+          - when: {actor: sam, call: "ship(job_order)"}
+            then: [{refused: "insufficient stock"}, "job_order.status == pending", "filter.stock_count == 2"]
+      "shipping a draft fulfillment is refused":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-102", part: filter, quantity: 3, status: draft}
+        steps:
+          - when: {actor: sam, call: "ship(job_order)"}
+            then: [{refused: "fulfillment is not pending"}, "job_order.status == draft"]
+      "shipping an already-shipped fulfillment is refused":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-102", part: filter, quantity: 3, status: shipped}
+        steps:
+          - when: {actor: sam, call: "ship(job_order)"}
+            then: [{refused: "fulfillment is not pending"}, "job_order.status == shipped"]
+      "shipping a cancelled fulfillment is refused":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-102", part: filter, quantity: 3, status: cancelled}
+        steps:
+          - when: {actor: sam, call: "ship(job_order)"}
+            then: [{refused: "fulfillment is not pending"}, "job_order.status == cancelled"]
+
+  FUL-004:
+    story: "cancel a fulfillment"
+    about: fulfillment
+    as_a: buyer
+    i_want: "to cancel a fulfillment I no longer need"
+    so_that: "the warehouse does not ship parts for a cancelled job"
+    epic: FUL
+    rules:
+      - rule: "a draft or pending fulfillment may be cancelled"
+        shown_by:
+          - "cancelling a draft fulfillment succeeds"
+          - "cancelling a pending fulfillment succeeds"
+      - rule: "a shipped or already-cancelled fulfillment cannot be cancelled"
+        shown_by:
+          - "cancelling a shipped fulfillment is refused"
+          - "cancelling a cancelled fulfillment is refused"
+    operations:
+      cancel:
+        is: "marks a draft or pending fulfillment cancelled"
+        inputs: {f: fulfillment}
+        who: [{role: buyer}]
+        refuse:
+          - when: "f.status != draft and f.status != pending"
+            reason: "fulfillment cannot be cancelled"
+        ensure:
+          - "f.status == cancelled"
+    examples:
+      "cancelling a draft fulfillment succeeds":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-103", part: filter, quantity: 3, status: draft}
+        steps:
+          - when: {actor: alice, call: "cancel(job_order)"}
+            then: [DONE, "job_order.status == cancelled"]
+      "cancelling a pending fulfillment succeeds":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-103", part: filter, quantity: 3, status: pending}
+        steps:
+          - when: {actor: alice, call: "cancel(job_order)"}
+            then: [DONE, "job_order.status == cancelled"]
+      "cancelling a shipped fulfillment is refused":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-103", part: filter, quantity: 3, status: shipped}
+        steps:
+          - when: {actor: alice, call: "cancel(job_order)"}
+            then: [{refused: "fulfillment cannot be cancelled"}, "job_order.status == shipped"]
+      "cancelling a cancelled fulfillment is refused":
+        given:
+          - actor: alice
+            with: {roles: [buyer]}
+          - part: filter
+            with: {code: "W-002", description: "Oil filter", stock_count: 10, min_stock: 2, status: active}
+          - fulfillment: job_order
+            with: {reference: "JOB-103", part: filter, quantity: 3, status: cancelled}
+        steps:
+          - when: {actor: alice, call: "cancel(job_order)"}
+            then: [{refused: "fulfillment cannot be cancelled"}, "job_order.status == cancelled"]

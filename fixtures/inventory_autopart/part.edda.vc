@@ -1,0 +1,104 @@
+- role: warehouse_staff
+  number: 1
+  approved_at: "2026-10-03 18:53"
+  approved_by: tuan
+  text: |
+    warehouse_staff:
+      is: "a person who receives and ships auto parts"
+- role: buyer
+  number: 1
+  approved_at: "2026-10-03 18:53"
+  approved_by: tuan
+  text: |
+    buyer:
+      is: "a person who requests parts for a repair job"
+- entity: part
+  number: 1
+  approved_at: "2026-10-03 18:53"
+  approved_by: tuan
+  text: |
+    part:
+      is: "a stocked auto part"
+      properties:
+        code: TEXT
+        description: TEXT
+        stock_count: DEFAULT 0
+        min_stock: DEFAULT 1
+        status: DEFAULT active | discontinued
+      may_change: {status: {active: [discontinued]}}
+      may_create: [{role: warehouse_staff}]
+      may_read: [{role: warehouse_staff}, {role: buyer}]
+      may_update: [{role: warehouse_staff}]
+- story: FUL-001
+  number: 1
+  approved_at: "2026-10-03 18:53"
+  approved_by: tuan
+  pins: [{role: warehouse_staff, number: 1}, {role: buyer, number: 1}, {entity: part, number: 1}]
+  text: |
+    FUL-001:
+      story: "receive parts into stock"
+      about: part
+      as_a: warehouse_staff
+      i_want: "to add received parts to the stock count"
+      so_that: "the count is always accurate"
+      epic: FUL
+      rules:
+        - rule: "receiving positive quantities raises the stock count"
+          shown_by:
+            - "receiving parts adds to the count"
+        - rule: "receiving zero or fewer parts is refused"
+          shown_by:
+            - "receiving zero parts is refused"
+            - "receiving a negative quantity is refused"
+        - rule: "a discontinued part cannot receive stock"
+          shown_by:
+            - "receiving against a discontinued part is refused"
+      operations:
+        receive:
+          is: "adds a delivered quantity to the stock count"
+          inputs: {p: part, qty: INTEGER}
+          who: [{role: warehouse_staff}]
+          refuse:
+            - when: "qty <= 0"
+              reason: "quantity must be positive"
+            - when: "p.status == discontinued"
+              reason: "part is discontinued"
+          ensure:
+            - "p.stock_count == OLD(p.stock_count) + qty"
+      examples:
+        "receiving parts adds to the count":
+          given:
+            - actor: sam
+              with: {roles: [warehouse_staff]}
+            - part: widget
+              with: {code: "W-001", description: "Oil filter", stock_count: 5, min_stock: 2, status: active}
+          steps:
+            - when: {actor: sam, call: "receive(widget, 10)"}
+              then: [DONE, "widget.stock_count == 15"]
+        "receiving zero parts is refused":
+          given:
+            - actor: sam
+              with: {roles: [warehouse_staff]}
+            - part: widget
+              with: {code: "W-001", description: "Oil filter", stock_count: 5, min_stock: 2, status: active}
+          steps:
+            - when: {actor: sam, call: "receive(widget, 0)"}
+              then: [{refused: "quantity must be positive"}, "widget.stock_count == 5"]
+        "receiving a negative quantity is refused":
+          given:
+            - actor: sam
+              with: {roles: [warehouse_staff]}
+            - part: widget
+              with: {code: "W-001", description: "Oil filter", stock_count: 5, min_stock: 2, status: active}
+          steps:
+            - when: {actor: sam, call: "receive(widget, -3)"}
+              then: [{refused: "quantity must be positive"}, "widget.stock_count == 5"]
+        "receiving against a discontinued part is refused":
+          given:
+            - actor: sam
+              with: {roles: [warehouse_staff]}
+            - part: widget
+              with: {code: "W-001", description: "Oil filter", stock_count: 0, min_stock: 2, status: discontinued}
+          steps:
+            - when: {actor: sam, call: "receive(widget, 5)"}
+              then: [{refused: "part is discontinued"}, "widget.stock_count == 0"]
