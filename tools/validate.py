@@ -115,6 +115,8 @@ NAME_PATHS = [
     "stories/*/examples/*/steps/#/when/actor",
 ]
 TITLE_PATHS = ["stories/*/examples/*"]
+BLOCK_PATHS = ["roles", "entities", "stories", "roles/*", "entities/*", "stories/*",
+               "stories/*/operations/*", "stories/*/examples/*"]     # block form only
 TITLE_REF_PATHS = ["stories/*/rules/#/shown_by/#"]     # an example title as a value
 VC_TEXT_PATHS = ["#/because", "#/approved_at"]
 VC_NAME_PATHS = ["#/story", "#/entity", "#/role", "#/approved_by", "#/pins/#/entity", "#/pins/#/role"]
@@ -201,11 +203,15 @@ class Source:
             self.marks[()] = (1, 1)
             self.walk(docs[0], ())
 
-    def walk(self, node, path):
+    def walk(self, node, path, in_flow=False):
         if id(node) in self.seen:       # an alias back to an anchor: reported once, at the anchor
             return
         self.seen.add(id(node))
         line = node.start_mark.line + 1
+        if (not self.is_vc and not in_flow and getattr(node, "flow_style", False)
+                and any_match(path, BLOCK_PATHS)):
+            self.src.append(("yaml_feature", self.line(path), "a block is written one key per line, not in { }"))
+            in_flow = True              # once per block written in flow form, at its key
         if isinstance(node, yaml.MappingNode):
             for k, v in node.value:
                 kline = k.start_mark.line + 1
@@ -228,11 +234,11 @@ class Source:
                         self.src.append(("yaml_feature", kline, "an example title is one line"))
                 elif k.style == '"':
                     self.src.append(("yaml_feature", kline, "a key is plain, not quoted"))
-                self.walk(v, kpath)
+                self.walk(v, kpath, in_flow)
         elif isinstance(node, yaml.SequenceNode):
             for i, v in enumerate(node.value):
                 self.marks[path + (i,)] = (v.start_mark.line + 1, v.start_mark.line + 1)
-                self.walk(v, path + (i,))
+                self.walk(v, path + (i,), in_flow)
         elif isinstance(node, yaml.ScalarNode):
             self.styles[path] = node.style
             self.raw[path] = node.value          # as written, for messages
@@ -2132,14 +2138,11 @@ def rules_text(text):
         if key not in RULES_KEYS:
             continue
         out.append(lines[lo])
-        if key not in ("operations", "examples") or not lines[lo].endswith(":"):
+        if key not in ("operations", "examples"):
             out += lines[lo + 1:hi]
             continue
         for ilo, ihi in _children(lines, lo + 1, hi):
             out.append(lines[ilo])
-            if not lines[ilo].endswith(":"):      # flow form: kept whole
-                out += lines[ilo + 1:ihi]
-                continue
             for klo, khi in _children(lines, ilo + 1, ihi):
                 if _key(lines[klo]) != "notes":
                     out += lines[klo:khi]
@@ -2181,8 +2184,8 @@ def _wording_drift_flags(sid, st, approved_st, source):
                 out.append(("wording_drift", source.line(p, key=False),
                     f"{sid} {oname}: means changed, fact did not"))
             elif cf != af and cm == am and am is not None:
-                p = ("stories", sid, "operations", oname, "ensure", i)
-                out.append(("wording_drift", source.line(p),
+                p = ("stories", sid, "operations", oname, "ensure", i, "fact")
+                out.append(("wording_drift", source.line(p, key=False),
                     f"{sid} {oname}: fact changed, means did not"))
     return out
 

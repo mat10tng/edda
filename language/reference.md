@@ -89,6 +89,11 @@ checker enforces at the source, before the schema:
   order;
 - no anchors, aliases, the `<<` key, tags, directives, complex keys,
   tabs or a second document;
+- blocks in block form only: `roles:`, `entities:` and `stories:`,
+  each role, entity and story under them, and each operation under
+  `operations:` and example under `examples:` are written one key per
+  line, never in flow form (`{ }` or `[ ]`); values below them
+  (`inputs:`, `who:`, `with:`, `then:` and the like) may be flow;
 - two-space indentation, enforced: a line's indentation is even and at
   most two deeper than the line before it, a list dash counting as two
   for the line after it; keys are snake_case except
@@ -192,7 +197,7 @@ entities:
 | `is:` | one sentence of description | the read view |
 | `properties:` | name to type phrase, or `{computed: expr}` | the shape the checker and the binding read |
 | `part_of:` | this entity belongs to that one | placement and the frame rule follow the owner |
-| `may_change:` | per status property, the only allowed changes; only on a choice property, optional or not (`type_mismatch` otherwise) | a change outside it fails at run time; an unreached status is flagged |
+| `may_change:` | per status property, the only allowed changes; only on a choice property, optional or not (`type_mismatch` otherwise) | a change outside it fails at run time; an unreached status of a choice with `DEFAULT` is flagged |
 | `wording:` | per value and role, the words shown; only on a choice property (`type_mismatch` otherwise) | the one piece of screen wording kept |
 | `always:` | facts that hold after every operation | invariants checked on the suite |
 | `while:` | `when` a condition holds, `holds` a fact | state-bound invariants, EARS WHILE |
@@ -580,7 +585,7 @@ a re-read is the binding's test, not a level 1 fact.
   must be normalised already (normalising it changes nothing), be in
   the subset of section 2 and pass the shape layer (its keys, names
   and duplicates), read as one block under the entry's name, and name
-  that block on its first line, in block or flow form (`bad_snapshot`
+  that block on its first line, in block form (`bad_snapshot`
   otherwise). It
   is never compared with the current block by the checker; `approved`
   does that, and only against the newest entry.
@@ -692,7 +697,7 @@ the pin's line for every other `bad_pin`.
 | rule | when | message |
 |---|---|---|
 | `not_yaml` | the file does not parse | `not YAML: <parser message>` |
-| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or example title (as a key or under `shown_by:`) on more than one line, a quoted key, or `DONE` anywhere but first under `then` | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item` |
+| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or example title (as a key or under `shown_by:`) on more than one line, a quoted key, `DONE` anywhere but first under `then`, or a block in flow form (section 2), at its key | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item`; `a block is written one key per line, not in { }` |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
 | `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, example, tag or role |
 | `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `then must start with DONE or refused` for a first `then` item under a `when` that is neither; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
@@ -870,7 +875,14 @@ removal audit (kb:9379093):
 - `approved_against_older` is removed: a stale pin shows on the
   story's status line as "pins stale" instead (`story.pins_stale`).
 - `unreachable_status` stays and says that it looks only at a choice
-  with `DEFAULT`.
+  with `DEFAULT`; section 4's `may_change:` row says so too.
+- A block (`roles:`, `entities:`, `stories:`, each role, entity and
+  story, each operation and example) in flow form is `yaml_feature`
+  (section 2), in `.edda` and in a `.vc` snapshot (`bad_snapshot`):
+  `rules_text` and `text` are compared by lines, and a second way to
+  write a block broke both (Astra round 32).
+- `wording_drift` "fact changed, means did not" is anchored at the
+  fact's own line, not at its list item.
 
 ## 15. Changes from revision 52
 

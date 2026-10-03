@@ -329,6 +329,15 @@ def wrapped_title(ls):
     return i + 4
 edit("wrapped_title", wrapped_title)
 
+def flow_block(ls):
+    i = find(ls, "      remove:"); j = find(ls, "    examples:")
+    ls[i:j] = ['      remove: {is: "takes an unsent order off the list", inputs: {order: order},',
+               '        who: [{role: shop_user}], refuse: [{when: "order.status == removed",',
+               '        reason: "already removed"}, {when: "order.units_sent > 0", reason: "already sent"}],',
+               '        ensure: ["order.status == removed"]}']
+    return i
+edit("flow_block", flow_block)
+
 # bad_version: approved file whose history numbers the entity 2 first
 edit("bad_version", lambda ls: None)
 vc = vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1)
