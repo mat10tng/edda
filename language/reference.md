@@ -2,7 +2,7 @@
 
 Revision 55, 3 Oct 2026. Replaces revision 54 (kb:9379116). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
-rounds 4 to 30. The skeleton is YAML; the words are keys; the logic is
+review rounds. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -779,17 +779,18 @@ unapproved version.
   (the checker keeps a source map); for a version, the line within the
   entry's text, counted from its key line.
 
-**Status and changes.** Under each `.edda` file with no refusal, the
-checker prints one line per role, entity and story, roles first, then
-entities, then stories, each in file order: `<kind> <name>: approved
-v<n>` or `<kind> <name>: draft v<n>`, `n` the newest version's number
-(0 when there is none), with `, pins stale` after an approved story
-whose pins are stale. Under a story with a version, one line per entry
-of `story.changes`, in walk order: `- <line>: <sentence>` for a
-removed line, `+ <line>: <sentence>` for an added one, the sentence as
-written in the text. A story never approved and a role or entity block
-show no changes. Status and changes are not problems: they never make
-the run fail.
+**Status and changes.** Under each `.edda` file that checks, its
+history included (no refusal in the file or in the `.edda.vc` beside
+it), the checker prints one line per role, entity and story, roles
+first, then entities, then stories, each in file order: `<kind>
+<name>: approved v<n>` or `<kind> <name>: draft v<n>`, `n` the block's
+or story's `version`, `len(versions)` (0 when there are none), with
+`, pins stale` after an approved story whose pins are stale. Under a
+story with a version, one line per entry of `story.changes`, in walk
+order: `- <line>: <sentence>` for a removed line, `+ <line>:
+<sentence>` for an added one, the sentence as written in the text. A
+story never approved and a role or entity block show no changes.
+Status and changes are not problems: they never make the run fail.
 
 **Done.** A story is done when, at its approved version: it is not a
 draft; no pin is stale; every example passes; the rule checks pass on
@@ -881,6 +882,9 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   nothing in the language changes.
 - A story never approved and a role or entity block show no changes;
   a stale pin shows only as `, pins stale` on the status line.
+- A file whose history is refused shows no status and no changes; the
+  history's refusals say why. The version shown is `version`,
+  `len(versions)`, not the newest entry's number (kb:9379121).
 
 ## 15. Changes from revision 53
 

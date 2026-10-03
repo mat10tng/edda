@@ -2276,10 +2276,10 @@ def changes(old, new):
 
 
 def status_lines(data, P, source):
-    """the status of every role, entity and story of a .edda that checks
-    (section 11), roles, then entities, then stories, each in file order:
-    approved or draft with its version, pins stale on an approved story, and
-    under a story with a version its changes"""
+    """the status of every role, entity and story of a .edda that checks,
+    its history included (section 11), roles, then entities, then stories,
+    each in file order: approved or draft with its version, pins stale on
+    an approved story, and under a story with a version its changes"""
     def newest(kind, name):
         return max((n for n in P.versions.get((kind, name), ()) if isinstance(n, int)), default=0)
 
@@ -2289,7 +2289,7 @@ def status_lines(data, P, source):
             current = block_text(source.text, source.line((section, name)))
             entry = P.newest_entry.get((kind, name))
             old = entry.get("text") if entry else None
-            n = entry["number"] if entry else 0
+            n = len(P.versions.get((kind, name), ()))     # block.version: len(versions)
             if not isinstance(old, str):
                 out.append(f"{kind} {name}: draft v{n}")
             elif kind != "story":
@@ -2349,6 +2349,12 @@ def check(path, P):
     return [], shape, meaning, history, flags
 
 
+def history_refused(path, P):
+    """whether the .edda.vc beside a .edda has a refusal"""
+    vc = path + ".vc"
+    return os.path.exists(vc) and any(check(vc, P)[:4])
+
+
 def project_of(folder):
     files, histories = [], []
     for path in sorted(glob.glob(f"{folder}/*.edda")):
@@ -2374,7 +2380,7 @@ if __name__ == "__main__":
             print(f"    {line}: {rule}: {msg}")
         for rule, line, msg in flags:
             print(f"    {line}: flagged: {rule}: {msg}")
-        if not problems and not path.endswith(".vc"):
+        if not problems and not path.endswith(".vc") and not history_refused(path, P):
             source, data = load(path)
             for s in status_lines(data, P, source):
                 print(f"    {s}")
@@ -2394,7 +2400,7 @@ if __name__ == "__main__":
                 print(f"      {line}: {rule}: {msg}")
             for rule, line, msg in flags:
                 print(f"      {line}: flagged: {rule}: {msg}")
-            if not refusals and not path.endswith(".vc"):
+            if not refusals and not path.endswith(".vc") and not history_refused(path, FP):
                 source, data = load(path)
                 for s in status_lines(data, FP, source):
                     print(f"      {s}")
