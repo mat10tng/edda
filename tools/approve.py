@@ -5,14 +5,18 @@ next version in the .edda.vc beside its file (reference section 10).
         [--at "YYYY-MM-DD HH:MM"] [--dry-run] [--folder DIR]
 
 The history is append-only: the new file is the old bytes followed by one
-entry, checked on a copy of the folder before it is written, and written
-through a temporary file and a rename. Who runs the script is not checked
-here; a guard outside the language keeps the agent out of the history."""
+entry (the entry alone when the history has no entries), checked on a copy
+of the folder before it is written, and written through a temporary file
+and a rename. One approval at a time per folder: a lock on the folder is
+held from the first read to the rename, everything is computed from one
+snapshot of the folder's files, and nothing is written if any of them
+changed meanwhile. Who runs the script is not checked here; a guard
+outside the language keeps the agent out of the history."""
 
 import argparse
 import datetime
+import fcntl
 import glob
-import json
 import os
 import re
 import shutil
@@ -30,6 +34,22 @@ SECTION_OF = {kind: section for section, kind in SECTIONS}
 
 class Refused(Exception):
     pass
+
+
+def read_folder(folder):
+    """{file name: bytes} of the folder's .edda and .edda.vc files"""
+    out = {}
+    for p in sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc")):
+        with open(p, "rb") as f:
+            out[os.path.basename(p)] = f.read()
+    return out
+
+
+def materialise(files, folder):
+    """write a snapshot's files into an empty folder"""
+    for name, data in files.items():
+        with open(os.path.join(folder, name), "wb") as f:
+            f.write(data)
 
 
 def find(folder, name):
@@ -100,6 +120,11 @@ def story_blocks(sid, P, files):
     return [(k, n) for k, n in P.block_order if n in (entities if k == "entity" else roles)]
 
 
+def blocks_not_approved(blocks, P, files):
+    """the blocks of story.blocks that have no version or are drafts"""
+    return [(k, n) for k, n in blocks if not E.approved(k, files.current(k, n, P), P.newest_entry.get((k, n)))]
+
+
 def version(P, kind, name):
     """block.version, story.version: len(versions)"""
     return len(P.versions.get((kind, name), ()))
@@ -120,18 +145,39 @@ def decide(folder, name):
             raise Refused("nothing to approve: the block matches its newest version")
         return path, kind, version(P, kind, name) + 1, None, text
     blocks = story_blocks(name, P, files)
-    if any(not E.approved(k, files.current(k, n, P), P.newest_entry.get((k, n))) for k, n in blocks):
+    if blocks_not_approved(blocks, P, files):
         raise Refused("approve its blocks first")
     if E.approved(kind, text, entry) and not E.pins_stale(entry, P):
         raise Refused("nothing to approve: the story matches its newest version and its pins are current")
     return path, kind, version(P, kind, name) + 1, [(k, n, version(P, k, n)) for k, n in blocks], text
 
 
+def is_one_line(text):
+    """no character str.splitlines() splits on (\\n, \\r, U+0085, U+2028 ...)"""
+    return "".join(text.splitlines()) == text
+
+
+def quoted(text):
+    """text as a YAML double-quoted scalar that reads back as text: a
+    printable character as itself, any other as an escape"""
+    out = []
+    for c in text:
+        o = ord(c)
+        if c in '"\\':
+            out.append("\\" + c)
+        elif 0x20 <= o <= 0x7e or 0xa0 <= o <= 0xd7ff and o not in (0x2028, 0x2029) or 0xe000 <= o <= 0xfffd and o != 0xfeff \
+                or 0x10000 <= o <= 0x10ffff:
+            out.append(c)
+        else:
+            out.append(f"\\x{o:02x}" if o <= 0xff else f"\\u{o:04x}")
+    return '"' + "".join(out) + '"'
+
+
 def entry_text(kind, name, number, at, by, because, pins, text):
     """one .edda.vc entry in the layout of the existing ones"""
-    out = [f"- {kind}: {name}", f"  number: {number}", f'  approved_at: "{at}"', f"  approved_by: {by}"]
+    out = [f"- {kind}: {name}", f"  number: {number}", f"  approved_at: {quoted(at)}", f"  approved_by: {by}"]
     if because is not None:
-        out.append(f"  because: {json.dumps(because, ensure_ascii=False)}")
+        out.append(f"  because: {quoted(because)}")
     if pins is not None:
         out.append("  pins: [" + ", ".join(f"{{{k}: {n}, number: {v}}}" for k, n, v in pins) + "]")
     out.append("  text: |")
@@ -139,15 +185,16 @@ def entry_text(kind, name, number, at, by, because, pins, text):
     return "\n".join(out) + "\n"
 
 
-def try_on_copy(folder, path, kind, name, new_bytes, old_entries):
-    """check the would-be folder: no refusal in the file or its history, the
-    old entries kept and one added, its text the block's or story's text, a
-    story's pins its blocks at their versions in story.blocks order, and the
-    block or story then approved (and its pins current); raises Refused with
-    the reason otherwise"""
+def try_on_copy(snapshot, path, kind, name, number, at, by, because, new_bytes, old_entries):
+    """check the would-be folder, built from the snapshot: no refusal in the
+    file or its history; the old entries kept and one added; its name,
+    number, approved_at, approved_by and because the ones given, its text
+    the block's or story's text; for a story every block of story.blocks
+    approved and pinned at its version, in story.blocks order; and the
+    block or story then approved (and its pins current); raises Refused
+    with the reason otherwise"""
     with tempfile.TemporaryDirectory(prefix="edda-approve-") as tmp:
-        for p in glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc"):
-            shutil.copy2(p, tmp)
+        materialise(snapshot, tmp)
         copy = os.path.join(tmp, os.path.basename(path))
         with open(copy + ".vc", "wb") as f:
             f.write(new_bytes)
@@ -162,23 +209,29 @@ def try_on_copy(folder, path, kind, name, new_bytes, old_entries):
         entry = P.newest_entry.get((kind, name))
         if entry != entries[-1]:
             raise Refused("the new entry is not the newest version")
+        given = {kind: name, "number": number, "approved_at": at, "approved_by": by}
+        if because is not None:
+            given["because"] = because
+        if {k: entry.get(k) for k in given} != given or because is None and "because" in entry:
+            raise Refused("the new entry would not read back as given")
         files = Files(tmp)
         if entry.get("text") != files.current(kind, name, P):
             raise Refused(f"the new entry's text is not the {kind}'s text")
         if kind == "story":
-            pins = [{k: n, "number": version(P, k, n)} for k, n in story_blocks(name, P, files)]
-            if entry.get("pins") != pins:
+            blocks = story_blocks(name, P, files)
+            if blocks_not_approved(blocks, P, files):
+                raise Refused("approve its blocks first")
+            if entry.get("pins") != [{k: n, "number": version(P, k, n)} for k, n in blocks]:
                 raise Refused("the new entry's pins are not the story's blocks at their versions")
         if not E.approved(kind, files.current(kind, name, P), entry) or kind == "story" and E.pins_stale(entry, P):
             raise Refused(f"the {kind} would not be approved by the new entry")
 
 
-def write_atomic(vc, old_bytes, new_bytes):
+def write_atomic(folder, snapshot, vc, new_bytes):
     """replace vc by new_bytes through a temporary file in the same folder,
-    unless vc changed since old_bytes were read"""
-    current = open(vc, "rb").read() if os.path.exists(vc) else b""
-    if current != old_bytes:
-        raise Refused("the history changed while approving; nothing written")
+    unless a file of the folder changed since the snapshot was read"""
+    if read_folder(folder) != snapshot:
+        raise Refused("the folder changed while approving; nothing written")
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(vc) or ".", prefix=".approve-", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
@@ -198,18 +251,49 @@ def write_atomic(vc, old_bytes, new_bytes):
         raise
 
 
+def approve(folder, name, at, by, because, dry_run):
+    """the approval, under the folder's lock and on one snapshot; returns
+    (entry, kind, number, vc)"""
+    if not os.path.isdir(folder):
+        raise Refused(f"not a folder: {folder}")
+    lock = os.open(folder, os.O_RDONLY)       # the folder itself is the lock: no file to leave behind
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        snapshot = read_folder(folder)
+        with tempfile.TemporaryDirectory(prefix="edda-snapshot-") as snap:
+            materialise(snapshot, snap)
+            path, kind, number, pins, text = decide(snap, name)
+        path = os.path.join(folder, os.path.basename(path))
+        entry = entry_text(kind, name, number, at, by, because, pins, text)
+        vc = path + ".vc"
+        old_bytes = snapshot.get(os.path.basename(vc), b"")
+        old_entries = (yaml.load(old_bytes.decode(), Loader=E.Core) or []) if old_bytes else []
+        if not old_entries:
+            new_bytes = entry.encode()
+        else:
+            new_bytes = old_bytes + (b"" if old_bytes.endswith(b"\n") else b"\n") + entry.encode()
+        try_on_copy(snapshot, path, kind, name, number, at, by, because, new_bytes, old_entries)
+        if not dry_run:
+            write_atomic(folder, snapshot, vc, new_bytes)
+        return entry, kind, number, vc
+    finally:
+        os.close(lock)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Append the operator's approval of a story or block to its .edda.vc.")
     ap.add_argument("name", metavar="NAME", help="a story id (ABC-123) or a role or entity name")
     ap.add_argument("--by", required=True, help="the operator's name; becomes approved_by")
     ap.add_argument("--because", help="one line of why; left out when not given")
-    ap.add_argument("--at", help='"YYYY-MM-DD HH:MM"; default now, local time')
+    ap.add_argument("--at", help='"YYYY-MM-DD HH:MM"; default now, in the host\'s local time (the business zone)')
     ap.add_argument("--dry-run", action="store_true", help="print the entry; write nothing")
     ap.add_argument("--folder", default=os.path.join(E.ROOT, "specs"), help="the project folder (default specs/)")
     a = ap.parse_args(argv)
     try:
         if not re.fullmatch(E.NAME, a.by) or a.by in E.PY_KEYWORDS:
             raise Refused(f"not a name: {a.by}")
+        if a.because is not None and not is_one_line(a.because):
+            raise Refused("because is one line")
         at = a.at if a.at is not None else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         try:
             ok = re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}", at) and datetime.datetime.strptime(at, "%Y-%m-%d %H:%M")
@@ -217,20 +301,10 @@ def main(argv=None):
             ok = False
         if not ok:
             raise Refused(f'not a time "YYYY-MM-DD HH:MM": {at}')
-        folder = os.path.abspath(a.folder)
-        path, kind, number, pins, text = decide(folder, a.name)
-        entry = entry_text(kind, a.name, number, at, a.by, a.because, pins, text)
-        vc = path + ".vc"
-        old_bytes = open(vc, "rb").read() if os.path.exists(vc) else b""
-        old_entries = (yaml.load(old_bytes.decode(), Loader=E.Core) or []) if old_bytes else []
-        sep = b"" if not old_bytes or old_bytes.endswith(b"\n") else b"\n"
-        new_bytes = old_bytes + sep + entry.encode()
-        try_on_copy(folder, path, kind, a.name, new_bytes, old_entries)
-        if a.dry_run:
-            sys.stdout.write(entry)
-            return 0
-        write_atomic(vc, old_bytes, new_bytes)
+        entry, kind, number, vc = approve(os.path.abspath(a.folder), a.name, at, a.by, a.because, a.dry_run)
         sys.stdout.write(entry)
+        if a.dry_run:
+            return 0
         print(f"appended {kind} {a.name} version {number} to {vc}")
         return 0
     except Refused as r:

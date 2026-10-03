@@ -634,18 +634,33 @@ a re-read is the binding's test, not a level 1 fact.
 
   `NAME` is a story id or a role or entity name, looked up across the
   project folder (`specs/` unless `--folder` names another); `--by` is
-  `approved_by`; `--at` is `approved_at`, now in local time when left
-  out; `because:` is written only when `--because` is given. It refuses
-  as the two items above say, in that order, with those messages; a
+  `approved_by`; `--at` is `approved_at`, now in the host's local time
+  when left out: the operator runs the command on that host, and its
+  zone is taken as the business zone of `NOW` (section 7.3).
+  `because:` is written only when `--because` is given, and is one
+  line: a `--because` with a line break (any character Python's
+  `str.splitlines()` splits on) is refused ("because is one line"). It
+  refuses as the two items above say, in that order, with those
+  messages; a
   file does not check when it or its history has a refusal, flags
   aside. Otherwise it appends one entry to the `.edda.vc` beside the
   block's file (creating it when there is none): the next number, the
   normalised text, and for a story a pin on every block of
-  `story.blocks`, in that order, at its version. The old bytes are kept
-  as they are; before writing, the file and its history are checked as
-  they would be, on a copy of the folder: no refusal, the entry's text
-  and pins as above, and the story or block approved with its pins
-  current, or nothing is written. The file is
+  `story.blocks`, in that order, at its version. When the history has
+  entries, its old bytes are kept as they are, comments included, and
+  the entry follows; when it has none (`[]`), the new file is the entry
+  alone. One approval runs at a time per project folder: it holds a
+  lock on the folder from its first read to the rename, reads the
+  folder's `.edda` and `.edda.vc` files once, and computes and checks
+  everything from that one snapshot. Before writing, the file and its
+  history are checked as they would be, on a copy of the snapshot: no
+  refusal, the old entries unchanged, the entry's number, text and pins
+  as above and its `approved_at`, `approved_by` and `because` read back
+  exactly as given, every block of `story.blocks` approved, and the
+  story or block approved with its pins current; then the folder's
+  files are read again, and if any changed since the snapshot nothing
+  is written ("the folder changed while approving; nothing written").
+  The file is
   written through a temporary file and a rename. `--dry-run` prints the
   entry and writes nothing. Who runs the command is not checked by it:
   that is the repository guard's.
@@ -782,7 +797,10 @@ unapproved version.
 - `story.blocks`: the blocks the story names, looked up across the
   project's files: its `about` entity; every entity in an input type
   phrase or a given; every entity reached through a dot path in the
-  story's expressions (the declared type of each step); every role in
+  story's expressions (the declared type of each step: the object read
+  from, the value read and, for a `MANY` list, its element type, so a
+  story reading `order.children` with `children: MANY item` names
+  `item`); every role in
   `as_a`, a who-line, a given's `roles:`, and on a `may_*` line of a
   collected entity; every role reached through `includes` of a
   collected role; each once; ordered by file name, then file order.
@@ -910,6 +928,14 @@ Operator decisions for the build (task 2568):
 - The history stays append-only: the new file is the old bytes and one
   entry, checked on a copy before it is written, and written through a
   temporary file and a rename. Nothing in the language changes.
+- After Astra round 36: one approval at a time per folder, under a lock
+  from the first read to the rename, computed and checked on one
+  snapshot that is re-read before writing; the pre-write check also
+  rechecks that the story's blocks are approved and that `approved_at`,
+  `approved_by` and `because` read back as given; a `because` with a
+  line break is refused; an empty history (`[]`) becomes the entry
+  alone; `approved_at` is the host's local time, taken as the business
+  zone; `story.blocks` says which types of a dot path count.
 
 ## 15. Changes from revision 54
 
