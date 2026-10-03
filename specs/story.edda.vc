@@ -50,3 +50,16 @@
         kind: added | removed
         line: INTEGER
         sentence: TEXT
+- entity: sentence
+  number: 2
+  approved_at: "2026-10-03 13:30"
+  approved_by: tuan
+  because: "Second approval: the kind list gains rule (revision 52); operator decision in KB session 1497 (kb:9378274 entry 103)"
+  text: |
+    sentence:
+      is: "one line of the read view"
+      properties:
+        kind: story | note | question | operation | permission | refusal | outcome | read | invariant | rule | example | given | when | then
+        text: TEXT
+        line: INTEGER
+        shade: plain | grey | warning

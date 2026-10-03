@@ -93,3 +93,18 @@
         file: TEXT
         line: INTEGER
         message: TEXT
+- entity: problem
+  number: 2
+  approved_at: "2026-10-03 13:30"
+  approved_by: tuan
+  because: "Second approval: the rule list gains no_rule (revision 52); operator decision in KB session 1497 (kb:9378274 entry 103)"
+  text: |
+    problem:
+      is: "one thing the checker found in a file or its history"
+      part_of: spec_file
+      properties:
+        kind: refused | flagged
+        rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | no_rule | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | approved_against_older | question_on_approved | wording_drift | plural_name | about_untouched
+        file: TEXT
+        line: INTEGER
+        message: TEXT
