@@ -210,7 +210,7 @@ class Source:
         line = node.start_mark.line + 1
         if (not self.is_vc and not in_flow and getattr(node, "flow_style", False)
                 and any_match(path, BLOCK_PATHS)):
-            self.src.append(("yaml_feature", self.line(path), "a block is written one key per line, not in { }"))
+            self.src.append(("yaml_feature", self.line(path), "a block is written one key per line, not in { } or [ ]"))
             in_flow = True              # once per block written in flow form, at its key
         if isinstance(node, yaml.MappingNode):
             for k, v in node.value:
@@ -220,6 +220,8 @@ class Source:
                     continue
                 if k.value == "<<":
                     self.src.append(("yaml_feature", kline, "the << key is not allowed"))
+                if self.text[k.end_mark.index:k.end_mark.index + 1] != ":":
+                    self.src.append(("yaml_feature", kline, "a key is written name: with no ? and no space before the colon"))
                 kpath = path + (k.value,)
                 self.marks[kpath] = (kline, v.start_mark.line + 1)
                 is_title = not self.is_vc and any_match(kpath, TITLE_PATHS)

@@ -89,6 +89,9 @@ checker enforces at the source, before the schema:
   order;
 - no anchors, aliases, the `<<` key, tags, directives, complex keys,
   tabs or a second document;
+- a key is written `name:`, the colon straight after the key: never
+  with a space before the colon (`operations :`) or introduced by an
+  explicit `?` key indicator, in `.edda` and `.edda.vc` alike;
 - blocks in block form only: `roles:`, `entities:` and `stories:`,
   each role, entity and story under them, and each operation under
   `operations:` and example under `examples:` are written one key per
@@ -697,7 +700,7 @@ the pin's line for every other `bad_pin`.
 | rule | when | message |
 |---|---|---|
 | `not_yaml` | the file does not parse | `not YAML: <parser message>` |
-| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or example title (as a key or under `shown_by:`) on more than one line, a quoted key, `DONE` anywhere but first under `then`, or a block in flow form (section 2), at its key | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `DONE is allowed only as the first then item`; `a block is written one key per line, not in { }` |
+| `yaml_feature` | an anchor (its aliases with it), tag, directive, `<<`, complex key, tab, second document, single quotes, a folded scalar, a block scalar outside `.vc` text, an odd or jumping indentation, an expression, type phrase or example title (as a key or under `shown_by:`) on more than one line, a quoted key, a key with a space before its colon or an explicit `?`, `DONE` anywhere but first under `then`, or a block in flow form (section 2), at its key | `anchors and aliases are not allowed` (and likewise for each feature); `a key is plain, not quoted`; `a key is written name: with no ? and no space before the colon`; `DONE is allowed only as the first then item`; `a block is written one key per line, not in { } or [ ]` |
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
 | `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, example, tag or role |
 | `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` entry or pin naming no block | `<key> must be a <mapping/list/text/number/yes-no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, nothing was given`; `<key> expects an expression, not DONE`; `then must start with DONE or refused` for a first `then` item under a `when` that is neither; `<entry> must name one of story or entity or role`; `<pin> must name one of entity or role` |
@@ -880,7 +883,13 @@ removal audit (kb:9379093):
   story, each operation and example) in flow form is `yaml_feature`
   (section 2), in `.edda` and in a `.vc` snapshot (`bad_snapshot`):
   `rules_text` and `text` are compared by lines, and a second way to
-  write a block broke both (Astra round 32).
+  write a block broke both (Astra round 32). Its message is `a block
+  is written one key per line, not in { } or [ ]` (Astra round 33).
+- A key with a space before its colon (`operations :`) or an explicit
+  `?` key is `yaml_feature` at the key's line, in `.edda` and in a
+  `.vc` snapshot (`bad_snapshot`): `rules_text` reads keys by line,
+  and a second way to write a key let a changed section drop out of
+  it (Astra round 33).
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 

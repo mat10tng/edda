@@ -338,6 +338,10 @@ def flow_block(ls):
     return i
 edit("flow_block", flow_block)
 
+def space_key(ls):
+    i = find(ls, "    operations:"); ls[i] = "    operations :"; return i
+edit("space_key", space_key)
+
 # bad_version: approved file whose history numbers the entity 2 first
 edit("bad_version", lambda ls: None)
 vc = vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1)
