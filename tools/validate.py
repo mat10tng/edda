@@ -2253,6 +2253,59 @@ def flag_problems(data, stem, P, source):
     return sorted(set(out), key=lambda p: (p[1], p[0]))
 
 
+def changes(old, new):
+    """story.changes (section 11): the walk over the newest version's text
+    and the current text; (kind, line, sentence), line counted from 1 at the
+    key line of the current text"""
+    a, b = old.split("\n")[:-1], new.split("\n")[:-1]
+    lcs = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
+    for i in range(len(a) - 1, -1, -1):
+        for j in range(len(b) - 1, -1, -1):
+            lcs[i][j] = lcs[i + 1][j + 1] + 1 if a[i] == b[j] else max(lcs[i + 1][j], lcs[i][j + 1])
+    out, i, j = [], 0, 0
+    while i < len(a) or j < len(b):
+        if i < len(a) and j < len(b) and a[i] == b[j]:
+            i, j = i + 1, j + 1
+        elif i < len(a) and (j == len(b) or lcs[i + 1][j] >= lcs[i][j + 1]):
+            out.append(("removed", j + 1, a[i]))
+            i += 1
+        else:
+            out.append(("added", j + 1, b[j]))
+            j += 1
+    return out
+
+
+def status_lines(data, P, source):
+    """the status of every role, entity and story of a .edda that checks
+    (section 11), roles, then entities, then stories, each in file order:
+    approved or draft with its version, pins stale on an approved story, and
+    under a story with a version its changes"""
+    def newest(kind, name):
+        return max((n for n in P.versions.get((kind, name), ()) if isinstance(n, int)), default=0)
+
+    out = []
+    for section, kind in (("roles", "role"), ("entities", "entity"), ("stories", "story")):
+        for name in mapping(data.get(section, {})):
+            current = block_text(source.text, source.line((section, name)))
+            entry = P.newest_entry.get((kind, name))
+            old = entry.get("text") if entry else None
+            n = entry["number"] if entry else 0
+            if not isinstance(old, str):
+                out.append(f"{kind} {name}: draft v{n}")
+            elif kind != "story":
+                out.append(f"{kind} {name}: {'approved' if current == old else 'draft'} v{n}")
+            else:
+                pins = [p for p in listing(entry.get("pins")) if isinstance(p, dict)]
+                stale = any(isinstance(p.get("number"), int) and p["number"] < newest(k, p.get(k)) for p in pins
+                            for k in ["entity" if "entity" in p else "role"])
+                if rules_text(current) == rules_text(old):
+                    out.append(f"story {name}: approved v{n}" + (", pins stale" if stale else ""))
+                else:
+                    out.append(f"story {name}: draft v{n}")
+                out += [f"  {'-' if k == 'removed' else '+'} {line}: {s}" for k, line, s in changes(old, current)]
+    return out
+
+
 def load(path):
     """(source, data or None); data only when the file is YAML"""
     text = open(path).read()
@@ -2321,6 +2374,10 @@ if __name__ == "__main__":
             print(f"    {line}: {rule}: {msg}")
         for rule, line, msg in flags:
             print(f"    {line}: flagged: {rule}: {msg}")
+        if not problems and not path.endswith(".vc"):
+            source, data = load(path)
+            for s in status_lines(data, P, source):
+                print(f"    {s}")
 
     print()
     print("fixtures: which layer catches each file")
@@ -2337,4 +2394,8 @@ if __name__ == "__main__":
                 print(f"      {line}: {rule}: {msg}")
             for rule, line, msg in flags:
                 print(f"      {line}: flagged: {rule}: {msg}")
+            if not refusals and not path.endswith(".vc"):
+                source, data = load(path)
+                for s in status_lines(data, FP, source):
+                    print(f"      {s}")
     sys.exit(0 if ok else 1)

@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 54
+language/   reference.md    the language reference, revision 55
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -52,7 +52,9 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             literals and declarations, operation
                             signatures, ordering, the style rule under
                             its equivalences, and the version sequence
-                            of a history
+                            of a history; under a file that checks, each
+                            block and story as draft or approved with
+                            its version, and a story's changed lines
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
