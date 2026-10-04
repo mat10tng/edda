@@ -63,3 +63,30 @@
         text: TEXT
         line: INTEGER
         shade: plain | grey | warning
+- entity: story
+  number: 2
+  approved_at: "2026-10-04 13:39"
+  approved_by: tuan
+  because: "revision 58: shrink and naming (decisions DD, FF)"
+  text: |
+    story:
+      is: "one story in a spec_file"
+      properties:
+        file: spec_file
+        id: TEXT, DERIVED
+        about: TEXT, DERIVED
+        as_a: TEXT, DERIVED
+        sentence: TEXT, DERIVED
+        epic: TEXT, OPTIONAL, DERIVED
+        text: TEXT, DERIVED
+        body_text: TEXT, DERIVED
+        blocks: MANY block, IN ORDER, DERIVED
+        versions: MANY version, IN ORDER, DERIVED
+        version: {computed: "len(versions)"}
+        approved: {computed: "versions != [] and body_text == versions[-1].body_text"}
+        pins_stale: {computed: "versions != [] and any(p.number < p.block.version for p in versions[-1].pins)"}
+        changes: MANY change, IN ORDER, DERIVED
+        sentences: MANY sentence, IN ORDER, DERIVED
+      may_create: [{role: agent}]
+      may_read: [{role: agent}, {role: operator}]
+      may_update: [{role: agent}, {role: operator}]
