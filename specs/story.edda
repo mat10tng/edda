@@ -9,11 +9,11 @@ entities:
       sentence: TEXT, DERIVED
       epic: TEXT, OPTIONAL, DERIVED
       text: TEXT, DERIVED
-      rules_text: TEXT, DERIVED
+      body_text: TEXT, DERIVED
       blocks: MANY block, IN ORDER, DERIVED
       versions: MANY version, IN ORDER, DERIVED
       version: {computed: "len(versions)"}
-      approved: {computed: "versions != [] and rules_text == versions[-1].rules_text"}
+      approved: {computed: "versions != [] and body_text == versions[-1].body_text"}
       pins_stale: {computed: "versions != [] and any(p.number < p.block.version for p in versions[-1].pins)"}
       changes: MANY change, IN ORDER, DERIVED
       sentences: MANY sentence, IN ORDER, DERIVED
@@ -46,7 +46,7 @@ stories:
     epic: VC
     tags: [version, approval]
     notes:
-      - "every story here comes from a fixture folder with its history, so the normalised text and rules_text are computed from the source, never supplied"
+      - "every story here comes from a fixture folder with its history, so the normalised text and body_text are computed from the source, never supplied"
     examples:
       "a new story is a draft":
         given:

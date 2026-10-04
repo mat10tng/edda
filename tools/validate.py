@@ -898,7 +898,9 @@ class Project:
                                 inputs.append((n, type_of_phrase(v), isinstance(v, str) and ", OPTIONAL" in v))
                             who = [w.get("role") for w in listing(mapping(op).get("who")) if isinstance(w, dict)]
                             self.operations[oname] = {"inputs": inputs, "returns": mapping(op).get("returns"), "returns_type": None, "returns_mark": None,
-                                                      "ordered_by": "ordered_by" in mapping(op), "who": who, "story": sid, "file": stem}
+                                                      "ordered_by": "ordered_by" in mapping(op), "who": who, "story": sid, "file": stem,
+                                                      "order_exprs": listing(mapping(op).get("ordered_by")),
+                                                      "refuse_when": [r.get("when") for r in listing(mapping(op).get("refuse")) if isinstance(r, dict)]}
         while True:               # computed properties and returns, until no type gets more precise
             changed = False
             for ename, ent in self.entities.items():
@@ -926,6 +928,7 @@ class Project:
             if not changed:
                 break
         self.cycle_anchors = self.find_cycles()
+        self.computed_loops = self.find_computed_loops()
         self.versions = {}        # (kind, name) -> the version numbers in the history beside the block's file
         self.newest_entry = {}    # (kind, name) -> the entry with the highest number
         for stem, entries in histories:
@@ -972,6 +975,100 @@ class Project:
                 anchors.add(r)
                 reported |= component
         return anchors
+
+    def find_computed_loops(self):
+        """computed_cycle: (entity, property) of the first computed property of
+        each group of computed properties that loop through one another, in
+        file-name then file order, to its message: one shortest loop through
+        that property. An edge runs to every computed property an expression
+        reads: a bare one of its own entity, one through a path into another,
+        or one in the summary of an operation the expression calls"""
+        order = [(e, p) for k, e in self.block_order if k == "entity" for p in self.entities[e]["computed"]]
+        summary = self.operation_reads()
+        edges = {}
+        for e, p in order:
+            E = Expr(self, self.scope_of(e), silent=True)
+            E.own, E.reads, E.calls = e, set(), set()
+            if isinstance(self.entities[e]["computed"][p], str):
+                E.run(self.entities[e]["computed"][p])
+            for o in E.calls:
+                E.reads |= summary[o]
+            edges[(e, p)] = [q for q in order if q in E.reads]
+        reach = {}
+        for x in order:
+            seen, stack = set(), list(edges[x])
+            while stack:
+                y = stack.pop()
+                if y not in seen:
+                    seen.add(y)
+                    stack.extend(edges[y])
+            reach[x] = seen
+        loops, reported = {}, set()
+        for start in order:
+            if start in reported or start not in reach[start]:
+                continue
+            reported |= {x for x in reach[start] if start in reach[x]}     # the whole group, reported once here
+            back, frontier = {}, [start]      # breadth first, so the loop shown is a shortest one
+            while start not in back:
+                nxt = []
+                for x in frontier:
+                    for y in edges[x]:
+                        if y not in back:
+                            back[y] = x
+                            nxt.append(y)
+                frontier = nxt
+            path, x = [start], back[start]
+            while x != start:
+                path.append(x)
+                x = back[x]
+            path = [start] + path[:0:-1] + [start]
+            one = len({e for e, _ in path}) == 1
+            loops[start] = "computed properties loop: " + " -> ".join(p if one else f"{e}.{p}" for e, p in path)
+        return loops
+
+    def operation_reads(self):
+        """computed_cycle: each operation with a text returns to its summary, the
+        (entity, property) pairs a call can read: its refuse conditions and
+        returns, each input typed by its declared type, and its ordered_by
+        over one result item, plus the summary of every operation it calls.
+        who is left out: a call inside an expression has no actor and no
+        permission check; ensure is left out: such a call is always a read.
+        Each expression is walked once and the summaries grow to a fixed point"""
+        own, calls = {}, {}
+        for o, op in self.operations.items():
+            if not isinstance(op["returns"], str):
+                continue
+            scope = {("var", n): True for n, _, _ in op["inputs"]}
+            scope.update({n: t for n, t, _ in op["inputs"]})
+            scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op["who"] if isinstance(r, str))))
+            item = {"ACTOR": scope["ACTOR"]}         # ordered_by's scope, as the meaning layer gives it
+            rl = as_list(op["returns_type"])
+            if rl and is_entity(rl[1]):
+                item.update({("var", rl[1][1]): True, rl[1][1]: rl[1]})
+            E = Expr(self, scope, silent=True)
+            E.reads, E.calls = set(), set()
+            for x in op["refuse_when"] + [op["returns"]]:
+                if isinstance(x, str):
+                    E.run(x)
+            I = Expr(self, item, silent=True)
+            I.reads, I.calls = E.reads, E.calls
+            for x in op["order_exprs"]:
+                if isinstance(x, str):
+                    I.run(x)
+            own[o], calls[o] = E.reads, E.calls
+        callers = {o: set() for o in own}
+        for o in own:
+            for c in calls[o]:
+                callers[c].add(o)
+        summary = {o: set(own[o]) for o in own}
+        work = list(own)
+        while work:
+            o = work.pop()
+            new = summary[o].union(*(summary[c] for c in calls[o]))
+            if new != summary[o]:
+                summary[o] = new
+                work.extend(callers[o])
+        return summary
 
     def home(self, ename):
         """the file an entity lives in: its own name, or its owner's through part_of"""
@@ -1067,6 +1164,8 @@ class Expr:
         self.types = {}           # id(node) -> its type, for fits()
         self.marks = {}           # id(node) -> what a value may be, literal markers kept (section 7.1)
         self.root = None          # the expression's top node, for root_mark()
+        self.own, self.reads = None, None   # computed_cycle: the entity and the (entity, property) reads
+        self.calls = None                   # computed_cycle: the operations with a text returns it calls
 
     def problem(self, rule, msg):
         if not self.silent:
@@ -1133,6 +1232,7 @@ class Expr:
                 self.problem("not_an_expression", f"not an expression (a comprehension variable is a plain name): {self.src}")
                 continue
             inner.pop(("lit", g.target.id), None)
+            inner[("var", g.target.id)] = True      # a comprehension variable, never a property read
             if it is not None and lt is None:
                 self.problem("type_mismatch", f"for expects a list: {self.src}")
                 inner[g.target.id] = None
@@ -1361,6 +1461,8 @@ class Expr:
                     self.marks[id(n)] = scope[("lit", "RESULT")]
                 return scope["RESULT"]
             if i in scope and i != "RESULT_OP":
+                if self.reads is not None and ("var", i) not in scope:
+                    self.reads.add((self.own, i))
                 if ("lit", i) in scope:
                     self.marks[id(n)] = scope[("lit", i)]
                 return scope[i]
@@ -1390,6 +1492,8 @@ class Expr:
                         outs.append(None)
                         continue
                     props = P.entities[a[1]]["props"]
+                    if self.reads is not None:
+                        self.reads.add((a[1], n.attr))
                     if n.attr not in props:
                         self.problem("unknown_name", f"unknown name: {n.attr}")
                     outs.append(props.get(n.attr))
@@ -1672,6 +1776,8 @@ class Expr:
                             self.problem("type_mismatch", f"{f.id} input {kw.arg} expects {words(opt[kw.arg])}: {src}")
                 if op["returns"] is None and n is not self.outer:
                     self.problem("not_an_expression", f"not an expression (a changing operation inside a fact): {src}")
+                if self.calls is not None and isinstance(op["returns"], str):
+                    self.calls.add(f.id)
                 if op.get("returns_mark") is not None:
                     self.marks[id(n)] = op["returns_mark"]
                 return op["returns_type"] if op["returns"] is not None else "NONE"
@@ -1744,6 +1850,8 @@ def walk_meaning(data, stem, P, source):
         for p, v in mapping(ent.get("properties")).items():
             if isinstance(v, dict):
                 yield from ex(v.get("computed"), ("entities", ename, "properties", p, "computed"), own)
+                if P.entities.get(ename, {}).get("file") == stem and (ename, p) in P.computed_loops:
+                    yield "computed_cycle", ("entities", ename, "properties", p), P.computed_loops[(ename, p)]
             else:
                 yield from tp(v, ("entities", ename, "properties", p))
         for p, arrows in mapping(ent.get("may_change")).items():
@@ -2107,7 +2215,7 @@ def history_problems(entries, P, source, stem):
 
 # --- run ---------------------------------------------------------------------
 
-KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "role_cycle", "wider_than_entity", "declared_twice", "no_rule"}
+KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "role_cycle", "computed_cycle", "wider_than_entity", "declared_twice", "no_rule"}
 
 def block_text(text, line):
     """the normalised text (section 10) of the block whose key line is line
@@ -2137,11 +2245,11 @@ def _key(line):
     return m.group(1) if m else None
 
 
-RULES_KEYS = ("about", "as_a", "rules", "operations", "examples")
+BODY_KEYS = ("about", "as_a", "rules", "operations", "examples")
 
 
-def rules_text(text):
-    """a story's rules_text (section 10) from its normalised text: the key
+def body_text(text):
+    """a story's body_text (section 10) from its normalised text: the key
     line, then only about:, as_a:, rules:, operations: and examples:, with
     every notes: entry under an operation or an example removed"""
     lines = text.split("\n")[:-1]
@@ -2150,7 +2258,7 @@ def rules_text(text):
     out = [lines[0]]
     for lo, hi in _children(lines, 1, len(lines)):
         key = _key(lines[lo])
-        if key not in RULES_KEYS:
+        if key not in BODY_KEYS:
             continue
         out.append(lines[lo])
         if key not in ("operations", "examples"):
@@ -2236,13 +2344,13 @@ def flag_problems(data, stem, P, source):
             out.append(("no_example", source.line(("stories", sid)),
                 f"story {sid} has no example"))
 
-    # flags that need history: approved when rules_text equals the newest entry's
+    # flags that need history: approved when body_text equals the newest entry's
     for sid, st in mapping(data.get("stories", {})).items():
         entry = P.newest_entry.get(("story", sid))
         if not entry or not isinstance(entry.get("text"), str):
             continue
         current = block_text(source.text, source.line(("stories", sid)))
-        is_approved = rules_text(current) == rules_text(entry["text"])
+        is_approved = body_text(current) == body_text(entry["text"])
 
         # question_on_approved
         if is_approved and listing(mapping(st).get("questions", [])):
@@ -2299,7 +2407,7 @@ def approved(kind, current, entry):
     old = entry.get("text") if entry else None
     if not isinstance(old, str):
         return False
-    return rules_text(current) == rules_text(old) if kind == "story" else current == old
+    return body_text(current) == body_text(old) if kind == "story" else current == old
 
 
 def status_lines(data, P, source):

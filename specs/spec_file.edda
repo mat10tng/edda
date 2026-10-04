@@ -32,7 +32,7 @@ entities:
       approved_by: TEXT
       because: TEXT, OPTIONAL
       text: TEXT
-      rules_text: TEXT, DERIVED
+      body_text: TEXT, DERIVED
       pins: MANY pin, IN ORDER
       sentences: MANY sentence, IN ORDER, DERIVED
 
@@ -59,7 +59,7 @@ entities:
     part_of: spec_file
     properties:
       kind: refused | flagged
-      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | derived_in_given | wider_than_entity | no_rule | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | question_on_approved | wording_drift
+      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_status | bad_type_phrase | not_an_expression | second_way | type_mismatch | returns_and_ensure | wrong_file | not_ordered | role_cycle | computed_cycle | derived_in_given | wider_than_entity | no_rule | bad_version | bad_pin | bad_snapshot | unreachable_status | no_example | question_on_approved | wording_drift
       file: TEXT
       line: INTEGER
       message: TEXT
@@ -104,6 +104,7 @@ stories:
           - "a status not in its list is refused"
           - "a name declared twice is refused at the second"
           - "a role that includes itself is refused"
+          - "a computed property that depends on itself is refused"
           - "a story in the wrong file is refused"
           - "a name that is not snake_case is refused"
           - "an actor's fixed name given in an example is refused"
@@ -349,6 +350,20 @@ stories:
               - "RESULT[0].rule == role_cycle"
               - "RESULT[0].line == 6"
               - "RESULT[0].message == \"role shop_user includes itself\""
+      "a computed property that depends on itself is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: computed_cycle}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == computed_cycle"
+              - "RESULT[0].line == 13"
+              - "RESULT[0].message == \"computed properties loop: units_held -> units_free -> units_held\""
       "a file that is not YAML is refused":
         given:
           - actor: bot

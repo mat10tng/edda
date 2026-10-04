@@ -288,6 +288,13 @@ def role_cycle(ls):
     return i + 1
 edit("role_cycle", role_cycle)
 
+def computed_cycle(ls):
+    i = find(ls, "      units_sent: DEFAULT 0")
+    ls[i + 1:i + 1] = ['      units_held: {computed: "units_free + units_sent"}',
+                       '      units_free: {computed: "units_held - units_sent"}']
+    return i + 1
+edit("computed_cycle", computed_cycle)
+
 def not_yaml(ls):
     i = find(ls, '    so_that: "the list is clean"'); ls[i] = "    so_that: the list is clean: no removed orders"; return i
 edit("not_yaml", not_yaml)

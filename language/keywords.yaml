@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 56).
+# Edda keyword registry, generated from language/reference.md (revision 57).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, style rule, fixed name, checker rule and
 # read-view sentence kind, with what it means, why it exists and where it
@@ -489,6 +489,9 @@ refusals:
   - rule: 'role_cycle'
     when: 'includes reaches itself; each cycle once, at its first role in file order'
     message: 'role <name> includes itself'
+  - rule: 'computed_cycle'
+    when: 'a computed property whose expression reads itself, directly or through other computed properties (bare in its own entity, through a path into another, or inside the refuse conditions, returns or ordered_by of a called operation, its inputs at their declared types); each group of properties that loop through one another once, at its first property in file-name, then file order'
+    message: 'computed properties loop: <a> -> <b> -> <a>, a shortest loop from that first property; each property as <entity>.<property> when the loop crosses entities'
   - rule: 'derived_in_given'
     when: 'a with: value for a derived or computed property, or for an actor''s name'
     message: '<property> is derived and cannot be given, <property> is computed and cannot be given, name is fixed and cannot be given'

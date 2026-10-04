@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 56, 3 Oct 2026. Replaces revision 55 (kb:9379125). Decisions
+Revision 57, 4 Oct 2026. Replaces revision 56 (kb:9379151). Decisions
 behind it: kb:9378274, rounds 1 to 4 (entries 1 to 46), and Astra's
 review rounds. The skeleton is YAML; the words are keys; the logic is
 Python expressions in a whitelisted subset. Everything here is mirrored
@@ -233,6 +233,19 @@ section 11 named `<entity>.<property>`; it cannot be given
 (`derived_in_given`). Anything else is `bad_type_phrase`. A computed
 property is always `{computed: "<expression>"}`; one whose expression is
 a condition is yes/no and is used as a condition (`order.approved`).
+Edda does not accept a computed property that depends on itself,
+directly (`a: "a + [1]"`) or through other computed properties: its own
+entity's, those reached through a reference (`a: "b"`, `b: "a"`), and
+those read by an operation the expression calls. Each such operation is
+summarised once, as the computed properties a call can read: its
+`refuse` conditions and `returns`, every input taken at its declared
+type, not the call's argument, and its `ordered_by` over one result
+item; plus the summaries of the operations it calls. Its `who:`
+conditions are left out, as such a call has no actor and no permission
+check (section 6), and so is `ensure`, as it is always a read. Such a
+property is `computed_cycle`; a calculation Edda cannot express this way
+is left to the host. A stored property or a comprehension's variable
+never forms a loop, and calling the same operation twice is not one.
 
 **Who-lines.** A who-line is `{role: <role>}` or `{role: <role>, when:
 "<condition>"}`. The roots in scope in the condition are `ACTOR`, the
@@ -592,8 +605,8 @@ a re-read is the binding's test, not a level 1 fact.
   otherwise). It
   is never compared with the current block by the checker; `approved`
   does that, and only against the newest entry.
-- **Draft, story.** Its `rules_text` differs from the newest version's:
-  `rules_text` is `text` with only `about:`, `as_a:`, `rules:`,
+- **Draft, story.** Its `body_text` differs from the newest version's:
+  `body_text` is `text` with only `about:`, `as_a:`, `rules:`,
   `operations:` and `examples:` kept and every `notes:` entry removed.
   The sentence,
   `i_want`, `so_that`, `epic`, `tags`, notes, questions, comments and
@@ -700,7 +713,7 @@ anchor and its aliases are one problem, at the anchor.
 3. meaning: `unknown_name`, `unknown_status`, `bad_type_phrase`,
    `not_an_expression`, `second_way`, `type_mismatch`,
    `returns_and_ensure`, `wrong_file`, `not_ordered`, `role_cycle`,
-   `derived_in_given`, `wider_than_entity`, `no_rule`;
+   `computed_cycle`, `derived_in_given`, `wider_than_entity`, `no_rule`;
 4. history and flags: `bad_version`, `bad_pin`, `bad_snapshot`, then
    every flag.
 
@@ -722,7 +735,8 @@ message names: the key for `unknown_key` and `missing_key` (the block's
 key line), the second declaration for `declared_twice`, the
 expression's line, the property's line for `unknown_status`,
 `bad_type_phrase` and `unreachable_status`, the first
-role's `includes:` line for `role_cycle`, the `then` item's line for
+role's `includes:` line for `role_cycle`, the first property's line
+for `computed_cycle`, the `then` item's line for
 `not_ordered`, the operation's key line for `returns_and_ensure`, the
 entity's key line for `wrong_file` on a part, the example's title
 line for `no_rule`, the title's line under `shown_by:` for
@@ -757,6 +771,7 @@ the pin's line for every other `bad_pin`.
 | `wrong_file` | a story in another entity's file; a part outside its owner's file | `story <id> is about <entity> and belongs in <entity>.edda`; `entity <name> is part of <owner> and belongs in <entity>.edda` |
 | `not_ordered` | `RESULT[n]` on an unordered return, through a slice, `or` or comprehension of `RESULT` as well | `<operation> gives no order; RESULT[<n>] needs ordered_by or IN ORDER` |
 | `role_cycle` | `includes` reaches itself; each cycle once, at its first role in file order | `role <name> includes itself` |
+| `computed_cycle` | a computed property whose expression reads itself, directly or through other computed properties (bare in its own entity, through a path into another, or inside the refuse conditions, returns or ordered_by of a called operation, its inputs at their declared types); each group of properties that loop through one another once, at its first property in file-name, then file order | `computed properties loop: <a> -> <b> -> <a>`, a shortest loop from that first property; each property as `<entity>.<property>` when the loop crosses entities |
 | `derived_in_given` | a `with:` value for a derived or computed property, or for an actor's `name` | `<property> is derived and cannot be given`, `<property> is computed and cannot be given`, `name is fixed and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
 | `no_rule` | a story with `rules:` has an example no rule names | `example "<title>" belongs to no rule` |
@@ -793,7 +808,7 @@ unapproved version.
 - `block.kind`, `block.name`, `block.text`, `story.id`, `story.about`,
   `story.as_a`, `story.sentence`, `story.epic`, `story.text`: from the
   block; `text` is the normalised text of section 10.
-- `story.rules_text`, `version.rules_text`: section 10, over `text`.
+- `story.body_text`, `version.body_text`: section 10, over `text`.
 - `story.blocks`: the blocks the story names, looked up across the
   project's files: its `about` entity; every entity in an input type
   phrase or a given; every entity reached through a dot path in the
@@ -913,7 +928,26 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 55
+## 14. Changes from revision 56
+
+Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
+
+- `computed_cycle`, a new refusal in the meaning layer: a computed
+  property that depends on itself, directly or through other computed
+  properties, a reference into another entity or the refuse
+  conditions, returns or ordered_by of a called operation included, is
+  refused once per group of properties
+  that loop through one another, at its first property (sections 4 and
+  11). Before, such a loop was not reported and every comparison on it
+  passed silently.
+  The fixture `computed_cycle` holds one two-property loop; EDDA-001
+  asserts its line.
+- `rules_text` is renamed `body_text` (sections 10 and 11, the `story`
+  and `version` entities), so it no longer reads as the `rules:` key;
+  the meaning is unchanged. The approved snapshots keep the old name,
+  so the blocks that changed are drafts until re-approved.
+
+## 15. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -937,7 +971,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 15. Changes from revision 54
+## 16. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -952,7 +986,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 16. Changes from revision 53
+## 17. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -987,7 +1021,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 17. Changes from revision 52
+## 18. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -1003,7 +1037,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 18. Changes from revision 51
+## 19. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -1025,7 +1059,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 19. Changes from revision 50
+## 20. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -1035,7 +1069,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 20. Changes from revision 49
+## 21. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -1044,14 +1078,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 21. Changes from revision 48
+## 22. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 22. Changes from revision 47
+## 23. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -1061,7 +1095,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 23. Changes from revision 46
+## 24. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -1070,7 +1104,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 24. Changes from revision 45
+## 25. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -1080,7 +1114,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 25. Changes from revision 44
+## 26. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -1089,7 +1123,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 26. Changes from revision 43
+## 27. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -1098,7 +1132,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 27. Changes from revision 42
+## 28. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -1109,7 +1143,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 28. Changes from revision 41
+## 29. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -1118,21 +1152,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 29. Changes from revision 40
+## 30. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 30. Changes from revision 39
+## 31. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 31. Changes from revision 38
+## 32. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -1140,7 +1174,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 32. Changes from revision 37
+## 33. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -1149,7 +1183,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 33. Changes from revision 36
+## 34. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -1160,7 +1194,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 34. Changes from revision 35
+## 35. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -1173,7 +1207,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 35. Changes from revision 34
+## 36. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -1186,7 +1220,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 36. Changes from revision 33
+## 37. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -1202,7 +1236,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 37. Changes from revision 32
+## 38. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1220,7 +1254,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 38. Changes from revision 31
+## 39. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1239,7 +1273,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 39. Changes from revision 30
+## 40. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1260,7 +1294,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 40. Changes from revision 29
+## 41. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1281,7 +1315,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 41. Changes from revision 28
+## 42. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1298,7 +1332,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 42. Changes from revision 27
+## 43. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1320,7 +1354,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 43. Changes from revision 26
+## 44. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names
