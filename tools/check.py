@@ -961,7 +961,7 @@ GEN_ONLY = {"sum", "any", "all"}
 ONE_ARG = {"len", "OLD"}
 OP_WORD = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}
 CMP_WORD = {ast.Lt: "<", ast.Gt: ">", ast.LtE: "<=", ast.GtE: ">="}
-FIXED = {"ACTOR", "RESULT", "NOW", "OLD", "TIME"}
+FIXED = {"ACTOR", "RESULT", "NOW", "TODAY", "OLD", "TIME"}
 TIME_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d")     # section 7.2
 REACHED = set()   # the entities a dot path has reached, the declared type of each step (story.blocks)
 
@@ -1091,7 +1091,7 @@ class Expr:
             i = n.id
             if i == "ACTOR":
                 return scope.get("ACTOR", ("actor", None))
-            if i == "NOW":
+            if i in ("NOW", "TODAY"):     # TODAY is a day, a TIME at 00:00 (7.2)
                 return "TIME"
             if i == "RESULT":
                 if "RESULT" not in scope:

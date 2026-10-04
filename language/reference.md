@@ -1,10 +1,10 @@
 # Edda: language reference
 
-Revision 58, 4 Oct 2026. Replaces revision 57. Decisions behind it:
+Revision 59, 4 Oct 2026. Replaces revision 58. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
-shrink: entry 138; the naming pass: entry 136), and Astra's review
-rounds. The skeleton is YAML; the words are keys; the logic is Python
-expressions in a whitelisted subset. Everything here is mirrored
+shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
+139), and Astra's review rounds. The skeleton is YAML; the words are
+keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
 `language/keywords.yaml` (the registry: every key, expression form,
@@ -33,7 +33,7 @@ so the subset below does not apply to it).
   in `refuse:` and `ensure:`, Design by Contract's form.
 - **Shape tells words apart.** Declared names are snake_case; YAML keys
   are snake_case; ids are `ABC-123`; the fixed names `OLD`, `ACTOR`,
-  `RESULT`, `NOW` and the type-phrase words (`MANY`, `DEFAULT`,
+  `RESULT`, `NOW`, `TODAY` and the type-phrase words (`MANY`, `DEFAULT`,
   `TEXT`, ...) are UPPERCASE; Python's own keywords
   (`and`, `or`, `not`, `in`, `is`, `for`, `if`, `None`,
   `True`, `False`) are Python's.
@@ -417,7 +417,7 @@ form are Python's.
 | `"text"`, `\n`, `\"` | a text literal | Python |
 | `TIME("2026-10-03 10:00")`, `TIME("2026-10-03")` | a time: one quoted text literal in the time format of 7.2; any other argument, or a text in another format, is `type_mismatch` | Python syntax, Edda meaning |
 | `3`, `-2`, `1.5`, `True`, `False`, `None`, `[]`, `[a, b]` | integer, number, yes/no, no value (`None`) and list literals | Python |
-| `NOW`, `ACTOR`, `RESULT` | the three fixed names: the time, the asker, the latest call's return | Edda |
+| `NOW`, `TODAY`, `ACTOR`, `RESULT` | the four fixed names: the time, the day, the asker, the latest call's return | Edda |
 | `OLD(x)` | the value before the operation, one argument, only under `ensure` | Edda, after Eiffel's `old` |
 | `len(x)` | one argument, no keywords | Python |
 | `check(file)`, `approve(story, because="why")` | a declared operation called in Python call form: required inputs by position, optional ones by keyword | Python |
@@ -457,6 +457,7 @@ comprehension of `RESULT` as well.
 | `ACTOR` | the asker: `name`, `roles`, and the properties of its roles | Edda |
 | `RESULT` | what the latest call returned; no value after `refused`; in scope only in a `then` item after a call (`not_an_expression` elsewhere) | Edda |
 | `NOW` | the time of the request, in the business zone | Edda |
+| `TODAY` | the day of `NOW` in the business zone: the time 00:00 that day, the same value as `TIME("YYYY-MM-DD")` for that date | Edda |
 | `DONE` | the verdict of a successful call, as the first `then` item, not inside an expression | Edda |
 | `MANY` `IN ORDER` `DEFAULT` `OPTIONAL` `DERIVED` `TEXT` `NUMBER` `INTEGER` `TIME` `YES_NO` | type-phrase words, section 4, not inside an expression, except `TIME("...")` (7.1) | Edda |
 
@@ -466,6 +467,16 @@ business zone. Inside an expression a time is always `TIME("...")`; a
 plain text literal is a TEXT and never stands for a time. `at:`, a
 `with:` value of a `TIME` property and `approved_at` are written the
 same way, quoted.
+
+**Days and moments.** A day (`TODAY`, `TIME("2026-10-04")`) and a
+moment (`NOW`, `TIME("2026-10-04 10:00")`) are both of type `TIME`;
+the checker cannot tell them apart. So `due == TODAY` compares a
+property with the day, as written, and a comparison of `TODAY` with a
+moment, such as `TODAY == NOW`, also passes the checker. A day counts
+as its 00:00 instant. So `TODAY == NOW` is true only at 00:00, while
+`<`, `>` and the other comparisons use that instant: `TODAY < NOW` is
+true all day after midnight. Write a calendar-day contract against a
+property that holds a day.
 
 ## 8. Examples
 
@@ -599,7 +610,7 @@ a re-read is the binding's test, not a level 1 fact.
   `while:` in an entity (the checker's `RETIRED_KEYS`). A `.edda`
   may not use them (`unknown_key`). A snapshot is never checked for
   meaning, so an expression form a later revision removed (a slice, a
-  conditional, a text where a TIME is expected, `TODAY`, `startswith`,
+  conditional, a text where a TIME is expected, `startswith`,
   `min`, `max`, a second way) stays as it was written. It
   is never compared with the current block by the checker; `approved`
   does that, and only against the newest version.
@@ -892,7 +903,7 @@ e for every x in l where c (the projection `e` is kept; a bare `x`
 reads "every x in l where c"); nested generators read in order; `l[0]`
 the first of l; `l[-1]` the last of l; `l[n]` item n of l, counted
 from 0; `TIME("t")` the time t; `+ - * /` plus, minus, times, divided by; `OLD(x)` x before; `ACTOR`
-the asker; `RESULT` the result; `True` yes, `False` no; `None`
+the asker; `TODAY` today; `RESULT` the result; `True` yes, `False` no; `None`
 no value; a text literal in its quotes. A name reads as words
 (`units_sent` reads "units sent"); an entity type takes "a" or "an"; a
 given or input keeps its name. Every rendered sentence starts with a
@@ -924,7 +935,25 @@ and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples, the frame-rule test and the done computation
 are build step 4 and get their own stories then.
 
-## 14. Changes from revision 57
+## 14. Changes from revision 58
+
+Operator decision GG (kb:9378274 entry 139), from Astra's round 42
+(kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
+way to state a calendar-day contract (`due == TODAY`).
+
+- `TODAY` is a fixed name again (1, 7.1, 7.2): the day of `NOW` in the
+  business zone, a `TIME` at 00:00, the same kind of value as
+  `TIME("2026-10-04")`. It compares with a day: `TIME("...")` or a
+  property that holds one. A comparison with a text, a number or a
+  yes/no is `type_mismatch`.
+- Revision 58 has one type, `TIME`, for days and moments, so the
+  checker cannot refuse a comparison of `TODAY` with a moment
+  (`TODAY == NOW`); it passes, as it did in revision 57. 7.2 says so
+  under "Days and moments".
+- The read view reads `TODAY` as "today" (12).
+- No block's text changes, so nothing needs re-approval.
+
+## 15. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -1011,7 +1040,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 15. Changes from revision 56
+## 16. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -1030,7 +1059,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 16. Changes from revision 55
+## 17. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -1054,7 +1083,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 17. Changes from revision 54
+## 18. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -1069,7 +1098,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 18. Changes from revision 53
+## 19. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -1104,7 +1133,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 19. Changes from revision 52
+## 20. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -1120,7 +1149,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 20. Changes from revision 51
+## 21. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -1142,7 +1171,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 21. Changes from revision 50
+## 22. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -1152,7 +1181,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 22. Changes from revision 49
+## 23. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -1161,14 +1190,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 23. Changes from revision 48
+## 24. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 24. Changes from revision 47
+## 25. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -1178,7 +1207,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 25. Changes from revision 46
+## 26. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -1187,7 +1216,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 26. Changes from revision 45
+## 27. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -1197,7 +1226,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 27. Changes from revision 44
+## 28. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -1206,7 +1235,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 28. Changes from revision 43
+## 29. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -1215,7 +1244,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 29. Changes from revision 42
+## 30. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -1226,7 +1255,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 30. Changes from revision 41
+## 31. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -1235,21 +1264,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 31. Changes from revision 40
+## 32. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 32. Changes from revision 39
+## 33. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 33. Changes from revision 38
+## 34. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -1257,7 +1286,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 34. Changes from revision 37
+## 35. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -1266,7 +1295,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 35. Changes from revision 36
+## 36. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -1277,7 +1306,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 36. Changes from revision 35
+## 37. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -1290,7 +1319,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 37. Changes from revision 34
+## 38. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -1303,7 +1332,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 38. Changes from revision 33
+## 39. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -1319,7 +1348,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 39. Changes from revision 32
+## 40. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1337,7 +1366,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 40. Changes from revision 31
+## 41. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1356,7 +1385,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 41. Changes from revision 30
+## 42. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1377,7 +1406,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 42. Changes from revision 29
+## 43. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1398,7 +1427,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 43. Changes from revision 28
+## 44. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1415,7 +1444,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 44. Changes from revision 27
+## 45. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1437,7 +1466,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 45. Changes from revision 26
+## 46. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

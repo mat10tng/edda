@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 58).
+# Edda keyword registry, generated from language/reference.md (revision 59).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, fixed name, checker rule and read-view
 # sentence kind, with what it means, why it exists and where it comes
@@ -322,8 +322,8 @@ forms:
   - form: '3, -2, 1.5, True, False, None, [], [a, b]'
     means: 'integer, number, yes/no, no value (None) and list literals'
     from: 'Python'
-  - form: 'NOW, ACTOR, RESULT'
-    means: 'the three fixed names: the time, the asker, the latest call''s return'
+  - form: 'NOW, TODAY, ACTOR, RESULT'
+    means: 'the four fixed names: the time, the day, the asker, the latest call''s return'
     from: 'Edda'
   - form: 'OLD(x)'
     means: 'the value before the operation, one argument, only under ensure'
@@ -347,6 +347,9 @@ words:
     from: 'Edda'
   - word: 'NOW'
     means: 'the time of the request, in the business zone'
+    from: 'Edda'
+  - word: 'TODAY'
+    means: 'the day of NOW in the business zone: the time 00:00 that day, the same value as TIME("YYYY-MM-DD") for that date'
     from: 'Edda'
   - word: 'DONE'
     means: 'the verdict of a successful call, as the first then item, not inside an expression'
