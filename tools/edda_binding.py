@@ -38,6 +38,7 @@ import os
 import shutil
 
 import check as checker
+import view as viewer
 
 FIXTURES = os.path.join(checker.ROOT, "fixtures")
 
@@ -179,6 +180,18 @@ def make_actor(name, roles, values):
 
 # --- spec_file ---------------------------------------------------------------
 
+class SpecFile(Thing):
+    """a spec_file; its stories are read from the checker's model of the
+    copied folder, made once, at the first read"""
+
+    @property
+    def stories(self):
+        d = object.__getattribute__(self, "__dict__")
+        if "_stories" not in d:
+            dict.__setitem__(d, "_stories", stories_of(self))
+        return dict.__getitem__(d, "_stories")
+
+
 def make_spec_file(name, values, workdir):
     """a fixture folder copied to workdir; its one .edda is the spec file"""
     folder = os.path.join(workdir, name)
@@ -189,7 +202,40 @@ def make_spec_file(name, values, workdir):
     path = files[0]
     with open(path) as f:
         text = f.read()
-    return Thing("spec_file", name=os.path.basename(path)[:-len(".edda")], text=text, _path=path)
+    return SpecFile("spec_file", name=os.path.basename(path)[:-len(".edda")], text=text, _path=path)
+
+
+def sentences(found):
+    """the renderer's sentences as sentence things"""
+    return [Thing("sentence", **s) for s in found]
+
+
+class Story(Thing):
+    """a story; version is len(versions), as the spec computes it"""
+
+    @property
+    def version(self):
+        return len(self.versions)
+
+
+def stories_of(file):
+    """spec_file.stories: the file's stories from the checker's model of its
+    folder, each with its sentences and its versions' (reference section
+    12); a folder that does not check has no model"""
+    folder = os.path.dirname(file._path)
+    if checker.refused(folder):
+        raise ValueError(f"{os.path.basename(file._path)} does not check, so it has no model")
+    model = checker.model_of(folder)
+    out = []
+    for st in model["stories"]:
+        if st["file"] != os.path.basename(file._path):
+            continue
+        versions = [Thing("version", number=v["number"], sentences=sentences(viewer.version_sentences(v)))
+                    for v in st["versions"]]
+        out.append(Story("story", file=file, versions=versions,
+                         sentences=sentences(viewer.story_sentences(st, model["operations"], model["entities"],
+                                                                    model["roles"]))))
+    return out
 
 
 def problems_of(path):
@@ -212,5 +258,15 @@ def check(actor, file):
     return problems_of(file._path)
 
 
+def view(actor, story):
+    return story.sentences
+
+
+def view_at(actor, story, number):
+    if number < 1 or number > len(story.versions):
+        raise Refused("no such version")
+    return story.versions[number - 1].sentences
+
+
 ENTITIES = {"spec_file": make_spec_file}
-OPERATIONS = {"check": check}
+OPERATIONS = {"check": check, "view": view, "view_at": view_at}

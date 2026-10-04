@@ -2045,7 +2045,7 @@ def project_of(folder):
 # --- the JSON model (section 9) ------------------------------------------------
 
 MODEL_VERSION = 1     # the model's own version, edda_model
-REVISION = 62         # the language revision the model follows
+REVISION = 63         # the language revision the model follows
 
 
 def ast_json(n):
@@ -2142,41 +2142,198 @@ def with_json(v, t, pw, givens, names, source):
     return {"kind": kind, "value": v}
 
 
+class ModelParts:
+    """the model's pieces read from one source (section 9): a path's line,
+    less shift (a version's lines count from its key line), and the
+    expressions, facts and who-lines at a path; drift, the lines the
+    wording_drift flags give"""
+
+    def __init__(self, source, shift=0, drift=()):
+        self.source, self.shift, self.drift = source, shift, set(drift)
+
+    def line(self, p, key=True):
+        return self.source.line(p, key) - self.shift
+
+    def expr(self, text, p):
+        return {"text": text, "line": self.line(p, False), "ast": ast_json(ast.parse(text, mode="eval").body)}
+
+    def fact(self, f, p):
+        if isinstance(f, dict):
+            drift = bool({self.line(p + ("fact",), False), self.line(p + ("means",), False)} & self.drift)
+            return {"fact": self.expr(f["fact"], p + ("fact",)), "means": f.get("means"), "drift": drift, "line": self.line(p)}
+        return {"fact": self.expr(f, p), "means": None, "drift": False, "line": self.line(p)}
+
+    def who(self, ws, p):
+        return [{"role": w["role"], "when": self.expr(w["when"], p + (i, "when")) if "when" in w else None,
+                 "line": self.line(p + (i,))} for i, w in enumerate(listing(ws))]
+
+    def props(self, ps, p, types):
+        """the properties at p, each with its type: as written, or as the
+        checker resolved a computed one from types"""
+        out = []
+        for n, v in mapping(ps).items():
+            if isinstance(v, dict):
+                t = dict({"phrase": None}, **resolved_json(types.get(n)), entity=None, many=False,
+                         in_order=False, default=None, optional=False, derived=False,
+                         computed=self.expr(v["computed"], p + (n, "computed")))
+            else:
+                t = phrase_json(v)
+            out.append(dict({"name": n}, **t, line=self.line(p + (n,))))
+        return out
+
+    def text_lines(self, xs, p):
+        """the line of each text of a list (notes, questions)"""
+        return [self.line(p + (i,), False) for i, _ in enumerate(listing(xs))]
+
+
+def story_json(sid, st, fname, P, M, pins):
+    """one story of the model and its operations (section 9), from its
+    parsed YAML at ("stories", sid) of M's source; P gives the types of
+    its givens' values, pins are the story's (kind, name, version)"""
+    at = ("stories", sid)
+    examples = []
+    for title, x in mapping(st.get("examples")).items():
+        xa = at + ("examples", title)
+        givens, names = given_names(x)
+        given = []
+        for i, g in enumerate(listing(x.get("given"))):
+            kind = next(k for k in g if k != "with")
+            ga = xa + ("given", i)
+            types = P.actor_props(givens[g[kind]][1]) if kind == "actor" else P.entities.get(kind, {}).get("props", {})
+            values = {}
+            for p, v in mapping(g.get("with")).items():
+                if kind == "actor" and p == "roles":
+                    values[p] = {"kind": "list", "value": [{"kind": "role", "value": r} for r in listing(v)]}
+                elif kind == "spec_file" and p == "fixture":
+                    values[p] = {"kind": "fixture", "value": v}
+                else:
+                    values[p] = with_json(v, types.get(p), ga + ("with", p), givens, names, M.source)
+            given.append({"kind": kind, "name": g[kind], "with": values, "line": M.line(ga)})
+        steps = []
+        for i, s in enumerate(listing(x.get("steps"))):
+            sa = xa + ("steps", i)
+            then = listing(s.get("then"))
+            when, verdict = None, None
+            if "when" in s:
+                w = s["when"]
+                when = {"actor": w["actor"], "call": M.expr(w["call"], sa + ("when", "call")),
+                        "at": w.get("at"), "line": M.line(sa + ("when",))}
+                verdict = {"kind": "DONE" if then[0] == "DONE" else "refused",
+                           "reason": None if then[0] == "DONE" else then[0]["refused"], "line": M.line(sa + ("then", 0))}
+                then = then[1:]
+            skip = 1 if when else 0
+            steps.append({"when": when, "verdict": verdict,
+                          "then": [M.expr(t, sa + ("then", j + skip)) for j, t in enumerate(then)],
+                          "then_line": M.line(sa + ("then",)) if "then" in s else None, "line": M.line(sa)})
+        examples.append({"title": title, "given": given,
+                         "given_line": M.line(xa + ("given",)) if "given" in x else None, "steps": steps,
+                         "notes": listing(x.get("notes")), "note_lines": M.text_lines(x.get("notes"), xa + ("notes",)),
+                         "line": M.line(xa)})
+    operations = []
+    for oname, op in mapping(st.get("operations")).items():
+        oa = at + ("operations", oname)
+        operations.append({
+            "name": oname, "story": sid, "is": op["is"],
+            "inputs": [dict({"name": n}, **phrase_json(v), line=M.line(oa + ("inputs", n)))
+                       for n, v in mapping(op.get("inputs")).items()],
+            "who": M.who(op.get("who"), oa + ("who",)),
+            "refuse": [{"when": M.expr(r["when"], oa + ("refuse", i, "when")), "reason": r["reason"],
+                        "drift": bool({M.line(oa + ("refuse", i, k), False) for k in ("when", "reason")} & M.drift),
+                        "line": M.line(oa + ("refuse", i))}
+                       for i, r in enumerate(listing(op.get("refuse")))],
+            "ensure": [M.fact(f, oa + ("ensure", i)) for i, f in enumerate(listing(op.get("ensure")))],
+            "returns": M.expr(op["returns"], oa + ("returns",)) if "returns" in op else None,
+            "ordered_by": [M.expr(o, oa + ("ordered_by", i)) for i, o in enumerate(listing(op.get("ordered_by")))],
+            "also_changes": [M.expr(o, oa + ("also_changes", i)) for i, o in enumerate(listing(op.get("also_changes")))],
+            "notes": listing(op.get("notes")), "note_lines": M.text_lines(op.get("notes"), oa + ("notes",)),
+            "file": fname, "line": M.line(oa)})
+    story = {
+        "id": sid, "sentence": st["story"], "about": st["about"], "as_a": st["as_a"],
+        "i_want": st["i_want"], "so_that": st["so_that"], "epic": st.get("epic"), "tags": listing(st.get("tags")),
+        "notes": listing(st.get("notes")), "note_lines": M.text_lines(st.get("notes"), at + ("notes",)),
+        "questions": listing(st.get("questions")), "question_lines": M.text_lines(st.get("questions"), at + ("questions",)),
+        "rules": [{"rule": r["rule"], "shown_by": listing(r.get("shown_by")), "line": M.line(at + ("rules", i, "rule"))}
+                  for i, r in enumerate(listing(st.get("rules")))],
+        "operations": list(mapping(st.get("operations"))), "examples": examples,
+        "pins": [{"kind": k, "name": n, "version": v} for k, n, v in pins]}
+    return story, operations
+
+
+def pins_of(version):
+    """a version's pins as (kind, name, number)"""
+    return [("entity" if "entity" in p else "role", p.get("entity", p.get("role")), p["number"])
+            for p in listing(version.get("pins")) if isinstance(p, dict)]
+
+
+def snapshot_data(text, kind):
+    """(source, data) of a snapshot's text read as one block under its
+    section, its key line on line 2 (section 10)"""
+    wrapped = SECTION[kind] + ":\n" + "".join("  " + l + "\n" for l in text.split("\n")[:-1])
+    DUPLICATES.clear()
+    return Source(wrapped, False), yaml.load(wrapped, Loader=Core)
+
+
+def versions_json(sid, fname, entries, snapshots):
+    """the approved versions of a story, oldest first (section 9): each
+    with its own record and its snapshot modelled as the story is, its
+    lines counted from its key line, read against the blocks it pins at
+    their pinned versions (section 12), whose properties it holds with
+    their types, each line counted from its snapshot's key line"""
+    out = []
+    for e, line in entries:
+        source, data = snapshot_data(e["text"], "story")
+        st = data["stories"][sid]
+        pins = pins_of(e)
+        pinned = {"roles": {}, "entities": {}}
+        sources = {}
+        for k, n, v in pins:
+            sources[(k, n)], block = snapshots.get((k, n, v), (None, None))
+            pinned[SECTION[k]][n] = mapping(block)
+        VP = Project([(fname[:-5], dict(pinned, stories={sid: st}))])
+        blocks = {}
+        for k, n, v in pins:
+            ps = mapping(pinned[SECTION[k]][n].get("properties"))
+            types = VP.entities[n]["props"] if k == "entity" else VP.roles[n]["properties"]
+            at = (SECTION[k], n, "properties")
+            found = ModelParts(sources[(k, n)], shift=1).props(ps, at, types) if sources[(k, n)] else []
+            blocks.setdefault(SECTION[k], []).append({"name": n, "properties": found})
+        M = ModelParts(source, shift=1)
+        story, operations = story_json(sid, st, fname, VP, M, pins)
+        out.append({"number": e["number"], "approved_at": e["approved_at"], "approved_by": e["approved_by"],
+                    "because": e.get("because"), "pins": story["pins"],
+                    "story": dict(story, file=fname, line=M.line(("stories", sid))),
+                    "operations": operations, "entities": blocks.get("entities", []),
+                    "roles": blocks.get("roles", []), "line": line})
+    return out
+
+
 def model_of(folder):
     """the model of a project that checks (section 9): every declaration with
     its file and line, every expression with its ast, and the graphs"""
     P = project_of(folder)
     files, epics, roles, entities, stories, operations = [], [], [], [], [], []
+    story_versions, snapshots = {}, {}    # (sid) -> [(version, line)]; (kind, name, number) -> (source, block)
+    for path in sorted(glob.glob(f"{folder}/*.edda.vc")):
+        source, data = load(path)
+        stem = os.path.basename(path)[:-8]
+        for i, e in enumerate(listing(data)):
+            kind = "story" if "story" in e else "entity" if "entity" in e else "role"
+            if P.file_of(kind, e[kind]) != stem:
+                continue
+            if kind == "story":
+                story_versions.setdefault(e[kind], []).append((e, source.line((i,))))
+            else:
+                source, block = snapshot_data(e["text"], kind)
+                snapshots[(kind, e[kind], e["number"])] = (source, block[SECTION[kind]][e[kind]])
     for path in sorted(glob.glob(f"{folder}/*.edda")):
         source, data = load(path)
         fname = os.path.basename(path)
+        stem = fname[:-5]
+        drift = [line for rule, line, _ in flag_problems(data, stem, P, source) if rule == "wording_drift"]
+        M = ModelParts(source, drift=drift)
+        line = M.line
 
-        def line(p, key=True):
-            return source.line(p, key)
-
-        def expr(text, p):
-            return {"text": text, "line": line(p, False), "ast": ast_json(ast.parse(text, mode="eval").body)}
-
-        def fact(f, p):
-            if isinstance(f, dict):
-                return {"fact": expr(f["fact"], p + ("fact",)), "means": f.get("means"), "line": line(p)}
-            return {"fact": expr(f, p), "means": None, "line": line(p)}
-
-        def who(ws, p):
-            return [{"role": w["role"], "when": expr(w["when"], p + (i, "when")) if "when" in w else None,
-                     "line": line(p + (i,))} for i, w in enumerate(listing(ws))]
-
-        def props(ps, p, types):
-            out = []
-            for n, v in mapping(ps).items():
-                if isinstance(v, dict):
-                    t = dict({"phrase": None}, **resolved_json(types.get(n)), entity=None, many=False,
-                             in_order=False, default=None, optional=False, derived=False,
-                             computed=expr(v["computed"], p + (n, "computed")))
-                else:
-                    t = phrase_json(v)
-                out.append(dict({"name": n}, **t, line=line(p + (n,))))
-            return out
+        props = M.props
 
         files.append({"name": fname, "history": fname + ".vc" if os.path.exists(path + ".vc") else None,
                       "blocks": [{"kind": k, "name": n, "line": line((s, n)), "status": "approved" if ok else "draft",
@@ -2197,71 +2354,15 @@ def model_of(folder):
                    "part_of_line": line(at + ("part_of",)) if "part_of" in e else None,
                    "properties": props(e.get("properties"), at + ("properties",), P.entities[ename]["props"]),
                    "may_change": changes,
-                   "always": [fact(f, at + ("always", i)) for i, f in enumerate(listing(e.get("always")))]}
+                   "always": [M.fact(f, at + ("always", i)) for i, f in enumerate(listing(e.get("always")))]}
             for key in ("may_create", "may_read", "may_update", "may_delete"):
-                ent[key] = who(e.get(key), at + (key,))
+                ent[key] = M.who(e.get(key), at + (key,))
             entities.append(dict(ent, file=fname, line=line(at)))
         for sid, st in mapping(data.get("stories")).items():
-            at = ("stories", sid)
-            examples = []
-            for title, x in mapping(st.get("examples")).items():
-                xa = at + ("examples", title)
-                givens, names = given_names(x)
-                given = []
-                for i, g in enumerate(listing(x.get("given"))):
-                    kind = next(k for k in g if k != "with")
-                    ga = xa + ("given", i)
-                    types = P.actor_props(givens[g[kind]][1]) if kind == "actor" else P.entities[kind]["props"]
-                    values = {}
-                    for p, v in mapping(g.get("with")).items():
-                        if kind == "actor" and p == "roles":
-                            values[p] = {"kind": "list", "value": [{"kind": "role", "value": r} for r in listing(v)]}
-                        elif kind == "spec_file" and p == "fixture":
-                            values[p] = {"kind": "fixture", "value": v}
-                        else:
-                            values[p] = with_json(v, types.get(p), ga + ("with", p), givens, names, source)
-                    given.append({"kind": kind, "name": g[kind], "with": values, "line": line(ga)})
-                steps = []
-                for i, s in enumerate(listing(x.get("steps"))):
-                    sa = xa + ("steps", i)
-                    then = listing(s.get("then"))
-                    when, verdict = None, None
-                    if "when" in s:
-                        w = s["when"]
-                        when = {"actor": w["actor"], "call": expr(w["call"], sa + ("when", "call")),
-                                "at": w.get("at"), "line": line(sa + ("when",))}
-                        verdict = {"kind": "DONE" if then[0] == "DONE" else "refused",
-                                   "reason": None if then[0] == "DONE" else then[0]["refused"], "line": line(sa + ("then", 0))}
-                        then = then[1:]
-                    skip = 1 if when else 0
-                    steps.append({"when": when, "verdict": verdict,
-                                  "then": [expr(t, sa + ("then", j + skip)) for j, t in enumerate(then)], "line": line(sa)})
-                examples.append({"title": title, "given": given, "steps": steps, "notes": listing(x.get("notes")),
-                                 "line": line(xa)})
-            for oname, op in mapping(st.get("operations")).items():
-                oa = at + ("operations", oname)
-                operations.append({
-                    "name": oname, "story": sid, "is": op["is"],
-                    "inputs": [dict({"name": n}, **phrase_json(v), line=line(oa + ("inputs", n)))
-                               for n, v in mapping(op.get("inputs")).items()],
-                    "who": who(op.get("who"), oa + ("who",)),
-                    "refuse": [{"when": expr(r["when"], oa + ("refuse", i, "when")), "reason": r["reason"], "line": line(oa + ("refuse", i))}
-                               for i, r in enumerate(listing(op.get("refuse")))],
-                    "ensure": [fact(f, oa + ("ensure", i)) for i, f in enumerate(listing(op.get("ensure")))],
-                    "returns": expr(op["returns"], oa + ("returns",)) if "returns" in op else None,
-                    "ordered_by": [expr(o, oa + ("ordered_by", i)) for i, o in enumerate(listing(op.get("ordered_by")))],
-                    "also_changes": [expr(o, oa + ("also_changes", i)) for i, o in enumerate(listing(op.get("also_changes")))],
-                    "notes": listing(op.get("notes")), "file": fname, "line": line(oa)})
-            stories.append({
-                "id": sid, "sentence": st["story"], "about": st["about"], "as_a": st["as_a"],
-                "i_want": st["i_want"], "so_that": st["so_that"], "epic": st.get("epic"), "tags": listing(st.get("tags")),
-                "notes": listing(st.get("notes")), "questions": listing(st.get("questions")),
-                "rules": [{"rule": r["rule"], "shown_by": listing(r.get("shown_by")), "line": line(at + ("rules", i))}
-                          for i, r in enumerate(listing(st.get("rules")))],
-                "operations": list(mapping(st.get("operations"))), "examples": examples,
-                "pins": [{"kind": "entity" if "entity" in p else "role", "name": p.get("entity", p.get("role")), "version": p["number"]}
-                         for p in listing((P.newest_version.get(("story", sid)) or {}).get("pins")) if isinstance(p, dict)],
-                "file": fname, "line": line(at)})
+            story, ops = story_json(sid, st, fname, P, M, pins_of(P.newest_version.get(("story", sid)) or {}))
+            versions = versions_json(sid, fname, sorted(story_versions.get(sid, []), key=lambda v: v[0]["number"]), snapshots)
+            stories.append(dict(story, versions=versions, file=fname, line=line(("stories", sid))))
+            operations += ops
     return {"edda_model": MODEL_VERSION, "revision": REVISION, "files": files, "epics": epics, "roles": roles,
             "entities": entities, "stories": stories, "operations": operations,
             "graphs": graphs_of(roles, entities, stories, operations)}
