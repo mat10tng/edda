@@ -191,6 +191,11 @@ class SpecFile(Thing):
             dict.__setitem__(d, "_stories", stories_of(self))
         return dict.__getitem__(d, "_stories")
 
+    @property
+    def notes(self):
+        """spec_file.notes: the checker's notes of this one file, in file order"""
+        return sorted(notes_of([self]), key=lambda n: n.line)
+
 
 def make_spec_file(name, values, workdir):
     """a fixture folder copied to workdir; its one .edda is the spec file"""
@@ -238,6 +243,14 @@ def stories_of(file):
     return out
 
 
+def notes_of(files):
+    """the checker's notes of several spec files as note things, each with
+    its spec_file"""
+    by_path = {f._path: f for f in files}
+    return [Thing("note", file=by_path[n["path"]], story_id=n["story_id"], line=n["line"], text=n["text"])
+            for n in checker.notes([f._path for f in files])]
+
+
 def problems_of(path):
     """the real checker over one .edda and the .edda.vc beside it"""
     P = checker.project_of(os.path.dirname(path))
@@ -262,6 +275,11 @@ def view(actor, story):
     return story.sentences
 
 
+def notes(actor, files):
+    return notes_of(files)
+
+
+# EDDA-007@0
 def view_at(actor, story, number):
     if number < 1 or number > len(story.versions):
         raise Refused("no such version")
@@ -269,4 +287,4 @@ def view_at(actor, story, number):
 
 
 ENTITIES = {"spec_file": make_spec_file}
-OPERATIONS = {"check": check, "view": view, "view_at": view_at}
+OPERATIONS = {"check": check, "view": view, "view_at": view_at, "notes": notes}

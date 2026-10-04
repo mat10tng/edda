@@ -250,6 +250,8 @@ def write_atomic(folder, reading, vc, new_bytes):
         raise
 
 
+# EDDA-005@0
+# EDDA-008@0
 def approve(folder, name, at, by, because, dry_run):
     """the approval, under the folder's lock and on one reading; returns
     (the new version's text, kind, number, vc)"""

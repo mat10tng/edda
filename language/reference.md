@@ -1,12 +1,13 @@
 # Edda: language reference
 
-Revision 63, 4 Oct 2026. Replaces revision 62. Decisions behind it:
+Revision 64, 4 Oct 2026. Replaces revision 63. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
 kb:9378618, and the build Plan kb:9379223; the JSON model and graphs
 as data: decision N, kb:9379218; the read view: the build Plan's
-phase 2622), and Astra's review rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
+phase 2622; links per operation: decision N, Q6, and the build Plan's
+phase 2623), and Astra's review rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
 `language/keywords.yaml` (the registry: every key, expression form,
@@ -53,12 +54,16 @@ specs/
   epics.edda         epics:
   order.edda         entities: order (and its parts), stories: about order
   order.edda.vc      versions of those stories and entity blocks, append-only
-  order.links        level 2: business name -> code path, name map
+  glossary.links     level 2: the code target, the naming rule, the
+                     code files the link check reads
+  order.links        level 2: the operations of order.edda whose function
+                     does not follow the rule
   order.binding      level 2: how examples make, call and read entities
 fixtures/
   <name>/order.edda  one whole spec in one folder, checked under its own
                      file name, used by examples through `fixture:`
   <name>/order.edda.vc   its history, when the fixture has one
+  <name>/*.links, <name>/code.py   a fixture of the link layer
 language/
   reference.md       this file
   schema.json        the keys of .edda, JSON Schema 2020-12
@@ -617,12 +622,134 @@ defines it:
 
 ## 9. Level 2: links and binding
 
-**Designed, not built.** `order.links` holds every path and the
-business-to-code name map; the code carries `# FUL-005@3`; a binding
-in another stack reads the model below and evaluates its expression
-trees (the whitelist is small) or calls Python. That an approval lands in the
-`.vc` file on disk and survives a re-read is the binding's test, not
-a level 1 fact.
+**Links.** Built, for Python code. A link joins an operation, not a
+line, to the code (decision N, Q6). `glossary.links`, one per project
+folder, names the code's target, the naming rule and the code files
+the link check reads; an `<entity>.links` beside `<entity>.edda` lists
+only the operations of that file whose function does not follow the
+rule, or that no code does yet. Both are YAML in the subset of section
+2: names and `NOT_BUILT` plain, paths quoted.
+
+```yaml
+# glossary.links
+target: python
+rule: same_name
+covers:
+  - "shop/orders.py"
+# order.links
+links:
+  remove: "shop/orders.py::take_off"
+  restore: NOT_BUILT
+```
+
+| key | means | why |
+|---|---|---|
+| `target:` | the code's stack; `python` is the one known | the naming rule and the markers are per stack |
+| `rule:` | the naming rule; `same_name`: an operation's function is the covered top-level function of its snake_case name | most operations need no line in a `.links` |
+| `covers:` | the code files the link check reads, each a `.py` file relative to the folder above the project folder (the repository, for `specs/`) | markers are read, and code no story reaches is flagged, only there |
+| `links:` | in an `<entity>.links`: operation name to `"path::function"`, a top-level function in a covered file, or to `NOT_BUILT` | the operations that do not follow the rule |
+
+The code carries `# <STORY-ID>@<n>`, a comment line of its own
+directly above the top-level function that does an operation of that
+story (above its decorators, when it has any), `n` the story's version
+the code was written against: its newest approved version, or 0 for a
+story never approved. Markers may stand one above the other: one
+function may do operations of several stories. A marker belongs to the
+def in force once the module has loaded. A later binding of the same
+name (a def, class, import, assignment such as `remove = None`, `del`,
+walrus, `with` or `except` target, loop target or match capture)
+replaces it only when every import runs it: a direct top-level
+statement of the module, or inside branches proven to run (the body of
+`if` with a true constant test, the `else` of a false one, the
+`finally` of a `try`, a first `match` case that is unguarded and
+catches all). The marker on a replaced def is refused, naming the
+replacing line; the name is then that later binding, a function only
+when it is a def. A later binding anywhere else may be skipped at run
+time: nested in any other branch of a compound statement (`with`, `if`,
+`try`, `except`, its `else`, `for`, `while`, `match`, or any form
+Python adds), or in an operand that may not be evaluated (the right of
+`and`/`or`, an arm of `x if c else y`, a comprehension). It does not
+replace the def: the link stays, and the marker is flagged
+`maybe_replaced`, naming that line (an optional fast version under
+`with suppress(ImportError):`, an `except ImportError:` fallback). A
+branch that never runs counts for nothing: the body of an `if` whose
+test is a false constant or `TYPE_CHECKING`, the `else` of a true one.
+A bare annotation (`remove: int`) binds nothing, and neither does a
+binding inside a def, class or lambda body. Every operation
+resolves to exactly one function: its `.links` line, else by the rule;
+none, or one in each of two covered files, is refused. An operation
+with a `.links` line is never resolved by the rule: a line that fails
+is refused once, at that line. An operation is
+linked when it resolves both ways: to one function, and that function
+carries a marker of the operation's story. A marker behind its story's
+newest approved version, or on a story never approved, is flagged
+(section 11).
+
+**Reach.** Each top-level name of a covered file stands for what its
+bindings resolve to: a top-level function or class of a covered file,
+a covered module, or nothing (an assignment, a loop target, an import
+of code no `covers:` names). A name takes its bindings in line order,
+as in the marker rule above: one every import runs replaces what came
+before (an import after a def of the same name stands for the imported
+definition), one only some imports run adds to it (a conditional
+import keeps both). An import resolves through the covered files:
+`import a.b as m` makes `m` the module `a.b`; `import a.b` binds `a`,
+through which `a.b` is that module; `from m import f` makes `f` whatever `f` stands
+for in `m` once `m` has loaded, or the submodule `m.f` when there is
+one; `as` renames. A dotted name goes on through each step: `m.f` is
+what `f` stands for in module `m`, or its submodule. So re-exports and
+module aliases are followed however deep (`from .impl import helper`
+in a package's `__init__.py`; `from . import impl as api` there, then
+`api.helper()`), each (file, name) once per lookup, so a loop ends. A
+module is found by its path: an absolute one is every covered file
+whose path ends in it (`a/b.py`, or `a/b/__init__.py` for a package),
+a relative one is counted from the importing file's folder.
+
+A top-level function or class is reached when a name or dotted name
+in the body of a linked function, or of one reached already, stands
+for it once its module has loaded. Called or passed as a value, both
+count, and so does a local name that happens to be the same: the rule
+errs toward reached, so it never flags code a linked function names.
+A file's top level runs on import: once anything in a file is reached,
+an import resolves through it, or code that runs imports it (used or
+not, in a branch or not; `import a.b.c` runs `a`, `a.b` and `a.b.c`,
+`from a import b` runs `a` and the submodule `b`), everything Python
+evaluates as its top level runs reaches what it names (as bound at
+that line, or once loaded): every module-level statement, and of a
+`def` its decorators, default values and annotations, of a `class`
+its decorators, base classes, keywords (`metaclass=`) and its whole
+body, nested classes too, of a `lambda` its default values. Only the
+bodies of functions and lambdas wait until they are called, and so do
+annotations when the module has `from __future__ import annotations`.
+The body of the command line block (`if __name__ == "__main__":`,
+either operand order) is left out; its `else` branch, and an
+`if __name__ != "__main__":`, run on import and count. A reached
+function's body reaches what it names, nested functions too. A class
+is one unit with its methods. A call through
+`getattr`, a string or other dynamic dispatch is not seen. A covered
+function or class no linked function reaches is flagged `no_story`.
+
+Edda's own links cover `tools/check.py`, `tools/approve.py`,
+`tools/view.py` and `tools/edda_binding.py`, the tools that do an
+operation of a story; `tools/run.py` (it holds operations to their
+rules and does none), the generators and the tests are left out.
+`check` is `check.py`'s `check` (the binding has a `check` too, so
+`spec_file.links` names it); `approve` and `approve_block` are both
+`approve.py`'s `approve`, which carries both stories' markers; `diff`
+is `check.py`'s `changes`, `story.changes`; `view` is `view.py`'s
+`story_sentences`; `view_at` is the binding's `view_at`, since only
+the binding picks the version and refuses "no such version"; `notes`
+is `check.py`'s `notes` (`view.py` and the binding each have a `notes`
+too, so `spec_file.links` names it), and the binding's `notes` calls
+it. `NOT_BUILT` stays for an operation no code does yet; Edda's own
+specs use it nowhere. Flagged `no_story`: the command lines (`report`,
+`model_main`, each `main`), the link layer itself, which no story
+covers yet, and `make_actor`, which only the runner calls.
+
+A binding in another stack (not built) reads the model below and
+evaluates its expression trees (the whitelist is small) or calls
+Python. That an approval lands in the `.vc` file on disk and survives
+a re-read is the binding's test, not a level 1 fact.
 
 **The binding.** Written once per entity, role and operation; glue
 only, it holds no rule: permission, refusals and the facts after are
@@ -663,7 +790,9 @@ not run. Edda's own binding,
 `tools/edda_binding.py`, binds `spec_file` (the `fixture:` folder
 copied to the work folder, never the original; its one `.edda` is the
 file; `stories` from the model of the copy, made at the first read, a
-copy that does not check having none), `problem` (`kind`, `rule`,
+copy that does not check having none; `notes` from `check.py`'s
+`notes`, in file order), `note` (`file`, `story_id`, `line`, `text`),
+`notes` (`check.py`'s `notes` over the given files), `problem` (`kind`, `rule`,
 `file_name`, `line`, `message`), `check` (the real checker,
 `tools/check.py`, over the copy and its history), `story` (`file`,
 `versions`, `sentences`, and `version`, `len(versions)` as the spec
@@ -721,9 +850,9 @@ checker broken on purpose and sees EDDA-001 fail on the example and
 the `then` line that catch the break, and holds bound operations of a
 small project of its own to each rule of section 6.
 
-Not built yet: links and the `# FUL-005@3` markers (until then the
-operations held to their rules are the bound ones), bindings in other
-stacks, the clock.
+Linked now means the marker resolves; it changes nothing the runner
+does: the runner still holds the bound operations to their rules.
+Not built yet: bindings in other stacks, the clock.
 
 **The model.** Built. `python3 tools/check.py --model [DIR]` (`DIR`
 the project, `specs/` unless named) prints one JSON model of the whole
@@ -741,7 +870,7 @@ A value left out is `null`, a list left out `[]`.
 | field | holds |
 |---|---|
 | `edda_model` | the model's own version, 1; a reader refuses a version it does not know |
-| `revision` | the language revision, 63 |
+| `revision` | the language revision the model follows, 63; revision 64 changed nothing in the model |
 | `files` | each `.edda` file: `name`, `history` (its `.edda.vc` or `null`), `blocks`: each role, entity and story in the order of the status lines (section 11) with `kind`, `name`, `line`, `status` (`approved` or `draft`), `version` and `pins_stale` |
 | `epics` | `id`, `text`, `file`, `line` |
 | `roles` | `name`, `is`, `properties`, `file`, `line` |
@@ -981,6 +1110,17 @@ anchor and its aliases are one problem, at the anchor.
    report names the layer that refused a file, or says `flagged` or
    `passes`.
 
+Then links, in a project with a `glossary.links` whose four layers
+refused nothing (a project without one has no link layer): the
+`.links` files through the source and shape rules above (`not_yaml`,
+`yaml_feature`, `unquoted_text`, `not_a_list`, `wrong_type`,
+`missing_key`, `unknown_key`, `bad_name`, `declared_twice`), then
+`unknown_link`, `no_function` and `bad_marker` over the `.links` files
+and the covered code; only when none of those, the flags `stale_link`,
+`unapproved_link`, `maybe_replaced` and `no_story`. The plain run lists each `.links`
+file, `glossary.links` first, then each covered file, after the
+project's other files; the fixture report says `caught by links`.
+
 **From the schema to a rule.** The shape layer is the JSON Schema plus
 the quoting rule; a schema failure becomes: `additionalProperties`,
 `unknown_key`; `required`, `missing_key`; `type` with an array
@@ -1009,7 +1149,10 @@ story's key line for `wrong_file`, `no_example` and
 side's line for `wording_drift`, and in the `.vc` the version's
 `number:` line for `bad_version`, `bad_snapshot` and a story version
 without pins, the version's `pins:` line for pins on a block version,
-and the pin's line for every other `bad_pin`.
+and the pin's line for every other `bad_pin`. In the link layer: the
+key's or item's line in a `.links`, the `rule:` value's line for an
+operation resolved by the rule, the marker's line for a marker, and the
+`def` line for a function without its marker and for `no_story`.
 
 **Refusals** (`problem.kind == refused`), with their messages:
 
@@ -1039,6 +1182,9 @@ and the pin's line for every other `bad_pin`.
 | `bad_version` | a `.vc` number out of sequence, an unknown story or block, or a version of a block of another file | `<kind> <name> v<n> out of sequence; expected v<m>`; for an unknown block, `<kind> <name> v<n>: no such <kind>`; for another file's block, `<kind> <name> v<n>: belongs in <file>.edda.vc` |
 | `bad_pin` | a pin on a block version, a story version without pins, a duplicate `(kind, name)`, a pin to no such block or version; a version exists when a history of the project holds it | `pin <kind> <name> v<n>: no such version`, `pin <kind> <name> v<n>: no such <kind>`, `pin <kind> <name> v<n>: pinned twice`, `story <id> v<n>: no pins`, `<kind> <name> v<n>: a block version has no pins` |
 | `bad_snapshot` | a version's text that is not already normalised, is outside the subset of section 2 or fails the shape layer (a bad name, a wrong key, a duplicate; a retired key of section 10 is not wrong here), does not read as one block under the version's name, or does not name it on its first line | `text of <kind> <name> v<n> is not a normalised block` |
+| `unknown_link` | a `.links` naming no known target or rule, no `.py` file, a file Python cannot read, no `.edda` beside it, no operation of that file or a file it does not cover; an exception written neither `"path::function"` nor `NOT_BUILT`; a marker naming no story | `unknown target: <x>`, `unknown naming rule: <x>`, `no such Python file: <path>`, `not Python (<reason>): <path>`, `no such file: <entity>.edda`, `unknown operation: <name>`, `not a covered file: <path>`, `not a link (write "path::function" or NOT_BUILT): <text>`, `unknown story: <id>` |
+| `no_function` | an operation that resolves to no function or to two: an exception naming a function its file does not have; by the rule, no covered file, or more than one, with a top-level function of its name | `no function <function> in <path>[, replaced by <how> at line <m>]`, `no function <operation> for <id> in the covered files[ (<path>::<operation>, replaced by <how> at line <m>)]`, `two functions for <operation> of <id>: <path>::<function>, ...; name one in <entity>.links` |
+| `bad_marker` | a comment that starts like a marker but is not `# <STORY-ID>@<n>`; a marker not on a line of its own directly above a top-level function; a version its story does not have; one story twice on one function; a marker above a function doing none of its story's operations; a function doing an operation without its story's marker; a marker on a def that a later binding of its name replaces, one every import runs: a direct top-level statement, or in a branch proven to run (section 9) | `not a marker (write # <STORY-ID>@<version>): <text>`, `a marker is a line of its own directly above a function: <text>`, `<function> at line <n> is replaced by a def, a class or a binding at line <m>, so the marker is on code that does not run: <text>`, `<id> has no version <n>`, `marked twice: <id> on <function>`, `<function> does no operation of <id>`, `<function> does <operation> of <id> and carries no # <id>@<version>` |
 
 **Flags** (`problem.kind == flagged`):
 
@@ -1048,9 +1194,10 @@ and the pin's line for every other `bad_pin`.
 | `no_example` | a story with no example | `story <id> has no example` |
 | `question_on_approved` | a question on an approved story | `story <id> is approved and still has a question` |
 | `wording_drift` | section 10 | `<id> <operation>: <side> changed, <other> did not` |
-
-Level 2 adds: code with no story; code behind the spec or at an
-unapproved version.
+| `stale_link` | a marker whose version is behind its story's newest approved version | `<id>@<n> is behind its approved v<m>` |
+| `unapproved_link` | a marker of a story with no approved version yet | `<id> has no approved version yet` |
+| `maybe_replaced` | a marker on a def that a later binding of its name may replace on some imports: one nested in a branch of any compound statement not proven to run (`with`, `if`, `try`, `for`, `while`, `match`), or in an operand that may not be evaluated (section 9) | `<function> at line <n> may be replaced by a def, a class or a binding at line <m>, which not every import runs: <text>` |
+| `no_story` | a top-level function or class of a covered file that no linked function reaches (section 9) | `no linked function reaches <name>` |
 
 **Derived properties** (`, DERIVED`), by name:
 
@@ -1060,7 +1207,9 @@ unapproved version.
   `problem.file_name` carries the full name (`order.edda`,
   `order.edda.vc`).
 - `spec_file.notes`: every note under a story, an operation or
-  an example, in file order; `file` is the enclosing spec_file,
+  an example, in file order (`check.py`'s `notes` builds them; the
+  operation `notes` of EDDA-003 orders those of several files by text,
+  file name and line); `file` is the enclosing spec_file,
   `story_id` the enclosing story's id, `line` the line of the note's
   text, `text` the string as YAML reads it.
 - `spec_file.problems`: the refusals and flags above for this file and
@@ -1114,25 +1263,32 @@ story with a version, one line per change of `story.changes`, in walk
 order: `- <line>: <sentence>` for a removed line, `+ <line>:
 <sentence>` for an added one, the sentence as written in the text. A
 story never approved and a role or entity block show no changes.
-Status and changes are not problems: they never make the run fail.
+In a project whose link layer refused nothing, each story's link line
+follows its status line and its changes: `<id>: linked (<operation> ->
+<path>::<function>, ...)`, its operations in file order; `<id>: not
+linked (...)` when one of them is `NOT_BUILT`, it reading `<operation>:
+not built`; `<id>: no operations to link` for a story with none.
+Status, changes and link lines are not problems: they never make the
+run fail.
 
 **Done.** A story is done when, at its approved version: it is not a
 draft; no pin is stale; every example passes; its operations'
 refusals, ensures, `always` and frame rule hold on the whole suite;
 every link resolves both ways. The checker computes it; the agent never
-marks it. Nothing computes done yet. `tools/run.py` (section 9)
+marks it. Nothing computes done as one verdict yet. `tools/run.py` (section 9)
 computes two parts for the stories whose operations are bound: every
 example passes, and the operations' refusals, ensures, `always` and
 frame rule hold on every call the examples make; it reports that as
-`examples passed`, never as done. The rest (approved version, no
-stale pins, the rules on the host's whole test suite, links) is not
-built.
+`examples passed`, never as done. The checker's status and link lines
+give the approved version, stale pins and links (section 9); the rules
+on the host's whole test suite are not built.
 
 **Runs, test only.** Examples through the binding, every call of a
 bound operation wrapped in its refusals, ensures, always and the frame
 rule (built, sections 6 and 9); the same wrapping round the linked
-operation for every test in the host's suite (not built yet: it needs
-links). Never in production.
+operation for every test in the host's suite (not built yet: links now
+name the operation's function, but nothing wraps it in the host's
+tests). Never in production.
 
 ## 12. Views
 
@@ -1391,7 +1547,80 @@ the running of examples and the rule wrapping round every call are
 begun (sections 6 and 9: Edda's own `check`); the rest of the done
 computation gets its own stories.
 
-## 14. Changes from revision 62
+## 14. Changes from revision 63
+
+Build Plan kb:9379223, phase 2623, and decision N (kb:9379218, Q6):
+every operation is linked to the code that does it.
+
+- `glossary.links` names the target (`python`), the naming rule
+  (`same_name`: the operation's name is the function's) and the code
+  files it covers; an `<entity>.links` lists only the operations that
+  do not follow the rule, as `"path::function"` or `NOT_BUILT`; the
+  code carries `# <STORY-ID>@<n>` directly above the function doing an
+  operation (2, 9).
+- A link layer runs after the four, only in a project with a
+  `glossary.links` whose four layers refused nothing. Refused:
+  `unknown_link`, `no_function`, `bad_marker`, and the source and shape
+  rules on a `.links`. Flagged: `stale_link`, `unapproved_link`,
+  `maybe_replaced`, `no_story`, the last by the reach rule of section 9. A link line
+  follows each story's status line (11). "Level 2 adds" left section
+  11: its cases are these flags.
+- Edda's own: `specs/glossary.links`, `block.links`,
+  `spec_file.links` and `story.links`, and markers in `check.py`,
+  `approve.py`, `view.py` and `edda_binding.py`. Every operation of
+  EDDA-001 to EDDA-008 resolves to one function that carries its
+  story's marker (9).
+- `notes` (EDDA-003) is built: `check.py`'s `notes` returns the notes
+  of several spec files ordered by text, file name and line, carries
+  `# EDDA-003@0` and is named in `spec_file.links`; the binding binds
+  `note`, `spec_file.notes` and `notes`, so EDDA-003 runs and its one
+  example passes (9, 11).
+- A marker belongs to the def in force once the module has loaded: one
+  on a def that a later binding of its name replaces is refused
+  `bad_marker`, naming the replacing line, and the name resolves to
+  that later binding. Only a binding every import runs replaces: a
+  direct top-level statement, or one in a branch proven to run (`if
+  True:`, a `finally`). One nested in any other branch of a compound
+  statement (`with`, `if`, `try`, `except`, `else`, `for`, `while`,
+  `match`, or a later form), or in an operand that may not be
+  evaluated, leaves the link and flags `maybe_replaced`; a branch that
+  never runs (`if False:`, `if TYPE_CHECKING:`) counts for nothing; a
+  bare annotation binds nothing, a match capture binds (9, 11).
+- An operation with a `.links` line is never resolved by the rule; a
+  line that fails is refused once (9).
+- Each covered file's top-level names resolve to a covered function or
+  class, a covered module, or nothing, by the binding in force once the
+  module has loaded (an import after a def stands for the imported
+  definition; a conditional one keeps both). Imports are found by
+  module path against the covered files, package and relative ones
+  too, aliases followed, and on through re-exports and module aliases
+  (`from . import impl as api`, then `api.helper()`), transitively,
+  each name once per lookup. An import in code that runs runs the
+  top level of each covered module it names, used or not: a
+  side-effect `import a.plugins` reaches what `plugins.py` calls at
+  module level, and `import a.b.c` runs each package on the way. What
+  Python evaluates as a top level runs reaches what it names:
+  decorators, default values, annotations (unless `from __future__
+  import annotations`), base classes and class keywords, and whole
+  class bodies, nested ones too; only function and lambda bodies wait
+  until called. Only the body of `if __name__ == "__main__":`, either
+  operand order, is left out of the reach (9).
+- Linked now means the marker resolves; the runner still wraps the
+  bound operations, as before (9, 11).
+- New fixtures, one per link rule: `stale_link`, `unapproved_link`,
+  `no_story`, `unknown_link`, `no_function`, `bad_marker`,
+  `maybe_replaced` and `bad_links` (a `.links` with an unknown key).
+  `tools/test_links.py` holds the layer to each rule, to the marker
+  rule over every compound statement form and to the reach rule over
+  every import shape and every import-time position.
+- The plain run changes only by the link lines under specs/' stories,
+  specs/' `.links` files and the four covered tools with their flags,
+  and the new fixtures; no existing fixture has a `glossary.links`, so
+  none changes. `--model`, the read view and the runner are unchanged;
+  the model's `revision` stays 63, as nothing in it changed (9). No
+  block's text changes, so nothing needs re-approval.
+
+## 15. Changes from revision 62
 
 Build Plan kb:9379223, phase 2622: the read view, built.
 
@@ -1494,7 +1723,7 @@ Build Plan kb:9379223, phase 2622: the read view, built.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 15. Changes from revision 61
+## 16. Changes from revision 61
 
 Build Plan kb:9379223, phase 2621, and decision N (kb:9379218, Q7): one
 versioned JSON model of the whole spec, the graphs in it as data.
@@ -1531,7 +1760,7 @@ versioned JSON model of the whole spec, the graphs in it as data.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 16. Changes from revision 60
+## 17. Changes from revision 60
 
 Build Plan kb:9379223, phase 2625: every bound operation is held to its
 contract, on every call the runner makes.
@@ -1568,7 +1797,7 @@ contract, on every call the runner makes.
   wrapping as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 17. Changes from revision 59
+## 18. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -1609,7 +1838,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 18. Changes from revision 58
+## 19. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -1627,7 +1856,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 19. Changes from revision 57
+## 20. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -1714,7 +1943,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 20. Changes from revision 56
+## 21. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -1733,7 +1962,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 21. Changes from revision 55
+## 22. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -1757,7 +1986,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 22. Changes from revision 54
+## 23. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -1772,7 +2001,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 23. Changes from revision 53
+## 24. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -1807,7 +2036,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 24. Changes from revision 52
+## 25. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -1823,7 +2052,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 25. Changes from revision 51
+## 26. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -1845,7 +2074,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 26. Changes from revision 50
+## 27. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -1855,7 +2084,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 27. Changes from revision 49
+## 28. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -1864,14 +2093,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 28. Changes from revision 48
+## 29. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 29. Changes from revision 47
+## 30. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -1881,7 +2110,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 30. Changes from revision 46
+## 31. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -1890,7 +2119,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 31. Changes from revision 45
+## 32. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -1900,7 +2129,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 32. Changes from revision 44
+## 33. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -1909,7 +2138,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 33. Changes from revision 43
+## 34. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -1918,7 +2147,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 34. Changes from revision 42
+## 35. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -1929,7 +2158,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 35. Changes from revision 41
+## 36. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -1938,21 +2167,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 36. Changes from revision 40
+## 37. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 37. Changes from revision 39
+## 38. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 38. Changes from revision 38
+## 39. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -1960,7 +2189,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 39. Changes from revision 37
+## 40. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -1969,7 +2198,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 40. Changes from revision 36
+## 41. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -1980,7 +2209,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 41. Changes from revision 35
+## 42. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -1993,7 +2222,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 42. Changes from revision 34
+## 43. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -2006,7 +2235,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 43. Changes from revision 33
+## 44. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -2022,7 +2251,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 44. Changes from revision 32
+## 45. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -2040,7 +2269,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 45. Changes from revision 31
+## 46. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -2059,7 +2288,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 46. Changes from revision 30
+## 47. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -2080,7 +2309,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 47. Changes from revision 29
+## 48. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -2101,7 +2330,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 48. Changes from revision 28
+## 49. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -2118,7 +2347,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 49. Changes from revision 27
+## 50. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -2140,7 +2369,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 50. Changes from revision 26
+## 51. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

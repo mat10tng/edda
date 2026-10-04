@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 63).
+# Edda keyword registry, generated from language/reference.md (revision 64).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, fixed name, checker rule and read-view
 # sentence kind, with what it means, why it exists and where it comes
@@ -239,6 +239,22 @@ keys:
     section: 'Examples'
     means: 'inside with:, a spec_file''s folder under fixtures/'
     why: 'the binding reads them'
+  - key: 'target:'
+    section: 'Level 2: links and binding'
+    means: 'the code''s stack; python is the one known'
+    why: 'the naming rule and the markers are per stack'
+  - key: 'rule:'
+    section: 'Level 2: links and binding'
+    means: 'the naming rule; same_name: an operation''s function is the covered top-level function of its snake_case name'
+    why: 'most operations need no line in a .links'
+  - key: 'covers:'
+    section: 'Level 2: links and binding'
+    means: 'the code files the link check reads, each a .py file relative to the folder above the project folder (the repository, for specs/)'
+    why: 'markers are read, and code no story reaches is flagged, only there'
+  - key: 'links:'
+    section: 'Level 2: links and binding'
+    means: 'in an <entity>.links: operation name to "path::function", a top-level function in a covered file, or to NOT_BUILT'
+    why: 'the operations that do not follow the rule'
   - key: 'story:'
     section: 'Versions and approval'
     means: 'which story this is a version of; exactly one of story:, entity: and role:'
@@ -458,6 +474,15 @@ refusals:
   - rule: 'bad_snapshot'
     when: 'a version''s text that is not already normalised, is outside the subset of section 2 or fails the shape layer (a bad name, a wrong key, a duplicate; a retired key of section 10 is not wrong here), does not read as one block under the version''s name, or does not name it on its first line'
     message: 'text of <kind> <name> v<n> is not a normalised block'
+  - rule: 'unknown_link'
+    when: 'a .links naming no known target or rule, no .py file, a file Python cannot read, no .edda beside it, no operation of that file or a file it does not cover; an exception written neither "path::function" nor NOT_BUILT; a marker naming no story'
+    message: 'unknown target: <x>, unknown naming rule: <x>, no such Python file: <path>, not Python (<reason>): <path>, no such file: <entity>.edda, unknown operation: <name>, not a covered file: <path>, not a link (write "path::function" or NOT_BUILT): <text>, unknown story: <id>'
+  - rule: 'no_function'
+    when: 'an operation that resolves to no function or to two: an exception naming a function its file does not have; by the rule, no covered file, or more than one, with a top-level function of its name'
+    message: 'no function <function> in <path>[, replaced by <how> at line <m>], no function <operation> for <id> in the covered files[ (<path>::<operation>, replaced by <how> at line <m>)], two functions for <operation> of <id>: <path>::<function>, ...; name one in <entity>.links'
+  - rule: 'bad_marker'
+    when: 'a comment that starts like a marker but is not # <STORY-ID>@<n>; a marker not on a line of its own directly above a top-level function; a version its story does not have; one story twice on one function; a marker above a function doing none of its story''s operations; a function doing an operation without its story''s marker; a marker on a def that a later binding of its name replaces, one every import runs: a direct top-level statement, or in a branch proven to run (section 9)'
+    message: 'not a marker (write # <STORY-ID>@<version>): <text>, a marker is a line of its own directly above a function: <text>, <function> at line <n> is replaced by a def, a class or a binding at line <m>, so the marker is on code that does not run: <text>, <id> has no version <n>, marked twice: <id> on <function>, <function> does no operation of <id>, <function> does <operation> of <id> and carries no # <id>@<version>'
 
 flags:
   - rule: 'unreachable_choice'
@@ -472,6 +497,18 @@ flags:
   - rule: 'wording_drift'
     when: 'section 10'
     message: '<id> <operation>: <side> changed, <other> did not'
+  - rule: 'stale_link'
+    when: 'a marker whose version is behind its story''s newest approved version'
+    message: '<id>@<n> is behind its approved v<m>'
+  - rule: 'unapproved_link'
+    when: 'a marker of a story with no approved version yet'
+    message: '<id> has no approved version yet'
+  - rule: 'maybe_replaced'
+    when: 'a marker on a def that a later binding of its name may replace on some imports: one nested in a branch of any compound statement not proven to run (with, if, try, for, while, match), or in an operand that may not be evaluated (section 9)'
+    message: '<function> at line <n> may be replaced by a def, a class or a binding at line <m>, which not every import runs: <text>'
+  - rule: 'no_story'
+    when: 'a top-level function or class of a covered file that no linked function reaches (section 9)'
+    message: 'no linked function reaches <name>'
 
 sentences:
   - kind: 'story'
@@ -481,7 +518,7 @@ sentences:
   - kind: 'operation'
     template: '<Name> <is-sentence>.'
   - kind: 'permission'
-    template: 'A <role> [whose <actor condition>] may <name> <inputs> [while <state condition>].; the condition is split only at its top-level and: the parts that mention ACTOR go after "whose", the rest after "while"; a condition whose top is not and stays whole, after "whose" if it mentions ACTOR, else after "while"; an input reads as its type with "a" or "an" when its name is its type (order: order reads "an order"), else <name>, a <type>'
+    template: 'A <role> [whose <actor condition>] may <name> <inputs> [while <state condition>][, if <other actor condition>].; the condition is split only at its top-level and: a part that compares a property of ACTOR (its left side starts with ACTOR.) goes after "whose", any other part that mentions ACTOR (any, all, not, a call, an or, ...) after ", if", the rest after "while"; a condition whose top is not and is one part; an input reads as its type with "a" or "an" when its name is its type (order: order reads "an order"), else <name>, a <type>'
   - kind: 'refusal'
     template: 'If <name> is asked for <an input> whose <condition>, then the system shall refuse it: <reason>. when every left side starts with that input''s name, which is then dropped; otherwise If <name> is asked and <condition>, then ...'
   - kind: 'outcome'

@@ -5,7 +5,8 @@
 
 EDDA-001 runs through the binding against the real checker and its
 examples pass; against a checker that moves one problem's line it is
-failing, on the example and the then line that state the line. A small
+failing, on the example and the then line that state the line. EDDA-003
+passes too, and fails when notes come back out of order. A small
 project of its own shows a known failure is kept when a later fact has no
 binding, ACTOR and RESULT stay across a step without a call, and with:
 values name a given only where an entity or actor is declared, and a bad
@@ -1366,6 +1367,19 @@ class RunTest(unittest.TestCase):
         self.assertEqual(detail, "1 of 26 examples failed")
         self.assertEqual(failed, [("an unknown key is refused",
                                    [(os.path.relpath(os.path.join(SPECS, "spec_file.edda")) + ":152", "RESULT[0].line == 33", "RESULT[0].line is 34")])])
+
+    def test_real_checker_passes_edda_003(self):
+        sid, status, detail, failed = story(run.run(SPECS, ["EDDA-003"]), "EDDA-003")
+        self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
+
+    def test_notes_out_of_order_fail_edda_003(self):
+        real = binding.checker.notes
+        binding.checker.notes = lambda paths: sorted(real(paths), key=lambda n: n["line"])
+        try:
+            sid, status, detail, failed = story(run.run(SPECS, ["EDDA-003"]), "EDDA-003")
+        finally:
+            binding.checker.notes = real
+        self.assertEqual((status, detail), ("failing", "1 of 1 examples failed"))
 
     def test_actor_without_an_allowed_role_is_refused(self):
         run.run(SPECS, ["EDDA-001"])            # loads the operations as written

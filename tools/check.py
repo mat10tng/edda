@@ -7,9 +7,11 @@ type-phrase grammar, the Python expression whitelist (7.1) with types
 from literals and declarations, operation signatures and ordering
 (meaning), and the version
 sequence, the pins and the snapshots of a .edda.vc (history), then the
-flags of a .edda that passed them. A partial checker: the running of
-examples is not here. Each folder (specs/, one fixture folder) is one project."""
-import ast, copy, datetime, glob, json, os, re, sys
+flags of a .edda that passed them; then, in a project with a
+glossary.links, the links from each operation to the code (section 9).
+A partial checker: the running of examples is not here. Each folder
+(specs/, one fixture folder) is one project."""
+import ast, copy, datetime, glob, io, json, os, re, sys, tokenize
 import yaml
 from jsonschema import Draft202012Validator
 
@@ -1908,6 +1910,7 @@ def flag_problems(data, stem, P, source):
     return sorted(set(out), key=lambda p: (p[1], p[0]))
 
 
+# EDDA-006@0
 def changes(old, new):
     """story.changes (section 11): the walk over the newest version's text
     and the current text; (kind, line, sentence), line counted from 1 at the
@@ -1928,6 +1931,26 @@ def changes(old, new):
             out.append(("added", j + 1, b[j]))
             j += 1
     return out
+
+
+# EDDA-003@0
+def notes(paths):
+    """spec_file.notes over several files (section 11, EDDA-003): every note
+    under a story, an operation or an example of each .edda path, as
+    {text, path, story_id, line}, ordered by text, then the file's name,
+    then line. A path whose folder does not check has no model: ValueError"""
+    out = []
+    for path in paths:
+        folder, fname = os.path.split(path)
+        if refused(folder):
+            raise ValueError(f"{fname} does not check, so it has no notes")
+        model = model_of(folder)
+        stories = [st for st in model["stories"] if st["file"] == fname]
+        parts = [(st["id"], x) for st in stories for x in [st] + st["examples"]]
+        parts += [(op["story"], op) for op in model["operations"] if op["story"] in {st["id"] for st in stories}]
+        out += [{"text": t, "path": path, "story_id": sid, "line": line}
+                for sid, x in parts for t, line in zip(x["notes"], x["note_lines"])]
+    return sorted(out, key=lambda n: (n["text"], os.path.basename(n["path"])[:-len(".edda")], n["line"]))
 
 
 def pins_stale(version, P):
@@ -1966,15 +1989,17 @@ def statuses(data, P, source):
                    changes(old, current) if story else [])
 
 
-def status_lines(data, P, source):
+def status_lines(data, P, source, linked=None):
     """the status of every role, entity and story of a .edda that checks,
     its history included (section 11): approved or draft with its version,
     pins stale on an approved story, and under a story with a version its
-    changes"""
+    changes; then the story's link line, when the link layer gave one"""
     out = []
     for kind, name, _, ok, n, stale, ch in statuses(data, P, source):
         out.append(f"{kind} {name}: {'approved' if ok else 'draft'} v{n}" + (", pins stale" if stale else ""))
         out += [f"  {'-' if k == 'removed' else '+'} {line}: {s}" for k, line, s in ch]
+        if kind == "story" and linked and name in linked:
+            out.append(linked[name])
     return out
 
 
@@ -1994,6 +2019,7 @@ def load(path):
     return source, data
 
 
+# EDDA-001@3
 def check(path, P):
     """returns (source, shape, meaning, history, flags): lists of (rule,
     line, message); history and flags are the fourth layer of section 11,
@@ -2040,6 +2066,603 @@ def project_of(folder):
         if isinstance(data, list) and not schema_problems(VC, VC_SCHEMA, data, source):
             histories.append((os.path.basename(path)[:-8], data))
     return Project(files, histories)
+
+
+# --- links (sections 9 and 11) ---------------------------------------------------
+# A project with a glossary.links names its code target, its naming rule and
+# the code files it covers; an <entity>.links lists the operations that do
+# not follow the rule; the code carries # <STORY-ID>@<version> directly above
+# the function doing an operation. Read after the four layers, when they
+# refused nothing.
+
+LINK_TARGETS = {"python"}
+LINK_RULES = {"same_name"}      # the operation's snake_case name is the function's name
+NOT_BUILT = "NOT_BUILT"         # an operation no code does yet
+GLOSSARY_LINKS_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["target", "rule", "covers"],
+    "properties": {"target": {"type": "string", "minLength": 1}, "rule": {"type": "string", "minLength": 1},
+                   "covers": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}}
+ENTITY_LINKS_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["links"],
+    "properties": {"links": {"type": "object", "propertyNames": {"pattern": f"^{NAME}$"},
+                             "additionalProperties": {"type": "string", "minLength": 1}}}}
+GLOSSARY_LINKS = Draft202012Validator(GLOSSARY_LINKS_SCHEMA)
+ENTITY_LINKS = Draft202012Validator(ENTITY_LINKS_SCHEMA)
+LOOKS_LIKE_MARKER = re.compile(r"#\s*[A-Z][A-Z0-9]*-[0-9]+\s*@")
+MARKER = re.compile(r"# ([A-Z][A-Z0-9]*-[0-9]+)@([0-9]+)")
+LINK = re.compile(r"([^:]+)::([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def read_links(path, validator, schema):
+    """(source, data, refusals) of a .links file: the source layer, the
+    quoting rule (a path quoted, a name and NOT_BUILT plain) and the shape
+    layer"""
+    source, data = load(path)
+    if source.src:
+        return source, None, sorted(set(source.src), key=lambda p: (p[1], p[0]))
+    out = list(source.style) + [("declared_twice", ln, f"declared twice: {k}") for k, ln in source.duplicates]
+    out += schema_problems(validator, schema, data, source)
+    for where, style in source.styles.items():
+        key = where[0] if where else ""
+        if key in ("target", "rule") and len(where) == 1 and style == '"':
+            out.append(("bad_name", source.line(where, False), f'not a name: "{source.raw[where]}" (a name is plain)'))
+        is_path = key == "covers" or key == "links" and source.raw[where] != NOT_BUILT
+        if is_path and len(where) == 2 and style is None:
+            out.append(("unquoted_text", source.line(where, False), "quote the path; an unquoted # drops the rest of the line"))
+    return source, data, sorted(set(out), key=lambda p: (p[1], p[0]))
+
+
+def is_main_block(n):
+    """if __name__ == "__main__": (either operand order) at the top level:
+    its body is the command line, which an import does not run"""
+    t = n.test if isinstance(n, ast.If) else None
+    if not (isinstance(t, ast.Compare) and len(t.ops) == 1 and isinstance(t.ops[0], ast.Eq)):
+        return False
+    pair = [t.left, t.comparators[0]]
+    return (any(isinstance(x, ast.Name) and x.id == "__name__" for x in pair)
+            and any(isinstance(x, ast.Constant) and x.value == "__main__" for x in pair))
+
+
+BRANCH = tuple(getattr(ast, k) for k in ("stmt", "excepthandler", "match_case") if hasattr(ast, k))
+
+
+def branch_taken(test):
+    """True or False when an if's test is known before the module runs: a
+    constant, TYPE_CHECKING (bare or typing.TYPE_CHECKING, False when the
+    code runs), or not of one of those; None otherwise"""
+    if isinstance(test, ast.Constant):
+        return bool(test.value)
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING" or \
+            isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING":
+        return False
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = branch_taken(test.operand)
+        return None if inner is None else not inner
+    return None
+
+
+FUNCTION = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def import_time(statements, lazy):
+    """every node Python evaluates when these top-level statements run:
+    all of them, the whole of each class body too, except the body of a
+    function or lambda, which waits until it is called. Of a def it
+    keeps the decorators, the default values and the annotations; of a
+    lambda the default values. lazy (from __future__ import annotations)
+    defers every annotation"""
+    out, todo = [], list(statements)
+    while todo:
+        n = todo.pop()
+        if isinstance(n, FUNCTION):
+            a = n.args
+            todo += a.defaults + [d for d in a.kw_defaults if d is not None]
+            if not isinstance(n, ast.Lambda):
+                todo += n.decorator_list
+                if not lazy:
+                    args = a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg]
+                    todo += [x.annotation for x in args if x is not None and x.annotation is not None]
+                    todo += [n.returns] if n.returns is not None else []
+            continue
+        if isinstance(n, ast.AnnAssign) and lazy:
+            todo += [n.target] + ([n.value] if n.value is not None else [])
+            continue
+        out.append(n)
+        todo += ast.iter_child_nodes(n)
+    return out
+
+
+class CodeFile:
+    """one covered Python file: its top-level functions and classes (the
+    units), its markers, the statements an import runs, and what it
+    imports of the other covered files"""
+
+    def __init__(self, shown, path):
+        self.shown = shown
+        text = open(path).read()
+        self.tree = ast.parse(text, filename=shown)
+        self.units = {}             # name -> (line of the def, node), the def in force
+        self.first = {}             # first line of a top-level function (a decorator's or the def's) -> its node
+        for n in self.tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                self.units[n.name] = (n.lineno, n)
+                if not isinstance(n, ast.ClassDef):
+                    self.first[min([n.lineno] + [d.lineno for d in n.decorator_list])] = n
+        # what an import runs: every top-level statement, of the command line
+        # block only its else branch
+        self.runs = [x for n in self.tree.body for x in (n.orelse if is_main_block(n) else [n])]
+        lazy = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
+                   and any(a.name == "annotations" for a in n.names) for n in self.tree.body)
+        self.top = import_time(self.runs, lazy)     # every node an import evaluates
+        self.bound = []             # (line, name, node or None, sure, import) of every top-level binding an import runs
+        for n in self.runs:
+            self.bound += self.bindings(n, True)
+        self.functions = {n.name for n in self.first.values() if self.replaced(n) is None}
+        lines = text.splitlines()
+        self.comments = [(t.start[0], t.string.rstrip(), lines[t.start[0] - 1].strip() == t.string.strip())
+                         for t in tokenize.generate_tokens(io.StringIO(text).readline) if t.type == tokenize.COMMENT]
+
+    def bindings(self, n, sure):
+        """(line, name, node or None, sure, import) of each name statement n
+        binds in the module: a def or class (its node), an import (its
+        (statement, alias)), an assignment (a bare annotation binds
+        nothing), a for, with or except target, a match capture, a del, a
+        walrus; into every compound statement and expression, never into a
+        def, class or lambda body, and of a comprehension only its walrus
+        targets. sure when it runs on every import that runs n: a direct
+        statement of n, or inside a branch proven to run (an if's body
+        when its test is a true constant, its else when a false one or
+        TYPE_CHECKING, a try's finally, the first match case when it is
+        unguarded and catches all). Any other branch, of any compound
+        statement (with, if, try, except, else, for, while, match, or a
+        form Python adds later), or a short-circuit operand (the right of
+        and/or, the arms of x if c else y), may be skipped: not sure. A
+        branch that never runs binds nothing"""
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return [(n.lineno, n.name, n, sure, None)]
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            return [(n.lineno, (a.asname or a.name).split(".")[0], None, sure, (n, a)) for a in n.names if a.name != "*"]
+        if isinstance(n, ast.Lambda):
+            return []
+        if isinstance(n, ast.AnnAssign) and n.value is None:
+            return []
+
+        def each(nodes, s):
+            return [b for x in nodes for b in self.bindings(x, s)]
+        if isinstance(n, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            # its own targets are local; a walrus in it binds the module's
+            # name, on some runs only
+            parts = [getattr(n, f) for f in ("elt", "key", "value") if hasattr(n, f)]
+            return each(parts + [i for g in n.generators for i in g.ifs], False)
+        if isinstance(n, ast.BoolOp):
+            return each(n.values[:1], sure) + each(n.values[1:], False)
+        if isinstance(n, ast.IfExp):
+            return each([n.test], sure) + each([n.body, n.orelse], False)
+        if isinstance(n, ast.If):
+            test = branch_taken(n.test)
+            return (each([n.test], sure) + (each(n.body, sure and test is True) if test is not False else [])
+                    + (each(n.orelse, sure and test is False) if test is not True else []))
+        if isinstance(n, ast.Try) or type(n).__name__ == "TryStar":
+            return each(n.body + n.handlers + n.orelse, False) + each(n.finalbody, sure)
+        if type(n).__name__ == "Match":
+            return each([n.subject], sure) + [b for i, c in enumerate(n.cases) for b in each(
+                [c.pattern] + ([c.guard] if c.guard else []) + c.body,
+                sure and i == 0 and c.guard is None and type(c.pattern).__name__ == "MatchAs"
+                and c.pattern.pattern is None)]
+        if isinstance(n, ast.stmt) and any(isinstance(v, list) and any(isinstance(x, BRANCH) for x in v)
+                                           for _, v in ast.iter_fields(n)):
+            # any other compound statement: its header (a with's items, a
+            # while's test, a for's iterable) runs, its branches may not; a
+            # for's target is bound only when it loops
+            out = []
+            for field, v in ast.iter_fields(n):
+                skipped = isinstance(v, list) and any(isinstance(x, BRANCH) for x in v) or \
+                    field == "target" and isinstance(n, (ast.For, ast.AsyncFor))
+                out += each([x for x in (v if isinstance(v, list) else [v]) if isinstance(x, ast.AST)],
+                            sure and not skipped)
+            return out
+        out = []
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            out.append((n.lineno, n.id, None, sure, None))
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            out.append((n.lineno, n.name, None, sure, None))
+        elif type(n).__name__ in ("MatchAs", "MatchStar") and n.name:
+            out.append((n.lineno, n.name, None, sure, None))
+        elif type(n).__name__ == "MatchMapping" and n.rest:
+            out.append((n.lineno, n.rest, None, sure, None))
+        for child in ast.iter_child_nodes(n):
+            out += self.bindings(child, sure)
+        return out
+
+    def later(self, node, sure):
+        """(line, how) of the first binding of node's name after node that an
+        import runs, sure or not as asked; None when there is none"""
+        found = [(line, x) for line, name, x, s, _ in self.bound if name == node.name and line > node.lineno and s == sure]
+        if not found:
+            return None
+        line, x = min(found, key=lambda b: b[0])
+        return line, "a def" if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)) else \
+            "a class" if isinstance(x, ast.ClassDef) else "a binding"
+
+    def replaced(self, node):
+        """(line, how) of the first binding of node's name after node that
+        every import runs, so the name no longer means node once the module
+        has loaded; None when node is in force"""
+        return self.later(node, True)
+
+    def maybe_replaced(self, node):
+        """(line, how) of the first binding of node's name after node that
+        only some imports run (in an if, try, loop or match case), before
+        any that replaces node; None otherwise"""
+        maybe, sure = self.later(node, False), self.replaced(node)
+        return maybe if maybe and not (sure and sure[0] < maybe[0]) else None
+
+    def gone(self, name):
+        """", replaced by <how> at line <n>" when a top-level def of name is
+        replaced before the module has loaded; "" otherwise"""
+        out = [self.replaced(n) for n in self.first.values() if n.name == name]
+        out = [r for r in out if r]
+        return f", replaced by {out[-1][1]} at line {out[-1][0]}" if out else ""
+
+    def markers(self):
+        """(line, text, function node or None) for every comment that starts
+        like a marker; the function is the top-level one it stands directly
+        above, through the markers right below it; None when it stands
+        elsewhere"""
+        alone = {line for line, text, own in self.comments if own and LOOKS_LIKE_MARKER.match(text)}
+        out = []
+        for line, text, own in self.comments:
+            if LOOKS_LIKE_MARKER.match(text):
+                below = line + 1
+                while below in alone:
+                    below += 1
+                out.append((line, text, self.first.get(below) if own else None))
+        return out
+
+    def modules(self, name, level, codes):
+        """the covered files a module stands for: relative (level 1 or more),
+        from this file's folder; absolute, every covered file whose path
+        ends in the module's path. A package is its __init__.py"""
+        parts = name.split(".") if name else []
+        if level:
+            d = os.path.dirname(self.shown)
+            for _ in range(level - 1):
+                d = os.path.dirname(d)
+            ends = [os.path.normpath(os.path.join(d, *parts, "__init__.py"))]
+            if parts:
+                ends.append(os.path.normpath(os.path.join(d, *parts) + ".py"))
+            return [s for s in codes if s in ends]
+        ends = [os.path.join(*parts, "__init__.py"), os.path.join(*parts) + ".py"] if parts else []
+        return [s for s in codes if any(s == e or s.endswith(os.sep + e) for e in ends)]
+
+
+class Names:
+    """the top-level names of the covered files, each resolved to what it
+    stands for: ("unit", file, name), a top-level def or class of a
+    covered file; ("module", file), a covered module; ("path", "a.b"), the
+    module a.b of import a.b.c, covered or not, which a dotted name may go
+    on through. Anything else (an assignment, a loop target, an import of
+    uncovered code) stands for nothing. A name takes its bindings in line
+    order: one every import runs replaces what came before, one only some
+    imports run adds to it. Through imports, re-exports and module
+    aliases, each (file, name) once per lookup, so a loop ends"""
+
+    def __init__(self, codes):
+        self.codes = codes
+        self.by_name = {f: {} for f in codes}       # file -> name -> its bindings, in line order
+        for f, c in codes.items():
+            for b in sorted(c.bound, key=lambda b: b[0]):
+                self.by_name[f].setdefault(b[1], []).append(b)
+
+    def name(self, f, name, through, before=None, stack=frozenset()):
+        """what name stands for in f once f has loaded, or just before line
+        before; every covered file an import went through is added to
+        through"""
+        if (f, name) in stack:
+            return set()
+        stack = stack | {(f, name)}
+        out = set()
+        for line, _, node, sure, imp in self.by_name[f].get(name, []):
+            if before is not None and line >= before:
+                break
+            got = self.binding(f, name, node, imp, through, stack)
+            out = got if sure else out | got
+        return out
+
+    def modules(self, f, dotted, level, through):
+        found = {("module", m) for m in self.codes[f].modules(dotted, level, self.codes)}
+        through |= {m for _, m in found}
+        return found
+
+    def imported(self, f, n, through):
+        """add to through every covered module import statement n runs,
+        whether or not its name is used: each package along the dotted
+        path (import a.b.c runs a, a.b and a.b.c), and of a from-import
+        each name that is a submodule"""
+        if isinstance(n, ast.Import):
+            paths = [(a.name, 0) for a in n.names]
+        else:
+            paths = [(n.module or "", n.level)] + [
+                (".".join(filter(None, [n.module, a.name])), n.level) for a in n.names if a.name != "*"]
+        for dotted, level in paths:
+            parts = dotted.split(".") if dotted else []
+            for i in range(0 if level else 1, len(parts) + 1):
+                self.modules(f, ".".join(parts[:i]), level, through)
+
+    def binding(self, f, name, node, imp, through, stack):
+        if node is not None:
+            return {("unit", f, name)} if self.codes[f].units.get(name, (0, None))[1] is node else set()
+        if imp is None:
+            return set()
+        n, a = imp
+        if isinstance(n, ast.Import):
+            # import a.b binds a; import a.b as m binds m to a.b
+            dotted = a.name if a.asname else a.name.split(".")[0]
+            return {("path", dotted)} | self.modules(f, dotted, 0, through)
+        full = ".".join(filter(None, [n.module, a.name]))
+        out = self.modules(f, full, n.level, through) | ({("path", full)} if not n.level else set())
+        for _, m in self.modules(f, n.module, n.level, through):
+            out |= self.name(m, a.name, through, stack=stack)
+        return out
+
+    def attribute(self, f, targets, attr, through, stack=frozenset()):
+        """what .attr of each target stands for: a module's top-level name
+        or submodule, a path's longer path"""
+        out = set()
+        for t in targets:
+            if t[0] == "module":
+                out |= self.name(t[1], attr, through, stack=stack)
+                if t[1].endswith("__init__.py"):
+                    d = os.path.dirname(t[1])
+                    subs = {os.path.join(d, attr, "__init__.py"), os.path.join(d, attr) + ".py"}
+                    out |= {("module", m) for m in self.codes if m in subs}
+                    through |= {m for m in self.codes if m in subs}
+            elif t[0] == "path":
+                out |= {("path", f"{t[1]}.{attr}")} | self.modules(f, f"{t[1]}.{attr}", 0, through)
+        return out
+
+    def local(self, f, nodes, through):
+        """name -> what it stands for, of every import inside a def or
+        class body among nodes (each node, not walked into); it adds to
+        the module's name, erring toward reached"""
+        out = {}
+        for n in nodes:
+            if isinstance(n, (ast.Import, ast.ImportFrom)) and n not in self.codes[f].tree.body:
+                for a in n.names:
+                    if a.name != "*":
+                        out.setdefault((a.asname or a.name).split(".")[0], set()).update(
+                            self.binding(f, None, None, (n, a), through, frozenset()))
+        return out
+
+    def expr(self, f, n, through, before=None, local=None):
+        """what a name or a dotted name stands for in f, with local names
+        added"""
+        if isinstance(n, ast.Name):
+            return self.name(f, n.id, through, before) | (local or {}).get(n.id, set())
+        if isinstance(n, ast.Attribute):
+            return self.attribute(f, self.expr(f, n.value, through, before, local), n.attr, through)
+        return set()
+
+
+def units_reached(roots, codes):
+    """the (file, unit) pairs the roots reach. A unit reaches what each
+    name or dotted name in its body stands for once its module has loaded
+    (Names): a unit of its own file, or one of another covered file
+    through imports, re-exports and module aliases (m.f after import a.b
+    as m, a.b.f after import a.b, f after from m import f, relative or
+    not); called or passed, both count. A reached unit's file's top level
+    runs on import, and so does that of every covered file an import went
+    through and of every covered module an import in its code runs (each
+    package along the dotted path, a from-import's submodules), used or
+    not, in a branch or not, so what Python evaluates then (import_time:
+    decorators, default values, annotations, bases, class bodies, all but
+    function and lambda bodies) reaches what it names too (as bound at
+    that line, or once loaded), the body of the command line block (if
+    __name__ == "__main__":) left out. An import inside a def or class
+    body adds to the name it binds there"""
+    names = Names(codes)
+
+    def named(nodes, f, top=False):
+        """what nodes (a unit's whole node walked; with top, the file's
+        import-time nodes as they are) name, and the files they run"""
+        nodes = nodes if top else [n for node in nodes for n in ast.walk(node)]
+        through, out = set(), []
+        local = names.local(f, nodes, through)
+        for n in nodes:
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                names.imported(f, n, through)
+            if isinstance(n, (ast.Name, ast.Attribute)):
+                got = names.expr(f, n, through, local=local)
+                if top:
+                    got |= names.expr(f, n, through, n.lineno, local)
+                out += [(t[1], t[2]) for t in got if t[0] == "unit"]
+        return out, through
+
+    seen, files, todo = set(), set(), list(roots)
+
+    def run(f):
+        """f's top level runs on import"""
+        if f not in files:
+            files.add(f)
+            found, through = named(codes[f].top, f, True)
+            todo.extend(found)
+            for g in through:
+                run(g)
+
+    while todo:
+        f, name = todo.pop()
+        if (f, name) in seen or name not in codes[f].units:
+            continue
+        seen.add((f, name))
+        found, through = named([codes[f].units[name][1]], f)
+        todo.extend(found)
+        for g in through | {f}:
+            run(g)
+    return seen
+
+
+def links_of(folder, P):
+    """the link layer of a project whose four layers refused nothing: None
+    without a glossary.links; otherwise (files, linked): files, every .links
+    file, then every covered code file, each (shown name, refusals, flags);
+    linked, story id -> its link line, None when anything was refused"""
+    gpath = os.path.join(folder, "glossary.links")
+    if not os.path.exists(gpath):
+        return None
+    base = os.path.dirname(folder)
+    shown_folder = os.path.relpath(folder, base)
+    paths = [gpath] + sorted(p for p in glob.glob(f"{folder}/*.links") if p != gpath)
+    found = {os.path.join(shown_folder, os.path.basename(p)): [] for p in paths}    # shown name -> refusals
+    flags = {}                                                                      # shown name -> flags
+    gshown = os.path.join(shown_folder, "glossary.links")
+    codes = {}                        # shown path -> CodeFile, in covers order
+
+    def files_out():
+        return [(n, sorted(set(found.get(n, [])), key=lambda p: (p[1], p[0])),
+                 sorted(set(flags.get(n, [])), key=lambda p: (p[1], p[0]))) for n in list(found)]
+
+    gsource, glossary, found[gshown] = read_links(gpath, GLOSSARY_LINKS, GLOSSARY_LINKS_SCHEMA)
+    if found[gshown]:
+        return files_out(), None
+    for key, known, what in (("target", LINK_TARGETS, "target"), ("rule", LINK_RULES, "naming rule")):
+        if glossary[key] not in known:
+            found[gshown].append(("unknown_link", gsource.line((key,), False), f"unknown {what}: {glossary[key]}"))
+    for i, p in enumerate(glossary["covers"]):
+        shown = os.path.normpath(p)
+        full = os.path.join(base, shown)
+        line = gsource.line(("covers", i))
+        if shown in codes:
+            found[gshown].append(("declared_twice", line, f"declared twice: {p}"))
+        elif os.path.isabs(p) or shown.split(os.sep)[0] == ".." or not shown.endswith(".py") or not os.path.isfile(full):
+            found[gshown].append(("unknown_link", line, f"no such Python file: {p}"))
+        else:
+            try:
+                codes[shown] = CodeFile(shown, full)
+            except (SyntaxError, ValueError, tokenize.TokenError) as e:
+                found[gshown].append(("unknown_link", line, f"not Python ({str(e).splitlines()[0]}): {p}"))
+    if found[gshown]:
+        return files_out(), None
+    for shown in codes:
+        found[shown] = []
+
+    # the exceptions: operation -> (shown path, function), or NOT_BUILT
+    exceptions = {}
+    explicit = set()                  # every operation a .links line names, refused or not: no rule for it
+    for p in paths[1:]:
+        shown_l = os.path.join(shown_folder, os.path.basename(p))
+        source, data, found[shown_l] = read_links(p, ENTITY_LINKS, ENTITY_LINKS_SCHEMA)
+        stem = os.path.basename(p)[:-len(".links")]
+        if found[shown_l]:
+            links = data.get("links") if isinstance(data, dict) else None
+            explicit.update(op for op in (links if isinstance(links, dict) else ())
+                            if op in P.operations and P.operations[op]["file"] == stem)
+            continue
+        if stem not in P.files:
+            found[shown_l].append(("unknown_link", 1, f"no such file: {stem}.edda"))
+            continue
+        for op, target in data["links"].items():
+            line = source.line(("links", op))
+            m = LINK.fullmatch(target)
+            shown = m and os.path.normpath(m.group(1))
+            if op not in P.operations or P.operations[op]["file"] != stem:
+                found[shown_l].append(("unknown_link", line, f"unknown operation: {op}"))
+                continue
+            explicit.add(op)
+            if target == NOT_BUILT and source.styles.get(("links", op)) is None:
+                exceptions[op] = NOT_BUILT
+            elif not m:
+                found[shown_l].append(("unknown_link", line, f'not a link (write "path::function" or {NOT_BUILT}): {target}'))
+            elif shown not in codes:
+                found[shown_l].append(("unknown_link", line, f"not a covered file: {m.group(1)}"))
+            elif m.group(2) not in codes[shown].functions:
+                found[shown_l].append(("no_function", line, f"no function {m.group(2)} in {m.group(1)}"
+                                                            f"{codes[shown].gone(m.group(2))}"))
+            else:
+                exceptions[op] = (shown, m.group(2))
+
+    # every operation to exactly one function: its exception, or by the rule
+    rule_line = gsource.line(("rule",), False)
+    done_by = dict(exceptions)        # operation -> (shown path, function), or NOT_BUILT
+    for op, o in P.operations.items():
+        if op in explicit:
+            continue
+        hits = [(shown, op) for shown, c in codes.items() if op in c.functions]
+        if len(hits) == 1:
+            done_by[op] = hits[0]
+        elif not hits:
+            gone = "".join(f" ({s}::{op}{c.gone(op)})" for s, c in codes.items() if c.gone(op))
+            found[gshown].append(("no_function", rule_line, f"no function {op} for {o['story']} in the covered files{gone}"))
+        else:
+            where = ", ".join(f"{s}::{f}" for s, f in hits)
+            found[gshown].append(("no_function", rule_line,
+                                  f"two functions for {op} of {o['story']}: {where}; name one in {o['file']}.links"))
+
+    # the markers, both ways: each names a story at a version it has, above
+    # a function doing an operation of it; each such function carries one
+    def newest(sid):
+        return len(P.versions.get(("story", sid), ()))
+
+    def ops_of(sid):
+        return [op for op, o in P.operations.items() if o["story"] == sid]
+    marked = set()                    # (shown path, function, story)
+    for shown, c in codes.items():
+        for line, text, node in c.markers():
+            m = MARKER.fullmatch(text)
+            sid, n = (m.group(1), int(m.group(2))) if m else (None, None)
+            fn = node and node.name
+            gone = node and c.replaced(node)
+            before = len(found[shown])
+            if not m:
+                found[shown].append(("bad_marker", line, f"not a marker (write # <STORY-ID>@<version>): {text}"))
+            elif fn is None:
+                found[shown].append(("bad_marker", line, f"a marker is a line of its own directly above a function: {text}"))
+            elif gone:
+                found[shown].append(("bad_marker", line, f"{fn} at line {node.lineno} is replaced by {gone[1]} "
+                                                         f"at line {gone[0]}, so the marker is on code that does not run: {text}"))
+            elif sid not in P.stories:
+                found[shown].append(("unknown_link", line, f"unknown story: {sid}"))
+            elif (shown, fn, sid) in marked:
+                found[shown].append(("bad_marker", line, f"marked twice: {sid} on {fn}"))
+            elif n > newest(sid):
+                found[shown].append(("bad_marker", line, f"{sid} has no version {n}"))
+            elif all(op in done_by for op in ops_of(sid)) and not any(done_by[op] == (shown, fn) for op in ops_of(sid)):
+                found[shown].append(("bad_marker", line, f"{fn} does no operation of {sid}"))
+            elif newest(sid) == 0:
+                flags.setdefault(shown, []).append(("unapproved_link", line, f"{sid} has no approved version yet"))
+            elif n < newest(sid):
+                flags.setdefault(shown, []).append(("stale_link", line, f"{sid}@{n} is behind its approved v{newest(sid)}"))
+            maybe = node and c.maybe_replaced(node)
+            if maybe and len(found[shown]) == before:
+                flags.setdefault(shown, []).append(("maybe_replaced", line, f"{fn} at line {node.lineno} may be replaced "
+                                                    f"by {maybe[1]} at line {maybe[0]}, which not every import runs: {text}"))
+            if m and fn is not None and not gone:
+                marked.add((shown, fn, sid))
+    for op, o in P.operations.items():
+        if isinstance(done_by.get(op), tuple) and done_by[op] + (o["story"],) not in marked:
+            shown, fn = done_by[op]
+            found[shown].append(("bad_marker", codes[shown].units[fn][0],
+                                 f"{fn} does {op} of {o['story']} and carries no # {o['story']}@<version>"))
+    if any(found.values()):
+        flags.clear()
+        return files_out(), None
+
+    # covered code no story reaches
+    reach = units_reached([t for t in done_by.values() if isinstance(t, tuple)], codes)
+    for shown, c in codes.items():
+        for name, (line, _) in c.units.items():
+            if (shown, name) not in reach:
+                flags.setdefault(shown, []).append(("no_story", line, f"no linked function reaches {name}"))
+    linked = {}
+    for sid in P.stories:
+        ops = ops_of(sid)
+        parts = [f"{op}: not built" if done_by[op] == NOT_BUILT else f"{op} -> {done_by[op][0]}::{done_by[op][1]}"
+                 for op in ops]
+        if not ops:
+            linked[sid] = f"{sid}: no operations to link"
+        else:
+            built = all(done_by[op] != NOT_BUILT for op in ops)
+            linked[sid] = f"{sid}: {'linked' if built else 'not linked'} ({', '.join(parts)})"
+    return files_out(), linked
 
 
 # --- the JSON model (section 9) ------------------------------------------------
@@ -2425,8 +3048,12 @@ def report(folder):
     checker's own run does for specs/; whether nothing was refused"""
     ok = True
     P = project_of(folder)
-    for path in sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc")):
-        src, shape, meaning, history, flags = check(path, P)
+    paths = sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc"))
+    found = {path: check(path, P) for path in paths}
+    L = None if any(any(r[:4]) for r in found.values()) else links_of(folder, P)
+    linked = L[1] if L else None
+    for path in paths:
+        src, shape, meaning, history, flags = found[path]
         problems = src + shape + meaning + history
         print(os.path.relpath(path, ROOT), "OK" if not problems else "")
         for rule, line, msg in problems:
@@ -2436,8 +3063,15 @@ def report(folder):
             print(f"    {line}: flagged: {rule}: {msg}")
         if not problems and not path.endswith(".vc") and not history_refused(path, P):
             source, data = load(path)
-            for s in status_lines(data, P, source):
+            for s in status_lines(data, P, source, linked):
                 print(f"    {s}")
+    for shown, problems, flags in (L[0] if L else []):
+        print(shown, "OK" if not problems else "")
+        for rule, line, msg in problems:
+            ok = False
+            print(f"    {line}: {rule}: {msg}")
+        for rule, line, msg in flags:
+            print(f"    {line}: flagged: {rule}: {msg}")
     return ok
 
 
@@ -2493,8 +3127,11 @@ if __name__ == "__main__":
     LAYERS = ("source", "shape", "meaning", "history")      # the fourth layer's refusals; its flags are "flagged"
     for folder in sorted(os.listdir(f"{ROOT}/fixtures")):
         FP = project_of(f"{ROOT}/fixtures/{folder}")
-        for path in sorted(glob.glob(f"{ROOT}/fixtures/{folder}/*")):
-            src, shape, meaning, history, flags = check(path, FP)
+        paths = sorted(glob.glob(f"{ROOT}/fixtures/{folder}/*.edda") + glob.glob(f"{ROOT}/fixtures/{folder}/*.edda.vc"))
+        found = {path: check(path, FP) for path in paths}
+        L = None if any(any(r[:4]) for r in found.values()) else links_of(f"{ROOT}/fixtures/{folder}", FP)
+        for path in paths:
+            src, shape, meaning, history, flags = found[path]
             refusals = src + shape + meaning + history
             caught = next((name for name, found in zip(LAYERS, (src, shape, meaning, history)) if found), None)
             label = ("caught by " + caught) if caught else ("flagged" if flags else "passes")
@@ -2505,6 +3142,12 @@ if __name__ == "__main__":
                 print(f"      {line}: flagged: {rule}: {msg}")
             if not refusals and not path.endswith(".vc") and not history_refused(path, FP):
                 source, data = load(path)
-                for s in status_lines(data, FP, source):
+                for s in status_lines(data, FP, source, L and L[1]):
                     print(f"      {s}")
+        for shown, refusals, flags in (L[0] if L else []):     # the link layer, after the four
+            print(f"  {shown}: " + ("caught by links" if refusals else "flagged" if flags else "passes"))
+            for rule, line, msg in refusals:
+                print(f"      {line}: {rule}: {msg}")
+            for rule, line, msg in flags:
+                print(f"      {line}: flagged: {rule}: {msg}")
     sys.exit(0 if ok else 1)

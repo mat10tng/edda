@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 63
+language/   reference.md    the language reference, revision 64
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -35,11 +35,16 @@ language/   reference.md    the language reference, revision 63
 specs/      *.edda          Edda's own stories, YAML, one file per entity
             *.edda.vc       approved versions, append-only; the blocks
                             so far, the stories still drafts
+            glossary.links  the code target, the naming rule and the
+                            tools the link check reads
+            *.links         per entity, the operations whose function
+                            does not follow the rule
 fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
                             under its own file name, one deliberate
                             problem or one history each; the examples
                             name the folder
             <name>/*.edda.vc  the fixture's history, when it has one
+            <name>/*.links, code.py  a fixture of the link layer
 tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             prints the lines and counts the stories
                             assert; it replaces fixtures/, so restore
@@ -59,7 +64,11 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             or approved with its version, and a story's
                             changed lines; --model prints the
                             JSON model of a project that checks,
-                            --graph one status life graph as text
+                            --graph one status life graph as text;
+                            then the links: every operation to the one
+                            function that does it, every marker to its
+                            story's version, covered code no story
+                            reaches flagged
             approve.py      the operator's approval of one story or
                             block, appended to its .edda.vc
             view.py         the read view: each story as plain
@@ -87,6 +96,8 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
             test_view.py    the read view: every sentence kind on a
                             small spec, every expression form in words,
                             EDDA-007 through the runner
+            test_links.py   the link layer: Edda's own links, each link
+                            fixture, each rule and the reach rule
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
@@ -96,9 +107,12 @@ snake_case. Tell your editor the extension is YAML and point it at
 
 Built so far: a partial checker, the approve command, and the running
 of examples for the stories whose operations have a binding (Edda's
-own `check`, `view` and `view_at`: EDDA-001, EDDA-002 and EDDA-007),
+own `check`, `notes`, `view` and `view_at`: EDDA-001, EDDA-002,
+EDDA-003 and EDDA-007),
 each call held to its operation's rules, the JSON model of a spec, and
-the read view; links and the other bindings are not there yet. `python3 tools/check.py` needs
+the read view, and the links from every operation to the code that
+does it; the other bindings are not
+there yet. `python3 tools/check.py` needs
 PyYAML and jsonschema.
 `python3 tools/run.py [--project DIR] [STORY ...]` runs the examples
 (reference section 9): exit 0 when no story failed, 1 when one failed,
@@ -110,5 +124,7 @@ ENTITY.PROPERTY [DIR]` its status life graph (reference section 9).
 as plain sentences (reference section 12).
 `python3 tools/test_run.py` shows the runner catches a broken checker
 and a bound operation that breaks a rule of its spec.
+`python3 tools/test_links.py` holds the link layer to its rules
+(reference sections 9 and 11).
 `python3 tools/approve.py NAME --by OPERATOR [--because TEXT] [--dry-run]`
 records an approval (reference section 10).

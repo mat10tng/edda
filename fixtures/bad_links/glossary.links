@@ -1,0 +1,6 @@
+# A key the glossary.links does not have.
+target: python
+rule: same_name
+language: python3
+covers:
+  - "bad_links/code.py"

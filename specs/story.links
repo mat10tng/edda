@@ -1,0 +1,4 @@
+# Operations of story.edda that do not follow the naming rule.
+links:
+  diff: "tools/check.py::changes"
+  view: "tools/view.py::story_sentences"

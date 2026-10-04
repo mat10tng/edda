@@ -779,6 +779,7 @@ def example_sentences(x, types):
             + [s for _, ss in parts for s in ss] + notes(x["notes"], x["note_lines"]))
 
 
+# EDDA-007@0
 def story_sentences(story, operations, entities, roles):
     """a story of the model as sentences (section 12): the story, its notes,
     its questions, then its operations and its examples in file order,

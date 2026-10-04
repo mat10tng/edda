@@ -1,0 +1,6 @@
+# The link layer (reference section 9): the covered code, relative to
+# fixtures/.
+target: python
+rule: same_name
+covers:
+  - "no_story/code.py"
