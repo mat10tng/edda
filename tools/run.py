@@ -818,8 +818,8 @@ def given_props(g, kind):
 
 
 def left_out(phrases, values, name):
-    """section 8: a stored property the given leaves out takes its DEFAULT,
-    [] for MANY, None for OPTIONAL; any other is a binding.Unset named
+    """section 8: a stored property the given leaves out takes its DEFAULT
+    (a time as a time, section 4), [] for MANY, None for OPTIONAL; any other is a binding.Unset named
     after the given and the property"""
     out = {}
     for p, phrase in phrases.items():
@@ -827,7 +827,7 @@ def left_out(phrases, values, name):
         if p in values or not m or phrase.endswith(", DERIVED"):
             continue
         if phrase.startswith("DEFAULT "):
-            out[p] = m.group("dchoice").split(" | ")[0] if m.group("dchoice") else ast.literal_eval(phrase[len("DEFAULT "):])
+            out[p] = as_time(checker.default_value(phrase), checker.type_of_phrase(phrase))
         elif m.group("many"):
             out[p] = []
         elif m.group("optional"):

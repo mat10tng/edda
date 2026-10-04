@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 61
+language/   reference.md    the language reference, revision 62
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -57,7 +57,9 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             of a history, and the flags; under a file
                             that checks, each block and story as draft
                             or approved with its version, and a story's
-                            changed lines
+                            changed lines; --model prints the
+                            JSON model of a project that checks,
+                            --graph one status life graph as text
             approve.py      the operator's approval of one story or
                             block, appended to its .edda.vc
             edda_binding.py the binding for Edda's own spec_file,
@@ -73,6 +75,9 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
             test_run.py     a checker broken on purpose must fail
                             EDDA-001; the real one passes it; each
                             broken rule fails its example
+            test_model.py   the JSON model and the status life graph:
+                            deterministic, every story and operation,
+                            each expression's ast read back
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
@@ -83,11 +88,15 @@ snake_case. Tell your editor the extension is YAML and point it at
 Built so far: a partial checker, the approve command, and the running
 of examples for the stories whose operations have a binding (Edda's
 own `check`: EDDA-001 and EDDA-002), each call held to its
-operation's rules; links and the other bindings are not there yet. `python3 tools/check.py` needs
+operation's rules, and the JSON model of a spec; links and the other
+bindings are not there yet. `python3 tools/check.py` needs
 PyYAML and jsonschema.
 `python3 tools/run.py [--project DIR] [STORY ...]` runs the examples
 (reference section 9): exit 0 when no story failed, 1 when one failed,
 3 when Edda itself failed.
+`python3 tools/check.py --model [DIR]` prints the JSON model of a
+project that checks, and `python3 tools/check.py --graph
+ENTITY.PROPERTY [DIR]` its status life graph (reference section 9).
 `python3 tools/test_run.py` shows the runner catches a broken checker
 and a bound operation that breaks a rule of its spec.
 `python3 tools/approve.py NAME --by OPERATOR [--because TEXT] [--dry-run]`

@@ -22,13 +22,17 @@ for reason; ensure, with OLD, inside a comprehension too; always, with
 a read it calls not judging it again; the frame rule, the actor
 included, also_changes and a computed property naming only what it
 reads on that entity; a read inside a fact that changes nothing; an
-ensure on the clock (not run).
+ensure on the clock (not run). A small item project leaves out a
+DEFAULT of every kind, 01, a text with a backslash and a time
+included: the runner gives each the value the checker's model gives,
+a time as a time, and "2026-02-30" stays a text.
 """
 import contextlib
 import copy
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -395,6 +399,82 @@ MAPPING_NAMES = {
     "iteration": list, "keys()": lambda d: list(d.keys()), "reversed": lambda d: list(reversed(d)),
     "in": lambda d: "ref" in d, "len": len,
 }
+
+
+DEFAULTS = r"""roles:
+  shop_user:
+    is: "a person at a shop"
+
+entities:
+  item:
+    is: "a thing with every kind of DEFAULT"
+    properties:
+      count: DEFAULT 01
+      ratio: DEFAULT 01.50
+      flag: DEFAULT True
+      path: DEFAULT "C:\New"
+      blank: DEFAULT ""
+      kind: DEFAULT plain | boxed
+      due: DEFAULT "2026-10-04 09:00"
+      odd: DEFAULT "2026-02-30"
+    may_read: [{role: shop_user}]
+
+stories:
+  TST-020:
+    story: "left-out defaults"
+    about: item
+    as_a: shop_user
+    i_want: "every DEFAULT left out in a given to take its value"
+    so_that: "the runner reads a DEFAULT as the checker does"
+    examples:
+      "every kind left out":
+        given:
+          - item: box
+        steps:
+          - then:
+              - "box.count == 1"
+              - "box.ratio == 1.5"
+              - "box.flag == True"
+              - "box.path == \"C:\\\\New\""
+              - "box.blank == \"\""
+              - "box.kind == plain"
+              - "box.due < TIME(\"2026-10-05\")"
+              - "box.odd == \"2026-02-30\""
+"""
+
+
+class DefaultTest(unittest.TestCase):
+    """section 4: a DEFAULT means one value in the checker's model and in
+    the runner, DEFAULT 01 and a backslash in a text included"""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        with open(os.path.join(self.dir.name, "item.edda"), "w") as f:
+            f.write(DEFAULTS)
+        binding.ENTITIES["item"] = lambda name, values, workdir: binding.Thing("item", values)
+
+    def tearDown(self):
+        del binding.ENTITIES["item"]
+        self.dir.cleanup()
+
+    def test_left_out_defaults_in_a_given(self):
+        sid, status, detail, failed = story(run.run(self.dir.name, ["TST-020"]), "TST-020")
+        self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
+
+    def test_model_and_runner_agree(self):
+        p = subprocess.run([sys.executable, os.path.join(os.path.dirname(run.__file__), "check.py"),
+                            "--model", self.dir.name], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout)
+        props = json.loads(p.stdout)["entities"][0]["properties"]
+        model = {x["name"]: x["default"] for x in props}
+        runner = run.left_out({x["name"]: x["phrase"] for x in props}, {}, "box")
+        self.assertEqual(model, {"count": 1, "ratio": 1.5, "flag": True, "path": "C:\\New",
+                                 "blank": "", "kind": "plain", "due": "2026-10-04 09:00",
+                                 "odd": "2026-02-30"})
+        # a time reads as the runner reads a time in with: (section 7.2)
+        model = {n: run.as_time(v, next(x["type"] for x in props if x["name"] == n)) for n, v in model.items()}
+        self.assertEqual(runner, model)
+        self.assertEqual([type(v) for v in runner.values()], [type(v) for v in model.values()])
 
 
 class OwnProjectTest(unittest.TestCase):
