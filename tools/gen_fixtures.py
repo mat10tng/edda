@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate Edda's fixtures (revision 58) from one clean spec and print
-the expected lines, counts and strings the stories assert. It replaces
-the whole fixtures/ folder: the folders it does not write are hand-made
-and must be checked out again afterwards."""
+the expected lines, counts and strings the stories assert. It deletes and
+rebuilds only the folders it writes; every other folder in fixtures/ is
+hand-made and left alone. A folder it once generated but no longer does
+is not removed."""
 import json, os, re, shutil, sys
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures")
@@ -85,8 +86,14 @@ def find(lines, text, start=0):
     raise KeyError(text)
 
 
+GENERATED = set()
+
+
 def write(folder, name, text):
     d = os.path.join(ROOT, folder)
+    if folder not in GENERATED:     # first write this run: start it clean
+        GENERATED.add(folder)
+        shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, name), "w") as f:
         f.write(text)
@@ -199,7 +206,6 @@ def lcs_changes(old, new):
 
 
 # --- the clean fixture ---------------------------------------------------
-shutil.rmtree(ROOT, ignore_errors=True)
 write("order", "order.edda", CLEAN)
 ROLE_V1 = block(L, "shop_user:")
 ORDER_V1 = block(L, "  order:")
