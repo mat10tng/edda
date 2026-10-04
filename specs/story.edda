@@ -41,7 +41,7 @@ stories:
     story: "a story is a draft until the operator approves it"
     about: story
     as_a: operator
-    i_want: "a story whose rules differ from its newest approved copy to be a draft, whoever changed it, and a rule whose wording moved away from its meaning flagged"
+    i_want: "a story whose body differs from its newest approved version to be a draft, whoever changed it, and a refusal or ensure whose wording moved away from its meaning flagged"
     so_that: "nothing the agent writes counts until I have said yes"
     epic: VC
     tags: [version, approval]
@@ -143,7 +143,7 @@ stories:
             reason: "nothing to approve: the story matches its newest version and its pins are current"
         ensure:
           - fact: "story.file.history.versions == OLD(story.file.history.versions) + [story.versions[-1]]"
-            means: "the earlier entries are kept untouched and exactly one new one is added at the end"
+            means: "the earlier versions are kept untouched and exactly one new one is added at the end"
           - "story.versions[-1].number == len(story.versions)"
           - "story.versions[-1].text == story.text"
           - "story.versions[-1].approved_by == ACTOR.name"
@@ -171,7 +171,7 @@ stories:
               - "good.stories[0].version == 1"
               - "good.stories[0].versions[0].number == 1"
               - "good.stories[0].versions[0].approved_by == \"tuan\""
-              - "good.stories[0].versions[0].approved_at == \"2026-10-02 09:00\""
+              - "good.stories[0].versions[0].approved_at == TIME(\"2026-10-02 09:00\")"
               - "good.stories[0].versions[0].because == \"the shop asked for it\""
               - "good.stories[0].versions[0].text == good.stories[0].text"
               - "len(good.stories[0].versions[0].pins) == 2"
@@ -194,7 +194,7 @@ stories:
               - DONE
               - "grown.stories[0].version == 2"
               - "grown.stories[0].versions[0].number == 1"
-              - "grown.stories[0].versions[0].approved_at == \"2026-09-28 10:05\""
+              - "grown.stories[0].versions[0].approved_at == TIME(\"2026-09-28 10:05\")"
               - "grown.stories[0].versions[1].number == 2"
               - "grown.stories[0].versions[1].text == grown.stories[0].text"
               - "grown.stories[0].versions[1].because is None"
@@ -355,7 +355,7 @@ stories:
     story: "the operator reads a story as sentences"
     about: story
     as_a: operator
-    i_want: "a story shown as plain sentences in its own order, one per rule, with the ids hidden, the notes in grey and the questions marked"
+    i_want: "a story shown as plain sentences in its own order, one per item, with the ids hidden, the notes in grey and the questions marked"
     so_that: "I read the business meaning, never the syntax"
     epic: VIEW
     tags: [read_view]

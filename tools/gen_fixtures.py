@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Generate Edda's fixtures (revision 26) from one clean spec and print
-the expected lines, counts and strings the stories assert."""
+"""Generate Edda's fixtures (revision 58) from one clean spec and print
+the expected lines, counts and strings the stories assert. It replaces
+the whole fixtures/ folder: the folders it does not write are hand-made
+and must be checked out again afterwards."""
 import json, os, re, shutil, sys
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures")
@@ -161,7 +163,7 @@ def block(lines, key_line_text):
     return out
 
 
-def vc_entry(kind, name, number, at, by, text_lines, because=None, pins=None):
+def vc_version(kind, name, number, at, by, text_lines, because=None, pins=None):
     e = [f"- {kind}: {name}", f"  number: {number}",
          f'  approved_at: "{at}"', f"  approved_by: {by}"]
     if because:
@@ -223,9 +225,9 @@ def declared_twice(ls):
     i = find(ls, "      units_sent: DEFAULT 0"); ls.insert(i + 1, "      units_sent: DEFAULT 1"); return i + 1
 edit("declared_twice", declared_twice)
 
-def unknown_status(ls):
+def unknown_choice(ls):
     i = find(ls, 'when: "order.status == removed"'); ls[i] = ls[i].replace("removed", "archived"); return i
-edit("unknown_status", unknown_status)
+edit("unknown_choice", unknown_choice)
 
 def returns_and_ensure(ls):
     i = find(ls, "        ensure:"); ls.insert(i, '        returns: "order"'); return find(ls, "      remove:")
@@ -281,13 +283,6 @@ def not_ordered(ls):
     return len(ls) - 1
 edit("not_ordered", not_ordered)
 
-def role_cycle(ls):
-    i = find(ls, '    is: "a person at a shop"')
-    ls[i + 1:i + 1] = ["    includes: [admin]", "  admin:", '    is: "a person who runs the shop"',
-                       "    includes: [shop_user]"]
-    return i + 1
-edit("role_cycle", role_cycle)
-
 def computed_cycle(ls):
     i = find(ls, "      units_sent: DEFAULT 0")
     ls[i + 1:i + 1] = ['      units_held: {computed: "units_free + units_sent"}',
@@ -302,10 +297,6 @@ edit("not_yaml", not_yaml)
 def bad_name(ls):
     i = find(ls, "    about: order"); ls[i] = "    about: Order"; return i
 edit("bad_name", bad_name)
-
-def second_way(ls):
-    i = find(ls, 'when: "order.units_sent > 0"'); ls[i] = ls[i].replace('"order.units_sent > 0"', '"0 < order.units_sent <= 99"'); return i
-edit("second_way", second_way)
 
 def type_mismatch(ls):
     i = find(ls, 'when: "order.units_sent > 0"'); ls[i] = ls[i].replace('"order.units_sent > 0"', '"order.units_sent == NOW"'); return i
@@ -351,32 +342,32 @@ edit("space_key", space_key)
 
 # bad_version: approved file whose history numbers the entity 2 first
 edit("bad_version", lambda ls: None)
-vc = vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1)
-vc += vc_entry("entity", "order", 2, AT, "tuan", ORDER_V1)
+vc = vc_version("role", "shop_user", 1, AT, "tuan", ROLE_V1)
+vc += vc_version("entity", "order", 2, AT, "tuan", ORDER_V1)
 write("bad_version", "order.edda.vc", vc)
 EXPECT["bad_version"] = {"line": vc.splitlines().index("  number: 2") + 1}
 
-# bad_pin: the story entry pins an entity version that does not exist
+# bad_pin: the story version pins an entity version that does not exist
 edit("bad_pin", lambda ls: None)
-bp = (vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1) + vc_entry("entity", "order", 1, AT, "tuan", ORDER_V1)
-      + vc_entry("story", "FIX-001", 1, "2026-09-28 10:05", "tuan", STORY_V1, pins=[("role", "shop_user", 1), ("entity", "order", 99)]))
+bp = (vc_version("role", "shop_user", 1, AT, "tuan", ROLE_V1) + vc_version("entity", "order", 1, AT, "tuan", ORDER_V1)
+      + vc_version("story", "FIX-001", 1, "2026-09-28 10:05", "tuan", STORY_V1, pins=[("role", "shop_user", 1), ("entity", "order", 99)]))
 write("bad_pin", "order.edda.vc", bp)
 EXPECT["bad_pin"] = {"line": bp.splitlines().index("  pins: [{role: shop_user, number: 1}, {entity: order, number: 99}]") + 1}
 
-# bad_snapshot: the story entry's text carries a comment, so it is not normalised
+# bad_snapshot: the story version's text carries a comment, so it is not normalised
 edit("bad_snapshot", lambda ls: None)
 bs_text = list(STORY_V1)
 bs_text.insert(1, "  # the shop calls this Ta bort")
-bs = (vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1) + vc_entry("entity", "order", 1, AT, "tuan", ORDER_V1)
-      + vc_entry("story", "FIX-001", 1, "2026-09-28 10:05", "tuan", bs_text, pins=[("role", "shop_user", 1), ("entity", "order", 1)]))
+bs = (vc_version("role", "shop_user", 1, AT, "tuan", ROLE_V1) + vc_version("entity", "order", 1, AT, "tuan", ORDER_V1)
+      + vc_version("story", "FIX-001", 1, "2026-09-28 10:05", "tuan", bs_text, pins=[("role", "shop_user", 1), ("entity", "order", 1)]))
 write("bad_snapshot", "order.edda.vc", bs)
 EXPECT["bad_snapshot"] = {"line": bs.splitlines().index("- story: FIX-001") + 2}
 
 # --- flags ---------------------------------------------------------------
 
-def unreachable_status(ls):
+def unreachable_choice(ls):
     i = find(ls, "      status: DEFAULT incoming | removed"); ls[i] = "      status: DEFAULT incoming | delivered | removed"; return i
-edit("unreachable_status", unreachable_status)
+edit("unreachable_choice", unreachable_choice)
 
 def no_example(ls):
     i = find(ls, "    examples:"); del ls[i:]; return find(ls, "  FIX-001:")
@@ -440,10 +431,10 @@ EXPECT["notes_b"] = {"note1": STOCK.splitlines().index('      - "the stock feed 
 # --- histories -----------------------------------------------------------
 
 def hist(blocks_only=False, story_text=None, story_pins=None, extra=""):
-    v = vc_entry("role", "shop_user", 1, AT, "tuan", ROLE_V1)
-    v += vc_entry("entity", "order", 1, AT, "tuan", ORDER_V1)
+    v = vc_version("role", "shop_user", 1, AT, "tuan", ROLE_V1)
+    v += vc_version("entity", "order", 1, AT, "tuan", ORDER_V1)
     if not blocks_only:
-        v += vc_entry("story", "FIX-001", 1, "2026-09-28 10:05", "tuan",
+        v += vc_version("story", "FIX-001", 1, "2026-09-28 10:05", "tuan",
                       story_text or STORY_V1,
                       pins=story_pins or [("role", "shop_user", 1), ("entity", "order", 1)])
     return v + extra
@@ -471,7 +462,7 @@ def pinned_old(ls):
     i = find(ls, '    may_update: [{role: shop_user}]'); ls.insert(i + 1, '    may_create: [{role: shop_user}]'); EXPECT["pinned_old"] = {"story_line": find(ls, "  FIX-001:") + 1}; return None
 po = edit("pinned_old", pinned_old)
 ORDER_V2 = block(po, "  order:")
-write("pinned_old", "order.edda.vc", hist(extra=vc_entry("entity", "order", 2, "2026-10-01 09:00", "tuan", ORDER_V2, because="the shop may create orders")))
+write("pinned_old", "order.edda.vc", hist(extra=vc_version("entity", "order", 2, "2026-10-01 09:00", "tuan", ORDER_V2, because="the shop may create orders")))
 
 # story_grown: v1 had no "already removed" refusal and no third example
 def story_grown(ls):

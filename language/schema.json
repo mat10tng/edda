@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edda.local/schema/v57",
-  "title": "Edda spec file (revision 57)",
+  "$id": "https://edda.local/schema/v58",
+  "title": "Edda spec file (revision 58)",
   "description": "The keys of a .edda file: the shape layer of reference section 11 together with the quoting rule. Strings that carry logic are Python expressions (section 7) or type phrases (section 4) and are checked in the meaning layer, not here. The YAML subset is checked at the source, before this schema.",
   "type": "object",
   "additionalProperties": false,
@@ -15,12 +15,11 @@
         "required": ["is"],
         "properties": {
           "is": {"type": "string"},
-          "has": {
+          "properties": {
             "type": "object",
             "propertyNames": {"$ref": "#/$defs/name"},
             "additionalProperties": {"$ref": "#/$defs/typePhrase"}
-          },
-          "includes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/name"}}
+          }
         }
       }
     },
@@ -49,33 +48,7 @@
               "additionalProperties": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/name"}}
             }
           },
-          "wording": {
-            "type": "object",
-            "propertyNames": {"$ref": "#/$defs/name"},
-            "additionalProperties": {
-              "type": "object",
-              "propertyNames": {"$ref": "#/$defs/name"},
-              "additionalProperties": {
-                "type": "object",
-                "propertyNames": {"$ref": "#/$defs/name"},
-                "additionalProperties": {"type": "string"}
-              }
-            }
-          },
           "always": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/factItem"}},
-          "while": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["when", "holds"],
-              "properties": {
-                "when": {"$ref": "#/$defs/expression"},
-                "holds": {"$ref": "#/$defs/factItem"}
-              }
-            }
-          },
           "may_create": {"$ref": "#/$defs/whoList"},
           "may_read": {"$ref": "#/$defs/whoList"},
           "may_update": {"$ref": "#/$defs/whoList"},
@@ -198,7 +171,7 @@
       "else": {"minProperties": 1, "maxProperties": 1},
       "description": "exactly one key besides with: the entity or actor, whose value is the given name; with holds flat property values (roles for an actor, fixture for a spec_file)"
     },
-    "outcome": {
+    "verdict": {
       "anyOf": [
         {"const": "DONE"},
         {"type": "object", "additionalProperties": false, "required": ["refused"],
@@ -221,7 +194,7 @@
         "then": {"type": "array", "minItems": 1}
       },
       "if": {"required": ["when"]},
-      "then": {"properties": {"then": {"prefixItems": [{"$ref": "#/$defs/outcome"}], "items": {"$ref": "#/$defs/expression"}}}},
+      "then": {"properties": {"then": {"prefixItems": [{"$ref": "#/$defs/verdict"}], "items": {"$ref": "#/$defs/expression"}}}},
       "else": {"properties": {"then": {"items": {"$ref": "#/$defs/expression"}}}}
     },
     "example": {

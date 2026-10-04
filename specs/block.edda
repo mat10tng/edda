@@ -34,7 +34,7 @@ stories:
             reason: "nothing to approve: the block matches its newest version"
         ensure:
           - fact: "block.file.history.versions == OLD(block.file.history.versions) + [block.versions[-1]]"
-            means: "the earlier entries are kept untouched and exactly one new one is added at the end"
+            means: "the earlier versions are kept untouched and exactly one new one is added at the end"
           - "block.versions[-1].number == len(block.versions)"
           - "block.versions[-1].text == block.text"
           - "block.versions[-1].approved_by == ACTOR.name"
