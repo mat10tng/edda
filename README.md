@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 60
+language/   reference.md    the language reference, revision 61
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -65,11 +65,14 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             fixture copies in a temporary folder and
                             calls the real checker; no rules of its own
             run.py          the runner: every example through the
-                            binding, reported per example and per story
-                            (examples passed, failing, not run
-                            and why)
+                            binding, every call held to its
+                            operation's rules (refusals, ensure with
+                            OLD, always, the frame rule), reported per
+                            example and per story (examples passed,
+                            failing, not run and why)
             test_run.py     a checker broken on purpose must fail
-                            EDDA-001; the real one passes it
+                            EDDA-001; the real one passes it; each
+                            broken rule fails its example
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
@@ -79,12 +82,13 @@ snake_case. Tell your editor the extension is YAML and point it at
 
 Built so far: a partial checker, the approve command, and the running
 of examples for the stories whose operations have a binding (Edda's
-own `check`: EDDA-001 and EDDA-002); the rule wrapping, links and the
-other bindings are not there yet. `python3 tools/check.py` needs
+own `check`: EDDA-001 and EDDA-002), each call held to its
+operation's rules; links and the other bindings are not there yet. `python3 tools/check.py` needs
 PyYAML and jsonschema.
 `python3 tools/run.py [--project DIR] [STORY ...]` runs the examples
 (reference section 9): exit 0 when no story failed, 1 when one failed,
 3 when Edda itself failed.
-`python3 tools/test_run.py` shows the runner catches a broken checker.
+`python3 tools/test_run.py` shows the runner catches a broken checker
+and a bound operation that breaks a rule of its spec.
 `python3 tools/approve.py NAME --by OPERATOR [--because TEXT] [--dry-run]`
 records an approval (reference section 10).

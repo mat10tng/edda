@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 60, 4 Oct 2026. Replaces revision 59. Decisions behind it:
+Revision 61, 4 Oct 2026. Replaces revision 60. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
@@ -359,19 +359,29 @@ operations:
 - **Order of checks.** Permission, then refusals in the order written,
   then the operation, then every `ensure` and `always`.
 - **Frame rule.** After an operation, every stored property location of
-  every entity reachable from the givens is unchanged unless it is
+  every entity reachable from the givens, and of every actor, is
+  unchanged unless it is
   named: a location is named when it is the left operand of an
   `ensure` fact's comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`, `in`,
   `is None`, `is not None`), the argument of `len` in that operand, or
-  listed under `also_changes`. Naming a derived property names the
-  stored locations it derives from. A location read on the right side
+  listed under `also_changes`. Naming a computed or derived property
+  names the stored locations it derives from, on that entity only. A
+  location read on the right side
   is not named. Naming a list allows elements to be added or removed
   and new elements to appear with their parts; the elements already
   there are entities of their own and stay unchanged unless named.
   Computed and derived properties follow.
 - **`OLD(x)`** is the value of `x` captured after the refusals were
   checked and before the operation changed anything: a deep, frozen
-  copy; `OLD(len(x))` is allowed. Only under `ensure`.
+  copy; `OLD(len(x))` is allowed. Inside a comprehension it keeps the
+  comprehension's names: `sum(OLD(e.amount) for e in account.entries)`
+  is each entry's amount before the call, and an entry the call added
+  has no `OLD` value, which fails the example. An `OLD` value is found
+  by what the call cannot change: an input or `ACTOR` by its name, a
+  comprehension's name by the value it took before the call, an entity
+  or a list by identity. So with an input `entries` that is
+  `account.entries`, `account.entries == OLD(entries) + [fresh]` holds
+  after a correct append. Only under `ensure`.
 - **Equality of entities.** Two references are equal when they are the
   same entity, never by value; a frozen copy keeps every identity, so
   `OLD(history.versions) + [story.versions[-1]]` compares element by
@@ -388,6 +398,60 @@ operations:
 - **One at a time.** Operations have the results they would have if run
   one at a time. Without `at:`, `NOW` is the example's start, fixed by
   the binding.
+
+**How the runner holds a call to these rules** (section 9). The spec
+checks the code's refusals; it never stands in for them. Every call of
+a bound operation, a step's `call:` or a read inside a fact, goes:
+
+1. permission, for a step's call only (a read inside a fact has no
+   actor);
+2. the `refuse` conditions in the order written: the first that holds
+   is the refusal the spec expects, or there is none;
+3. a snapshot of every stored property location of every entity
+   reachable from the givens and the call's inputs, and of every actor
+   among them (the properties its roles declare), and each `OLD(x)` of
+   the `ensure` facts, for each value of the comprehension names around
+   it;
+4. the bound operation;
+5. the outcome must match step 2: refused with exactly that reason, or
+   not refused when no condition held;
+6. a refused call changed nothing, the actor included; a call not
+   refused makes every
+   `ensure` fact hold, every `always` fact of every entity reachable
+   from the givens and the inputs hold, and changed no location the
+   spec does not name (the frame rule).
+
+Any break fails the example there, at the rule's own file and line:
+`<operation> should refuse: "<reason>", but it did not refuse` or `but
+it refused: "<other reason>"` at the `refuse` condition;
+`<operation> refused: "<reason>", but the spec does not refuse` at the
+operation; `<operation>: ensure <fact>: found <what>` at the fact;
+`<operation>: always <fact>, on <entity>: found <what>` at the
+`always` fact; `<operation> changed <x>.<property>, which the spec
+does not name` at the operation, `<x>` the given's name or, for an
+entity no given names, its kind.
+
+Reachable means through stored properties, entity references and lists
+of them, from the givens and the inputs; an actor is no entity and is
+not looked into, but the properties its roles declare are in the
+snapshot like an entity's; an element added by the call is new and not
+in the snapshot. A location
+is compared without reading it, so an unset value (section 8) is never
+read: an entity or an unset value by identity, a list element by
+element, any other value by its kind and value. `OLD(x)` is a copy of
+lists with every element the same entity; an entity in it is the live
+entity, as equality of entities says. Naming a computed property on
+an entity names the stored locations its expression reads when the
+runner evaluates it on that entity, before the call and after it,
+through other computed properties and the read operations it calls
+(their `refuse` conditions, `returns`, and `ordered_by` on each item
+returned); naming one account's
+`total` names that account's `entries` and the `amount` of each of its
+entries, never another account's. Naming a derived property (section
+11) names the stored properties of that same entity only. A read
+inside a fact names nothing, so it changes nothing; while the `always`
+facts after a call are judged, a read they call keeps its refusal and
+frame checks but does not judge the `always` facts again.
 
 ## 7. Expressions
 
@@ -595,7 +659,9 @@ story, or each one named, and each example: make the givens through
 the binding, in a fresh work folder; for each step with `when`, check
 permission (section 3: any of the actor's roles passes any who-line,
 condition included; otherwise refused, `"<operation> is not allowed
-for <roles>"`), then call the operation; then judge the `then` items.
+for <roles>"`), then call the operation, held to its rules (section 6:
+the spec's refusal, `ensure` with `OLD`, `always`, the frame rule);
+then judge the `then` items.
 `ACTOR` is the actor of the latest step with `when`, and `RESULT` the
 return of its call, both kept across later steps without `when`;
 `RESULT` has no value after a refusal or before any call.
@@ -604,10 +670,13 @@ The verdict is `DONE` when the call was not refused, `refused:
 fails the verdict. A fact is evaluated over its parsed `ast`, form by
 form of 7.1, never by `eval`: a bare lowercase name that is no given
 is a choice value; entities are equal only to themselves (section 6);
-a read inside a fact calls the bound operation with no actor; an index
+a read inside a fact calls the bound operation with no actor, held to
+its rules the same way; an index
 out of range, a property read on no entity or `RESULT` after a
-refusal fails the example. A wrong verdict ends the example; every
-fact of a step is judged. A property or operation found to have no
+refusal fails the example. A wrong verdict or a broken rule of a
+step's call ends the example; every fact of a step is judged, and a
+read inside one that breaks a rule fails the example at the rule's
+line. A property or operation found to have no
 binding while running ends that example; the failures found before it
 stay.
 
@@ -621,19 +690,21 @@ clock (`at:`, `NOW`, `TODAY`, not built yet, read directly, through a
 computed property whose expression reads it, or through an operation
 whose `returns`, `refuse` conditions or `ordered_by` read it; computed
 properties and operations reach it through one another, nested calls
-included, and the called operation's own who-line and `refuse`
-conditions count), or no examples. The
+included, and the called operation's own who-line, `refuse` conditions
+and `ensure` facts count, and so do the `always` facts of every entity
+the givens, the called operations' inputs and their returns reach, as
+declared), or no examples. The
 runner never reports `done` (section 11): that needs more than it
 computes. A draft story runs like an approved one. Exit 0 when no
 story failed; 1 when one failed or the spec does not check; 3 when
 Edda itself failed (decision AA). `tools/test_run.py` points the binding at a
 checker broken on purpose and sees EDDA-001 fail on the example and
-the `then` line that catch the break.
+the `then` line that catch the break, and holds bound operations of a
+small project of its own to each rule of section 6.
 
-Not built yet: rule wrapping (refusals in order, `ensure` with `OLD`,
-`always`, the frame rule, round every operation), links and the
-`# FUL-005@3` markers, the JSON model, bindings in other stacks, the
-clock.
+Not built yet: links and the `# FUL-005@3` markers (until then the
+operations held to their rules are the bound ones), the JSON model,
+bindings in other stacks, the clock.
 
 ## 10. Versions and approval
 
@@ -951,15 +1022,18 @@ draft; no pin is stale; every example passes; its operations'
 refusals, ensures, `always` and frame rule hold on the whole suite;
 every link resolves both ways. The checker computes it; the agent never
 marks it. Nothing computes done yet. `tools/run.py` (section 9)
-computes one part, "every example passes", for the stories whose
-operations are bound, and reports that as `examples passed`, never
-as done; the rest (approved version, no stale pins, the rules on the
-whole suite, links) is not built.
+computes two parts for the stories whose operations are bound: every
+example passes, and the operations' refusals, ensures, `always` and
+frame rule hold on every call the examples make; it reports that as
+`examples passed`, never as done. The rest (approved version, no
+stale pins, the rules on the host's whole test suite, links) is not
+built.
 
-**Runs, test only.** Examples through the binding (built, section 9);
-refusals, ensures, always and the frame rule wrapped round the linked
-operation for every test in the suite (not built yet). Never in
-production.
+**Runs, test only.** Examples through the binding, every call of a
+bound operation wrapped in its refusals, ensures, always and the frame
+rule (built, sections 6 and 9); the same wrapping round the linked
+operation for every test in the host's suite (not built yet: it needs
+links). Never in production.
 
 ## 12. Views
 
@@ -1026,11 +1100,48 @@ Qualities and infrastructure (#2487), time-triggered operations
 (#2489), generated cases (#2490), the analyser (#2491), drafting from
 existing code (#2492), story to Plan tasks (#2493), richer calculations
 and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
-the running of examples is begun (section 9: Edda's own `check`); the
-frame-rule test and the rest of the done computation get their own
-stories.
+the running of examples and the rule wrapping round every call are
+begun (sections 6 and 9: Edda's own `check`); the rest of the done
+computation gets its own stories.
 
-## 14. Changes from revision 59
+## 14. Changes from revision 60
+
+Build Plan kb:9379223, phase 2625: every bound operation is held to its
+contract, on every call the runner makes.
+
+- The runner wraps every call of a bound operation, a step's `call:`
+  and a read inside a fact, in the rules of section 6 (6, 9): the
+  spec's refusal, `ensure` with `OLD`, `always` and the frame rule.
+  Until links are built, the operations wrapped are the bound ones.
+- The spec checks the code's refusals, it does not replace them: the
+  first `refuse` condition that holds before the call is the reason
+  the code must give, and when none holds the code must not refuse.
+  A refused call must change nothing.
+- `OLD(x)` is taken after the refusals and before the call, a copy of
+  lists that keeps every entity's identity (6). It is found after the
+  call by what the call cannot change: an input by its name, a
+  comprehension's name by the value it took before (6).
+- The frame rule covers every stored property location of every entity
+  reachable from the givens and the inputs; a location is compared
+  without reading it, so an unset value is never read. The actor's
+  role properties are covered too, so a refused call that changes the
+  actor fails. Naming a computed property names the stored locations
+  its expression reads on that entity, the `ordered_by` of a read it
+  calls included; naming a derived property names the stored
+  properties of that entity only (6).
+- A read called by an `always` fact keeps its own refusal and frame
+  checks but does not judge the `always` facts again (6).
+- `OLD(x)` inside a comprehension keeps the comprehension's names (6).
+- A broken rule fails the example at the rule's own file and line, with
+  one plain message per rule (6).
+- An `ensure` or `always` fact that reads the clock leaves its story
+  not run, like any other read of the clock (9).
+- "Done" (11) is still not computed; `examples passed` now also means
+  the rules held on every call. Section 13 no longer lists the rule
+  wrapping as not begun.
+- No block's text changes, so nothing needs re-approval.
+
+## 15. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -1071,7 +1182,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 15. Changes from revision 58
+## 16. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -1089,7 +1200,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 16. Changes from revision 57
+## 17. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -1176,7 +1287,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 17. Changes from revision 56
+## 18. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -1195,7 +1306,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 18. Changes from revision 55
+## 19. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -1219,7 +1330,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 19. Changes from revision 54
+## 20. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -1234,7 +1345,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 20. Changes from revision 53
+## 21. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -1269,7 +1380,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 21. Changes from revision 52
+## 22. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -1285,7 +1396,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 22. Changes from revision 51
+## 23. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -1307,7 +1418,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 23. Changes from revision 50
+## 24. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -1317,7 +1428,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 24. Changes from revision 49
+## 25. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -1326,14 +1437,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 25. Changes from revision 48
+## 26. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 26. Changes from revision 47
+## 27. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -1343,7 +1454,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 27. Changes from revision 46
+## 28. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -1352,7 +1463,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 28. Changes from revision 45
+## 29. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -1362,7 +1473,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 29. Changes from revision 44
+## 30. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -1371,7 +1482,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 30. Changes from revision 43
+## 31. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -1380,7 +1491,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 31. Changes from revision 42
+## 32. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -1391,7 +1502,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 32. Changes from revision 41
+## 33. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -1400,21 +1511,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 33. Changes from revision 40
+## 34. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 34. Changes from revision 39
+## 35. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 35. Changes from revision 38
+## 36. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -1422,7 +1533,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 36. Changes from revision 37
+## 37. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -1431,7 +1542,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 37. Changes from revision 36
+## 38. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -1442,7 +1553,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 38. Changes from revision 35
+## 39. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -1455,7 +1566,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 39. Changes from revision 34
+## 40. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -1468,7 +1579,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 40. Changes from revision 33
+## 41. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -1484,7 +1595,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 41. Changes from revision 32
+## 42. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -1502,7 +1613,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 42. Changes from revision 31
+## 43. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -1521,7 +1632,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 43. Changes from revision 30
+## 44. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -1542,7 +1653,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 44. Changes from revision 29
+## 45. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -1563,7 +1674,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 45. Changes from revision 28
+## 46. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -1580,7 +1691,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 46. Changes from revision 27
+## 47. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -1602,7 +1713,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 47. Changes from revision 26
+## 48. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

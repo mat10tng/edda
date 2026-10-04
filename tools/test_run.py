@@ -16,7 +16,13 @@ run) and left-out properties (DEFAULT, [] for MANY, None for OPTIONAL,
 otherwise unset: failing when read, never "no binding", in the runner
 or inside bound code, by every ordinary path to a thing's fields or a
 maker's values, carried unread only by Thing(entity, values)), and the clock read through computed properties
-and the operations they call (not run).
+and the operations they call (not run). A small account project holds
+every call to its operation's rules: the refusal the spec gives, reason
+for reason; ensure, with OLD, inside a comprehension too; always, with
+a read it calls not judging it again; the frame rule, the actor
+included, also_changes and a computed property naming only what it
+reads on that entity; a read inside a fact that changes nothing; an
+ensure on the clock (not run).
 """
 import contextlib
 import copy
@@ -658,6 +664,583 @@ class OwnProjectTest(unittest.TestCase):
         binding.ENTITIES["order"] = lambda name, values, workdir: binding.Thing("order", values, sent_late=False)
         sid, status, detail, failed = story(run.run(self.dir.name, ["TST-012"]), "TST-012")
         self.assertEqual((status, detail), ("not run", "order.sent_late needs the clock, not built yet"))
+
+
+ACCOUNT = """\
+roles:
+  clerk:
+    is: "a person at the desk"
+    properties:
+      tries: DEFAULT 0
+
+entities:
+  account:
+    is: "money kept for a customer"
+    properties:
+      balance: DEFAULT 0
+      status: DEFAULT open | closed
+      note: TEXT, OPTIONAL
+      history: TEXT, OPTIONAL
+      stamped: TIME, OPTIONAL
+      entries: MANY entry
+      total: {computed: "sum(e.amount for e in entries)"}
+      leader: {computed: "ranked(entries)[0].label"}
+    may_change: {status: {open: [closed]}}
+    always:
+      - "balance >= 0"
+    may_read: [{role: clerk}]
+    may_update: [{role: clerk}]
+
+  entry:
+    is: "one sum noted on an account"
+    part_of: account
+    properties:
+      amount: DEFAULT 0
+      label: TEXT, OPTIONAL
+    may_read: [{role: clerk}]
+
+  purse:
+    is: "coins kept for a customer"
+    properties:
+      coins: DEFAULT 0
+    always:
+      - "nonnegative(coins)"
+    may_read: [{role: clerk}]
+    may_update: [{role: clerk}]
+
+stories:
+  RUL-001:
+    story: "keep money on an account"
+    about: account
+    as_a: clerk
+    i_want: "to put money on an account, note sums and close it"
+    so_that: "the money is kept"
+    operations:
+      deposit:
+        is: "puts money on an open account"
+        inputs: {account: account, n: INTEGER}
+        who: [{role: clerk}]
+        refuse:
+          - when: "account.status == closed"
+            reason: "the account is closed"
+          - when: "n <= 0"
+            reason: "nothing to put"
+        ensure:
+          - "account.balance == OLD(account.balance) + n"
+        also_changes: ["account.history"]
+      add_entry:
+        is: "notes a sum on an account"
+        inputs: {account: account, n: INTEGER}
+        who: [{role: clerk}]
+        ensure:
+          - "account.total == OLD(account.total) + n"
+      close:
+        is: "closes an account"
+        inputs: {account: account}
+        who: [{role: clerk}]
+        refuse:
+          - when: "account.status == closed"
+            reason: "the account is already closed"
+        ensure:
+          - "account.status == closed"
+      balance_of:
+        is: "the money on an account"
+        inputs: {account: account}
+        who: [{role: clerk}]
+        returns: "account.balance"
+    examples:
+      "money is put on an account":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - account: savings
+            with: {balance: 5}
+        steps:
+          - when: {actor: ann, call: "deposit(savings, 3)"}
+            then: [DONE, "savings.balance == 8", "balance_of(savings) == 8"]
+      "a closed account takes no money":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - account: old
+            with: {status: closed}
+        steps:
+          - when: {actor: ann, call: "deposit(old, 3)"}
+            then:
+              - refused: "the account is closed"
+      "a sum is noted":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - account: savings
+        steps:
+          - when: {actor: ann, call: "add_entry(savings, 4)"}
+            then: [DONE, "savings.total == 4"]
+      "an account is closed":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - account: savings
+        steps:
+          - when: {actor: ann, call: "close(savings)"}
+            then: [DONE, "savings.status == closed"]
+  RUL-002:
+    story: "take money from an account"
+    about: account
+    as_a: clerk
+    i_want: "to take money from an account"
+    so_that: "the customer gets it"
+    operations:
+      withdraw:
+        is: "takes money from an account"
+        inputs: {account: account, n: INTEGER}
+        who: [{role: clerk}]
+        ensure:
+          - "account.balance == OLD(account.balance) - n"
+    examples:
+      "more than the balance is taken":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - account: savings
+            with: {balance: 5}
+        steps:
+          - when: {actor: ann, call: "withdraw(savings, 7)"}
+            then: [DONE]
+  RUL-003:
+    story: "stamp an account"
+    about: account
+    as_a: clerk
+    i_want: "to stamp an account with the time"
+    so_that: "I know when it was seen"
+    operations:
+      stamp:
+        is: "stamps an account with the time"
+        inputs: {account: account}
+        who: [{role: clerk}]
+        ensure:
+          - "account.stamped == NOW"
+    examples:
+      "an account is stamped":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - account: savings
+        steps:
+          - when: {actor: ann, call: "stamp(savings)"}
+            then: [DONE]
+  RUL-004:
+    story: "fill a purse"
+    about: account
+    as_a: clerk
+    i_want: "to put coins in a purse"
+    so_that: "the coins are kept"
+    operations:
+      nonnegative:
+        is: "whether a number is not below zero"
+        inputs: {n: INTEGER}
+        who: [{role: clerk}]
+        returns: "n >= 0"
+      fill:
+        is: "puts coins in a purse"
+        inputs: {purse: purse, n: INTEGER}
+        who: [{role: clerk}]
+        ensure:
+          - "purse.coins == OLD(purse.coins) + n"
+    examples:
+      "a purse is filled":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - purse: small
+            with: {coins: 1}
+        steps:
+          - when: {actor: ann, call: "fill(small, 2)"}
+            then: [DONE, "small.coins == 3"]
+  RUL-005:
+    story: "note a sum on one account of two"
+    about: account
+    as_a: clerk
+    i_want: "a sum noted on one account to leave the other alone"
+    so_that: "each account keeps its own sums"
+    examples:
+      "a sum is noted on one account of two":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - entry: old_sum
+            with: {amount: 7}
+          - account: savings
+          - account: other
+            with: {entries: [old_sum]}
+        steps:
+          - when: {actor: ann, call: "add_entry(savings, 4)"}
+            then: [DONE, "savings.total == 4", "other.total == 7"]
+  RUL-006:
+    story: "settle an account"
+    about: account
+    as_a: clerk
+    i_want: "the balance set to the sum of its entries"
+    so_that: "the balance matches the sums noted"
+    operations:
+      settle:
+        is: "sets the balance to the sum of the entries"
+        inputs: {account: account}
+        who: [{role: clerk}]
+        ensure:
+          - "account.balance == sum(OLD(e.amount) for e in account.entries)"
+    examples:
+      "an account is settled":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - entry: first
+            with: {amount: 7}
+          - entry: second
+            with: {amount: 4}
+          - account: savings
+            with: {entries: [first, second]}
+        steps:
+          - when: {actor: ann, call: "settle(savings)"}
+            then: [DONE, "savings.balance == 11"]
+  RUL-007:
+    story: "append an entry"
+    about: account
+    as_a: clerk
+    i_want: "an entry added to the end of a list of entries"
+    so_that: "the entries keep their order"
+    operations:
+      append_entry:
+        is: "adds an entry to the end of an account's entries"
+        inputs: {account: account, entries: MANY entry, fresh: entry}
+        who: [{role: clerk}]
+        ensure:
+          - "account.entries == OLD(entries) + [fresh]"
+    examples:
+      "an entry is appended":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - entry: first
+            with: {amount: 7}
+          - entry: extra
+            with: {amount: 2}
+          - account: savings
+            with: {entries: [first]}
+        steps:
+          - when: {actor: ann, call: "append_entry(savings, savings.entries, extra)"}
+            then: [DONE, "len(savings.entries) == 2"]
+  RUL-008:
+    story: "put an entry first"
+    about: account
+    as_a: clerk
+    i_want: "an entry ranked first on its account"
+    so_that: "it leads the account"
+    operations:
+      ranked:
+        is: "entries, smallest amount first"
+        inputs: {entries: MANY entry}
+        who: [{role: clerk}]
+        returns: "entries"
+        ordered_by: ["entry.amount"]
+      promote:
+        is: "makes an entry the smallest on its account"
+        inputs: {account: account, entry: entry}
+        who: [{role: clerk}]
+        ensure:
+          - "account.leader == entry.label"
+    examples:
+      "an entry is put first":
+        given:
+          - actor: ann
+            with: {roles: [clerk]}
+          - entry: first
+            with: {amount: 7, label: "a"}
+          - entry: second
+            with: {amount: 4, label: "b"}
+          - entry: loose
+            with: {amount: 1}
+          - account: savings
+            with: {entries: [first, second]}
+        steps:
+          - when: {actor: ann, call: "promote(savings, first)"}
+            then: [DONE, "savings.leader == \\"a\\""]
+"""
+
+
+class Account(binding.Thing):
+    @property
+    def total(self):
+        return sum(e.amount for e in self.entries)
+
+    @property
+    def leader(self):
+        return ranked(None, self.entries)[0].label
+
+
+def deposit(actor, account, n):            # obeys the spec
+    if account.status == "closed":
+        raise binding.Refused("the account is closed")
+    if n <= 0:
+        raise binding.Refused("nothing to put")
+    account.balance += n
+    account.history = f"put {n}"           # allowed by also_changes
+
+
+def close(actor, account):
+    if account.status == "closed":
+        raise binding.Refused("the account is already closed")
+    account.status = "closed"
+
+
+def add_entry(actor, account, n):
+    account.entries.append(binding.Thing("entry", amount=n))
+
+
+def withdraw(actor, account, n):
+    account.balance -= n
+
+
+def fill(actor, purse, n):
+    purse.coins += n
+
+
+def settle(actor, account):
+    account.balance = sum(e.amount for e in account.entries)
+
+
+def append_entry(actor, account, entries, fresh):
+    entries.append(fresh)                   # entries is account.entries
+
+
+def ranked(actor, entries):
+    return sorted(entries, key=lambda e: e.amount)
+
+
+def promote(actor, account, entry):
+    entry.amount = min(e.amount for e in account.entries) - 1
+
+
+GOOD = {"deposit": deposit, "close": close, "add_entry": add_entry, "withdraw": withdraw,
+        "balance_of": lambda actor, account: account.balance,
+        "stamp": lambda actor, account: None,
+        "nonnegative": lambda actor, n: n >= 0, "fill": fill, "settle": settle,
+        "append_entry": append_entry, "ranked": ranked, "promote": promote}
+
+
+class RulesTest(unittest.TestCase):
+    """every call is held to its operation's rules (reference section 6)"""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.dir.name, "account.edda")
+        with open(self.path, "w") as f:
+            f.write(ACCOUNT)
+        self.made = {}      # the given things by name, so a test's code can reach them
+        for kind, cls in (("account", Account), ("entry", binding.Thing), ("purse", binding.Thing)):
+            binding.ENTITIES[kind] = lambda name, values, workdir, kind=kind, cls=cls: \
+                self.made.setdefault(name, cls(kind, values))
+        binding.OPERATIONS.update(GOOD)
+
+    def tearDown(self):
+        for kind in ("account", "entry", "purse"):
+            del binding.ENTITIES[kind]
+        for name in GOOD:
+            del binding.OPERATIONS[name]
+        self.dir.cleanup()
+
+    def line(self, text, after=None):
+        """file:line of the first line holding text, after the line holding after"""
+        lines = ACCOUNT.splitlines()
+        start = lines.index(next(x for x in lines if after in x)) if after else 0
+        n = next(i for i in range(start, len(lines)) if text in lines[i]) + 1
+        return f"{os.path.relpath(self.path)}:{n}"
+
+    def failed(self, sid):
+        sid, status, detail, failed = story(run.run(self.dir.name, [sid]), sid)
+        return status, {title: fs for title, fs in failed}
+
+    def test_an_operation_that_obeys_every_rule_passes(self):
+        sid, status, detail, failed = story(run.run(self.dir.name, ["RUL-001"]), "RUL-001")
+        self.assertEqual((status, detail, failed), ("examples passed", "all 4", []))
+
+    def test_also_changes_allows_a_change_the_frame_rule_would_refuse(self):
+        def deposit_noted(actor, account, n):
+            deposit(actor, account, n)
+            account.note = "put"            # named nowhere; history, also_changes, was fine
+        binding.OPERATIONS["deposit"] = deposit_noted
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed["money is put on an account"], [
+            (self.line("deposit:"), None, "deposit changed savings.note, which the spec does not name")])
+
+    def test_a_change_the_spec_does_not_name_fails(self):
+        def close_and_empty(actor, account):
+            close(actor, account)
+            account.balance = 7
+        binding.OPERATIONS["close"] = close_and_empty
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed, {"an account is closed": [
+            (self.line("close:"), None, "close changed savings.balance, which the spec does not name")]})
+
+    def test_a_broken_ensure_fails(self):
+        binding.OPERATIONS["close"] = lambda actor, account: None
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed, {"an account is closed": [
+            (self.line('- "account.status == closed"', "close:"), None,
+             'close: ensure account.status == closed: found account.status is "open"')]})
+
+    def test_a_broken_ensure_with_old_fails(self):
+        def deposit_forgets(actor, account, n):
+            account.balance = n
+        binding.OPERATIONS["deposit"] = deposit_forgets
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed["money is put on an account"], [
+            (self.line("OLD(account.balance) + n"), None,
+             "deposit: ensure account.balance == OLD(account.balance) + n: found account.balance is 3")])
+
+    def test_a_broken_always_rule_fails(self):
+        status, failed = self.failed("RUL-002")
+        self.assertEqual((status, failed), ("failing", {"more than the balance is taken": [
+            (self.line('"balance >= 0"'), None, "withdraw: always balance >= 0, on account savings: found balance is -2")]}))
+
+    def test_a_refusal_with_the_wrong_reason_fails(self):
+        def deposit_wrong(actor, account, n):
+            if account.status == "closed":
+                raise binding.Refused("no such account")
+            deposit(actor, account, n)
+        binding.OPERATIONS["deposit"] = deposit_wrong
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed, {"a closed account takes no money": [
+            (self.line('"account.status == closed"', "deposit:"), None,
+             'deposit should refuse: "the account is closed", but it refused: "no such account"')]})
+
+    def test_a_refusal_the_spec_does_not_give_fails(self):
+        def deposit_never(actor, account, n):
+            raise binding.Refused("the account is closed")
+        binding.OPERATIONS["deposit"] = deposit_never
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed, {"money is put on an account": [
+            (self.line("deposit:"), None, 'deposit refused: "the account is closed", but the spec does not refuse')]})
+
+    def test_a_call_not_refused_where_the_spec_refuses_fails(self):
+        def deposit_always(actor, account, n):
+            account.balance += n
+        binding.OPERATIONS["deposit"] = deposit_always
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed, {"a closed account takes no money": [
+            (self.line('"account.status == closed"', "deposit:"), None,
+             'deposit should refuse: "the account is closed", but it did not refuse')]})
+
+    def test_a_refused_call_that_changed_something_fails(self):
+        def deposit_marks(actor, account, n):
+            account.note = "tried"
+            deposit(actor, account, n)
+        binding.OPERATIONS["deposit"] = deposit_marks
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed["a closed account takes no money"], [
+            (self.line("deposit:"), None, "deposit changed old.note, which the spec does not name")])
+
+    def test_a_read_inside_a_fact_that_changes_something_fails(self):
+        def balance_of(actor, account):
+            account.note = "seen"
+            return account.balance
+        binding.OPERATIONS["balance_of"] = balance_of
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed, {"money is put on an account": [
+            (self.line("balance_of:"), None, "balance_of changed savings.note, which the spec does not name")]})
+
+    def test_an_always_rule_that_calls_a_read_does_not_check_itself_again(self):
+        status, failed = self.failed("RUL-004")
+        self.assertEqual((status, failed), ("examples passed", {}))
+
+    def test_an_always_rule_that_calls_a_read_still_fails_once_when_broken(self):
+        binding.OPERATIONS["fill"] = lambda actor, purse, n: setattr(purse, "coins", -n)
+        status, failed = self.failed("RUL-004")
+        self.assertEqual(failed, {"a purse is filled": [
+            (self.line("purse.coins == OLD(purse.coins) + n"), None,
+             "fill: ensure purse.coins == OLD(purse.coins) + n: found purse.coins is -2"),
+            (self.line('"nonnegative(coins)"'), None,
+             "fill: always nonnegative(coins), on purse small: found it is false")]})
+
+    def test_naming_a_computed_property_names_only_what_it_reads_on_that_entity(self):
+        def add_entry_and_spoil(actor, account, n):
+            add_entry(actor, account, n)
+            self.made["old_sum"].amount = 999      # another account's entry
+        binding.OPERATIONS["add_entry"] = add_entry_and_spoil
+        status, failed = self.failed("RUL-005")
+        self.assertEqual(failed, {"a sum is noted on one account of two": [
+            (self.line("add_entry:"), None, "add_entry changed old_sum.amount, which the spec does not name")]})
+
+    def test_naming_a_computed_property_allows_what_it_reads(self):
+        status, failed = self.failed("RUL-005")
+        self.assertEqual((status, failed), ("examples passed", {}))
+
+    def test_old_inside_a_comprehension_keeps_its_loop_variable(self):
+        status, failed = self.failed("RUL-006")
+        self.assertEqual((status, failed), ("examples passed", {}))
+
+    def test_old_inside_a_comprehension_fails_a_wrong_value(self):
+        def settle_wrong(actor, account):
+            account.balance = sum(e.amount for e in account.entries) + 1
+        binding.OPERATIONS["settle"] = settle_wrong
+        status, failed = self.failed("RUL-006")
+        self.assertEqual(failed, {"an account is settled": [
+            (self.line("sum(OLD(e.amount)"), None,
+             "settle: ensure account.balance == sum(OLD(e.amount) for e in account.entries): "
+             "found account.balance is 12")]})
+
+    def test_old_of_an_input_list_the_call_appends_to_keeps_its_value(self):
+        status, failed = self.failed("RUL-007")
+        self.assertEqual((status, failed), ("examples passed", {}))
+
+    def test_old_of_an_input_list_fails_a_wrong_append(self):
+        def append_twice(actor, account, entries, fresh):
+            entries.extend([fresh, fresh])
+        binding.OPERATIONS["append_entry"] = append_twice
+        status, failed = self.failed("RUL-007")
+        self.assertEqual(failed, {"an entry is appended": [
+            (self.line("OLD(entries) + [fresh]"), None,
+             "append_entry: ensure account.entries == OLD(entries) + [fresh]: "
+             "found account.entries is [entry first, entry extra, entry extra]")]})
+
+    def test_naming_a_computed_property_allows_what_its_reads_ordered_by_reads(self):
+        status, failed = self.failed("RUL-008")
+        self.assertEqual((status, failed), ("examples passed", {}))
+
+    def test_ordered_by_names_only_the_items_of_the_ranked_list(self):
+        def promote_and_spoil(actor, account, entry):
+            promote(actor, account, entry)
+            self.made["loose"].amount = 0        # on no account's ranked list
+        binding.OPERATIONS["promote"] = promote_and_spoil
+        status, failed = self.failed("RUL-008")
+        self.assertEqual(failed, {"an entry is put first": [
+            (self.line("promote:"), None, "promote changed loose.amount, which the spec does not name")]})
+
+    def test_a_refused_call_that_changed_the_actor_fails(self):
+        def deposit_counts(actor, account, n):
+            actor.tries += 1
+            deposit(actor, account, n)
+        binding.OPERATIONS["deposit"] = deposit_counts
+        status, failed = self.failed("RUL-001")
+        self.assertEqual(failed, {
+            "money is put on an account": [
+                (self.line("deposit:"), None, "deposit changed ann.tries, which the spec does not name")],
+            "a closed account takes no money": [
+                (self.line("deposit:"), None, "deposit changed ann.tries, which the spec does not name")]})
+
+    def test_an_ensure_that_reads_now_is_not_run(self):
+        sid, status, detail, failed = story(run.run(self.dir.name, ["RUL-003"]), "RUL-003")
+        self.assertEqual((status, detail), ("not run", "NOW needs the clock, not built yet"))
+
+    def test_a_broken_rule_is_printed_at_its_line(self):
+        binding.OPERATIONS["close"] = lambda actor, account: None
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = run.main(["--project", self.dir.name, "RUL-001"])
+        self.assertEqual(code, 1)
+        at = self.line('- "account.status == closed"', "close:")
+        self.assertIn(f"        {at}: close: ensure account.status == closed: "
+                      'found account.status is "open"\n', out.getvalue())
 
 
 class ShowTest(unittest.TestCase):

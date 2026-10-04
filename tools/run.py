@@ -7,7 +7,10 @@ binding (reference sections 8, 9 and 11).
 For each story (or each one named), each example: make the given things
 through the binding, run each step's call as its actor, then judge each
 then item: DONE, refused: "<reason>", or a fact, evaluated over the
-parsed ast (the whitelist of section 7.1; never eval). The spec must
+parsed ast (the whitelist of section 7.1; never eval). Every call of a
+bound operation, a step's or a read inside a fact, is held to the
+operation's rules (reference section 6): the refusal the spec gives,
+every ensure with OLD, every always-rule and the frame rule. The spec must
 check first (tools/check.py). A story whose examples all pass is reported
 "examples passed", never "done": done (reference section 11) needs more
 than the runner computes. Exit 0 when no story failed, 1 when one failed
@@ -36,6 +39,16 @@ class Fail(Exception):
 
 class EddaError(Exception):
     """Edda itself failed: a spec the checker should have refused"""
+
+
+class RuleBroken(Exception):
+    """a bound operation broke a rule of the spec; failures are (file:line,
+    None, what was found), the line the rule's own. Not a Fail: it ends
+    the step, it is never what a fact found"""
+
+    def __init__(self, failures):
+        super().__init__(failures)
+        self.failures = failures
 
 
 class SpecRefused(Exception):
@@ -70,6 +83,41 @@ def show(v, deep=True):
         return repr(v)
     except Exception as e:
         return f"<unprintable: {type(e).__name__}>"
+
+
+class Lazy:
+    """a value read only when an expression reaches it: an always-rule's
+    bare property names, so an unset one fails only when read"""
+
+    def __init__(self, get):
+        self.get = get
+
+    def __call__(self):
+        return self.get()
+
+
+def read(obj, attr, text):
+    """obj's property attr, read through the binding; text names it in a
+    failure. While the frame rule records what a computed property reads
+    (derives), the read is recorded, and a computed property is the
+    spec's expression on obj"""
+    if RECORD[0] is not None and isinstance(obj, binding.Thing):
+        v = derives(obj, attr)
+        if v is not MISSING:
+            return v
+    try:
+        v = getattr(obj, attr)
+    except (binding.NotBound, EddaError):
+        raise
+    except binding.UnsetRead as u:
+        if type(dict.get(object.__getattribute__(obj, "__dict__"), attr)) is binding.Unset:
+            raise Fail(f"{text} is unset")    # this read itself
+        raise Fail(str(u))          # the binding's property used an unset value
+    except Exception as e:      # the binding's property crashed
+        raise Fail(f"{text} raised {type(e).__name__}: {e}")
+    if isinstance(v, binding.Unset):
+        raise Fail(f"{text} is unset")
+    return v
 
 
 def evaluate(text, env):
@@ -127,7 +175,8 @@ def value(n, env):
         return n.value
     if isinstance(n, ast.Name):
         if n.id in env:
-            return env[n.id]
+            v = env[n.id]
+            return v() if isinstance(v, Lazy) else v
         if n.id == "RESULT":
             raise Fail("RESULT has no value after a refusal")
         if n.id == "ACTOR":
@@ -139,19 +188,7 @@ def value(n, env):
         obj = value(n.value, env)
         if not isinstance(obj, binding.Thing):
             raise Fail(f"{ast.unparse(n.value)} is no entity: {show(obj)}")
-        try:
-            v = getattr(obj, n.attr)
-        except (binding.NotBound, EddaError):
-            raise
-        except binding.UnsetRead as u:
-            if type(dict.get(object.__getattribute__(obj, "__dict__"), n.attr)) is binding.Unset:
-                raise Fail(f"{ast.unparse(n)} is unset")    # this read itself
-            raise Fail(str(u))          # the binding's property used an unset value
-        except Exception as e:      # the binding's property crashed
-            raise Fail(f"{ast.unparse(n)} raised {type(e).__name__}: {e}")
-        if isinstance(v, binding.Unset):
-            raise Fail(f"{ast.unparse(n)} is unset")
-        return v
+        return read(obj, n.attr, ast.unparse(n))
     if isinstance(n, ast.Subscript):
         seq, i = value(n.value, env), value(n.slice, env)
         if not isinstance(seq, list) or isinstance(i, bool) or not isinstance(i, int):
@@ -208,12 +245,14 @@ def value(n, env):
             return {"any": any, "all": all}[f](found)
         if f == "TIME" and len(args) == 1:
             return datetime.datetime.fromisoformat(args[0].value)
+        if f == "OLD" and len(args) == 1 and "OLD" in env:
+            return env["OLD"](args[0], env)
         if f in OPERATIONS:
             # a read inside a fact: as the checker itself, no actor, no permission (section 6)
             try:
                 return run_operation(f, None, [value(a, env) for a in args],
                                      {k.arg: value(k.value, env) for k in n.keywords})
-            except (Fail, EddaError, binding.NotBound):
+            except (Fail, RuleBroken, EddaError, binding.NotBound):
                 raise
             except binding.UnsetRead as u:
                 raise Fail(str(u))
@@ -240,15 +279,37 @@ def load_project(folder):
     operations, stories = {}, []
     PHRASES["entities"].clear()
     PHRASES["roles"].clear()
+    RULES["operations"].clear()
+    RULES["always"].clear()
     for path in sorted(glob.glob(f"{folder}/*.edda")):
         source, data = checker.load(path)
+
+        def line(at):
+            return f"{os.path.relpath(path)}:{source.line(at)}"
         for section in ("entities", "roles"):
             for name, block in (data.get(section) or {}).items():
                 PHRASES[section][name] = block.get("properties") or {}
+        for name, block in (data.get("entities") or {}).items():
+            RULES["always"][name] = [(fact_text(f), line(("entities", name, "always", i) + (("fact",) if isinstance(f, dict) else ())))
+                                     for i, f in enumerate(block.get("always") or [])]
         for sid, st in (data.get("stories") or {}).items():
             operations.update(st.get("operations") or {})
             stories.append((sid, st, source, path))
+            for name, op in (st.get("operations") or {}).items():
+                at = ("stories", sid, "operations", name)
+                RULES["operations"][name] = {
+                    "line": line(at),
+                    "refuse": [(r["when"], r["reason"], line(at + ("refuse", i, "when")))
+                               for i, r in enumerate(op.get("refuse") or [])],
+                    "ensure": [(fact_text(f), line(at + ("ensure", i) + (("fact",) if isinstance(f, dict) else ())))
+                               for i, f in enumerate(op.get("ensure") or [])],
+                    "also_changes": list(op.get("also_changes") or [])}
     return P, operations, stories
+
+
+def fact_text(f):
+    """a fact as an expression: a quoted fact, or the fact of {fact, means}"""
+    return f["fact"] if isinstance(f, dict) else f
 
 
 def uses_clock(text):
@@ -256,12 +317,13 @@ def uses_clock(text):
     return [n.id for n in ast.walk(ast.parse(text, mode="eval")) if isinstance(n, ast.Name) and n.id in CLOCK]
 
 
-def walk(P, text, scope):
+def walk(P, text, scope, own=None):
     """what text reads, typed as the checker types it: its (entity,
     property) pairs, ("CLOCK", name) for NOW or TODAY, and the operations
-    with a text returns it calls"""
+    with a text returns it calls; own is the entity whose bare property
+    names text reads (an always-rule's)"""
     E = checker.Expr(P, scope, silent=True)
-    E.reads, E.calls = set(), set()
+    E.own, E.reads, E.calls = own, set(), set()
     E.run(text)
     return E.reads, E.calls
 
@@ -308,10 +370,11 @@ def needs(story, operations, P):
     unbound, clock = [], []
     timed_ops, timed = clock_paths(P)
 
-    def scan(text, scope):
+    def scan(text, scope, own=None):
         for name in uses_clock(text):
             clock.append(f"{name} needs the clock, not built yet")
-        reads, calls = walk(P, text, scope)
+        reads, calls = walk(P, text, scope, own)
+        called.update(calls)
         for e, p in sorted(reads & timed):
             clock.append(f"{e}.{p} needs the clock, not built yet")
         for o in sorted(calls & timed_ops):
@@ -322,13 +385,14 @@ def needs(story, operations, P):
                 unbound.append(f"no binding for {n.func.id}")
 
     for ex in examples.values():
-        scope = {}
+        scope, called, kinds = {}, set(), set()
         for g in ex.get("given") or []:
             entity = next(k for k in g if k != "with")
             if entity == "actor":
                 scope[g[entity]] = ("actor", ("all", frozenset((g.get("with") or {}).get("roles") or [])))
             else:
                 scope[g[entity]] = ("entity", entity)
+                kinds.add(entity)
                 if entity not in binding.ENTITIES:
                     unbound.append(f"no binding for entity {entity}")
         for step in ex.get("steps") or []:
@@ -352,10 +416,45 @@ def needs(story, operations, P):
                 for x in op.get("refuse_when") or []:
                     if isinstance(x, str):
                         scan(x, inputs)
+                for f in operations.get(name, {}).get("ensure") or []:
+                    scan(fact_text(f), inputs)
+                called.add(name)
             for text in then:
                 if isinstance(text, str) and text != "DONE":
                     scan(text, scope)
+        if called:      # the always-rules every call is held to (section 6)
+            for o in called:
+                for _, t, _ in P.operations[o]["inputs"]:
+                    kinds.update(entity_kinds(t))
+                kinds.update(entity_kinds(P.operations[o]["returns_type"]))
+            for e in sorted(kinds_reached(P, kinds)):
+                for text, _ in RULES["always"].get(e) or []:
+                    scan(text, dict(P.entities[e]["props"]), e)
     return (unbound + clock or [None])[0]
+
+
+def entity_kinds(t):
+    """the entities a value of type t may be or hold"""
+    if checker.is_entity(t):
+        return {t[1]}
+    if checker.is_list(t):
+        return entity_kinds(t[1])
+    if checker.is_either(t):
+        return set().union(*(entity_kinds(a) for a in t[1]))
+    return set()
+
+
+def kinds_reached(P, kinds):
+    """kinds and every entity their properties reach, as declared"""
+    seen, stack = set(), list(kinds)
+    while stack:
+        e = stack.pop()
+        if e in seen or e not in P.entities:
+            continue
+        seen.add(e)
+        for t in P.entities[e]["props"].values():
+            stack.extend(entity_kinds(t))
+    return seen
 
 
 # --- one example ---------------------------------------------------------------
@@ -363,6 +462,8 @@ def needs(story, operations, P):
 OPERATIONS = {}     # the project's operations as written, set by run()
 PROJECT = [None]    # the checker's view of the project, set by run()
 PHRASES = {"entities": {}, "roles": {}}     # property type phrases as written, set by load_project()
+RULES = {"operations": {}, "always": {}}    # each operation's rules and each entity's always-rules, with their lines, set by load_project()
+GIVENS = []         # the things the example's givens made, set by run_example()
 
 
 def optional(phrase):
@@ -389,10 +490,313 @@ def permitted(name, actor, args, kwargs):
 
 def run_operation(name, actor, args, kwargs):
     """the operation's return; raises binding.Refused; actor None is a read
-    inside a fact, with no permission check"""
+    inside a fact, with no permission check. The call is held to the
+    operation's rules (section 6): permission, then the first refuse
+    condition that holds, which the code must give, reason for reason,
+    or none; a refused call changes nothing; a call not refused makes
+    every ensure and always-rule hold and changes no stored location the
+    spec does not name. A broken rule raises RuleBroken"""
     if actor is not None and not permitted(name, actor, args, kwargs):
         raise binding.Refused(f"{name} is not allowed for {', '.join(actor.roles)}")
-    return binding.OPERATIONS[name](actor, *args, **inputs_of(name, args, kwargs)[1])
+    rules = RULES["operations"][name]
+    required, optionals = inputs_of(name, args, kwargs)
+    scope = dict(required, **optionals)
+    if actor is not None:
+        scope["ACTOR"] = actor
+    expected = next((r for r in rules["refuse"] if evaluate(r[0], scope)), None)
+    if RECORD[0] is not None and "returns" in OPERATIONS[name]:
+        found = []  # what a read gives back derives from what its returns reads,
+        try:        # and its order from what ordered_by reads on each item
+            found = evaluate(OPERATIONS[name]["returns"], scope)
+        except (Fail, binding.UnsetRead):
+            pass
+        for item in found if type(found) is list else []:
+            for o in checker.listing(OPERATIONS[name].get("ordered_by")) if isinstance(item, binding.Thing) else []:
+                try:
+                    evaluate(o, {k: v for k, v in scope.items() if k == "ACTOR"} | {kind_of(item): item})
+                except (Fail, binding.UnsetRead):
+                    pass
+    roots = GIVENS + list(scope.values())
+    before = snapshot(roots)
+    if expected is None:
+        scope["OLD"] = old_values(rules["ensure"], scope)
+        places = named(rules, scope)    # before the call too: what it derived from then
+    try:
+        result = binding.OPERATIONS[name](actor, *args, **optionals)
+    except binding.Refused as r:
+        if expected is None:
+            raise RuleBroken([(rules["line"], None, f"{name} refused: {show(r.reason)}, but the spec does not refuse")])
+        if r.reason != expected[1]:
+            raise RuleBroken([(expected[2], None, f"{name} should refuse: {show(expected[1])}, but it refused: {show(r.reason)}")])
+        broken = changed(name, before, set())
+        if broken:
+            raise RuleBroken([(rules["line"], None, m) for m in broken])
+        raise
+    if expected is not None:
+        raise RuleBroken([(expected[2], None, f"{name} should refuse: {show(expected[1])}, but it did not refuse")])
+    broken = []
+    for text, at in rules["ensure"]:
+        found = judge(text, scope)
+        if found is not None:
+            broken.append((at, None, f"{name}: ensure {text}: found {found}"))
+    if not ALWAYS[0]:     # a read inside an always fact keeps its other checks, not these
+        ALWAYS[0], saved, RECORD[0] = True, RECORD[0], None
+        try:
+            for thing in reachable(roots):
+                for text, at in RULES["always"].get(kind_of(thing)) or []:
+                    found = judge(text, own_scope(thing, kind_of(thing)))
+                    if found is not None:
+                        broken.append((at, None, f"{name}: always {text}, on {show(thing, False)}: found {found}"))
+        finally:
+            ALWAYS[0], RECORD[0] = False, saved
+    places |= named(rules, scope)
+    broken += [(rules["line"], None, m) for m in changed(name, before, places)]
+    if broken:
+        raise RuleBroken(broken)
+    return result
+
+
+# --- the frame rule and OLD (section 6) -------------------------------------------
+
+MISSING = object()      # a stored property the thing does not hold
+RECORD = [None]         # the (id of the thing, property) locations read, while derives records
+ALWAYS = [False]        # True while the always facts after a call are judged
+
+
+def fields(thing):
+    """a thing's own dict, raw: an unset value stays unread"""
+    return object.__getattribute__(thing, "__dict__")
+
+
+def kind_of(thing):
+    return dict.get(fields(thing), "_entity")
+
+
+def stored(kind):
+    """the stored properties of an entity, as declared: neither computed nor derived"""
+    return [p for p, phrase in (PHRASES["entities"].get(kind) or {}).items()
+            if isinstance(phrase, str) and not phrase.endswith(", DERIVED")]
+
+
+def declared(thing):
+    """the stored properties of a thing: an entity's, or an actor's from its roles"""
+    if kind_of(thing) != "actor":
+        return stored(kind_of(thing))
+    return list(dict.fromkeys(p for r in dict.get(fields(thing), "roles") or []
+                              for p in PHRASES["roles"].get(r) or {}))
+
+
+def reachable(roots):
+    """every entity reachable from roots through stored properties, raw, in
+    the order first reached, and every actor among them, not looked into;
+    an unset value is not read"""
+    out, seen, stack = [], set(), list(reversed(roots))
+    while stack:
+        x = stack.pop()
+        if type(x) is list:
+            stack.extend(reversed(x))
+            continue
+        if not isinstance(x, binding.Thing) or id(x) in seen:
+            continue
+        if kind_of(x) == "actor":
+            seen.add(id(x))
+            out.append(x)
+            continue
+        if kind_of(x) not in PHRASES["entities"]:
+            continue
+        seen.add(id(x))
+        out.append(x)
+        d = fields(x)
+        stack.extend(reversed([dict.get(d, p) for p in stored(kind_of(x)) if p in d]))
+    return out
+
+
+def frozen(v):
+    """a deep, frozen copy that keeps every identity: lists copied, an entity
+    or an unset value the same object, a plain value as it is"""
+    return [frozen(x) for x in v] if type(v) is list else v
+
+
+def same(a, b):
+    """is the value b the frozen value a: an entity or an unset value by
+    identity, a list element by element, any other value by type and value;
+    nothing unset is read"""
+    if a is b:
+        return True
+    if type(a) is list and type(b) is list:
+        return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+    if type(a) is not type(b) or a is MISSING or type(a) is binding.Unset or isinstance(a, binding.Thing):
+        return False
+    return a == b
+
+
+def snapshot(roots):
+    """every stored property location of every entity reachable from roots,
+    and of every actor among them, (thing, property) to its frozen value"""
+    return [(t, p, frozen(dict.get(fields(t), p, MISSING))) for t in reachable(roots) for p in declared(t)]
+
+
+def label(thing):
+    d = fields(thing)
+    return d.get("_given") or d.get("_entity")
+
+
+def changed(name, before, places):
+    """a message for each location in before that changed and is not one of
+    places, (id of the thing, property)"""
+    return [f"{name} changed {label(t)}.{p}, which the spec does not name"
+            for t, p, v in before
+            if not same(v, dict.get(fields(t), p, MISSING)) and (id(t), p) not in places]
+
+
+def old_values(ensure, scope):
+    """OLD for the ensure facts after the call: each OLD(x) taken now, as a
+    frozen copy, for every value of the comprehension variables x is
+    inside, and looked up after the call by the text of x and the names it
+    uses, each by what the call cannot change (keyed)"""
+    table = []
+    env = dict(scope, OLD=lambda x, env: value(x, env))     # before the call OLD(x) is x
+    for text, _ in ensure:
+        gather(ast.parse(text, mode="eval").body, env, scope, table)
+
+    def old(x, env):
+        text, names = ast.unparse(x), uses(x, env, scope)
+        for t, bound, v in table:
+            if t == text and keyed(bound, names):
+                if isinstance(v, Fail):     # x could not be read before the call
+                    raise v
+                return v
+        raise Fail(f"OLD({text}) has no value for " + ", ".join(f"{n} = {show(env[n])}" for n, _ in names)
+                   + ": it was not there before the call")
+    return old
+
+
+def uses(x, env, scope):
+    """the names x uses that env gives a value, by name, each with its key:
+    None for an input or the actor, bound by name for the whole call, so
+    a value the call changes still finds its OLD; for a comprehension's
+    name the value it takes and a frozen copy of it"""
+    found = sorted({n.id for n in ast.walk(x) if isinstance(n, ast.Name)} - {"OLD"})
+    return [(n, None if n in scope and env[n] is scope[n] else (env[n], frozen(env[n])))
+            for n in found if n in env]
+
+
+def keyed(before, now):
+    """do the names of an OLD(x) taken before the call match those of one
+    after: the same names, an input by name alone, a comprehension's name
+    by the same value it took before, an entity or a list by identity"""
+    if [n for n, _ in before] != [n for n, _ in now]:
+        return False
+    return all(a is b if a is None or b is None else a[0] is b[0] or same(a[1], b[0])
+               for (_, a), (_, b) in zip(before, now))
+
+
+def gather(n, env, scope, table):
+    """into table, (text of x, the names x uses with their keys, its frozen
+    value or a Fail) for each OLD(x) in n, inside a comprehension once for
+    each value its variables take now; a filter is not applied, so a value
+    the call lets in still has its OLD"""
+    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "OLD":
+        x, bound = n.args[0], uses(n.args[0], env, scope)
+        text = ast.unparse(x)
+        if any(t == text and keyed(b, bound) for t, b, _ in table):
+            return
+        try:
+            v = frozen(value(x, env))
+        except Fail as e:
+            v = e
+        except binding.UnsetRead as u:
+            v = Fail(str(u))
+        table.append((text, bound, v))
+        return
+    if isinstance(n, (ast.ListComp, ast.GeneratorExp)):
+        gather_loop(n.generators, n.elt, env, scope, table)
+        return
+    for child in ast.iter_child_nodes(n):
+        gather(child, env, scope, table)
+
+
+def gather_loop(gens, elt, env, scope, table):
+    if not gens:
+        gather(elt, env, scope, table)
+        return
+    g = gens[0]
+    gather(g.iter, env, scope, table)
+    try:
+        source = value(g.iter, env)
+    except (Fail, binding.UnsetRead):
+        return
+    for x in source if isinstance(source, list) else []:
+        inner = dict(env, **{g.target.id: x})
+        for c in g.ifs:
+            gather(c, inner, scope, table)
+        gather_loop(gens[1:], elt, inner, scope, table)
+
+
+def named(rules, scope):
+    """the locations the spec names, as (id of the thing, property): the
+    left operand of an ensure comparison, len of it, and each also_changes
+    path; a computed or derived property named also names the stored
+    locations it derives from, on that thing (derives)"""
+    places = set()
+    paths = []
+    for text, _ in rules["ensure"]:
+        n = ast.parse(text, mode="eval").body
+        if isinstance(n, ast.Compare) and len(n.ops) == 1:
+            left = n.left
+            if isinstance(left, ast.Call) and isinstance(left.func, ast.Name) and left.func.id == "len" and len(left.args) == 1:
+                left = left.args[0]
+            paths.append(left)
+    paths += [ast.parse(p, mode="eval").body for p in rules["also_changes"]]
+    for n in paths:
+        if not isinstance(n, ast.Attribute):
+            continue
+        try:
+            thing = value(n.value, scope)
+        except (Fail, binding.UnsetRead):
+            continue        # the fact itself fails, or names nothing reachable
+        if not isinstance(thing, binding.Thing):
+            continue
+        places.add((id(thing), n.attr))
+        saved, RECORD[0] = RECORD[0], set()
+        try:
+            try:
+                derives(thing, n.attr)
+            except (Fail, binding.UnsetRead):
+                pass        # what was read before it failed is named
+            places |= RECORD[0]
+        finally:
+            RECORD[0] = saved
+    return places
+
+
+def derives(thing, prop):
+    """while recording: thing.prop read. A stored property records its
+    location; a derived one (section 11) every stored location of that
+    thing; a computed one is its expression evaluated on that thing, so
+    its own reads, through other computed properties and the read
+    operations it calls, are recorded, and gives that value. Anything
+    else gives MISSING, read as usual"""
+    kind = kind_of(thing)
+    ent = PROJECT[0].entities.get(kind)
+    if ent is None:
+        if prop in declared(thing):     # an actor's
+            RECORD[0].add((id(thing), prop))
+        return MISSING
+    if prop in stored(kind):
+        RECORD[0].add((id(thing), prop))
+    elif prop in ent["derived"]:
+        RECORD[0].update((id(thing), q) for q in stored(kind))
+    elif isinstance(ent["computed"].get(prop), str):
+        return evaluate(ent["computed"][prop], own_scope(thing, kind))
+    return MISSING
+
+
+def own_scope(thing, kind):
+    """an always-rule's roots: the entity's own properties, each read only
+    when the rule reaches it"""
+    who = label(thing)
+    return {p: Lazy(lambda p=p: read(thing, p, f"{who}.{p}")) for p in PHRASES["entities"].get(kind) or {}}
 
 
 def holds_things(t):
@@ -533,6 +937,7 @@ def run_example(ex, where, source, path, workdir):
             env = make_givens(ex.get("given") or [], workdir)
         except Fail as e:
             return [(line(where + ("given",)), None, str(e))], None
+        GIVENS[:] = env.values()
         for i, step in enumerate(ex.get("steps") or []):
             if not run_step(step, i, env, where, line, failures):
                 break
@@ -562,6 +967,9 @@ def run_step(step, i, env, where, line, failures):
             got = str(u)
         except binding.Refused as r:
             got = f"refused: {show(r.reason)}"
+        except RuleBroken as e:     # the code broke a rule of the spec: the example ends here
+            failures.extend(e.failures)
+            return False
         except (EddaError, binding.NotBound):
             raise
         except Exception as e:      # the code under test crashed
@@ -572,7 +980,11 @@ def run_step(step, i, env, where, line, failures):
             failures.append((line(at + (0,)), expected, got))
             return False
     for j, text in enumerate(then[first:], first):
-        found = judge(text, env)
+        try:
+            found = judge(text, env)
+        except RuleBroken as e:     # a read inside the fact broke a rule
+            failures.extend(e.failures)
+            continue
         if found is not None:
             failures.append((line(at + (j,)), text, found))
     return True
