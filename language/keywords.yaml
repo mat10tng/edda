@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 59).
+# Edda keyword registry, generated from language/reference.md (revision 60).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, fixed name, checker rule and read-view
 # sentence kind, with what it means, why it exists and where it comes
@@ -162,7 +162,7 @@ keys:
   - key: 'given:'
     section: 'Examples'
     means: 'a list of things to make; each item has exactly one key besides with: - <entity>: <name> or - actor: <name>'
-    why: 'order-independent, schema-checked; names declared here are used below; the binding makes them; no glue is written'
+    why: 'order-independent, schema-checked; names declared here are used below; the binding makes them (section 9); no glue is written'
   - key: 'with:'
     section: 'Examples'
     means: 'property name to value: a number, quoted text, a quoted time, True, False, a choice value, a given name, or a flat list of those; roles: (a list of role names) for an actor, fixture: for a spec_file only'

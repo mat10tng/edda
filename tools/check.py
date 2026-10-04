@@ -883,7 +883,8 @@ class Project:
         """computed_cycle: each operation with a text returns to its summary, the
         (entity, property) pairs a call can read: its refuse conditions and
         returns, each input typed by its declared type, and its ordered_by
-        over one result item, plus the summary of every operation it calls.
+        over one result item, plus the summary of every operation it calls;
+        ("CLOCK", name) for NOW or TODAY read in any of them.
         who is left out: a call inside an expression has no actor and no
         permission check; ensure is left out: such a call is always a read.
         Each expression is walked once and the summaries grow to a fixed point"""
@@ -1008,7 +1009,7 @@ class Expr:
     def __init__(self, project, scope, allow_old=False, silent=False):
         self.P, self.scope, self.allow_old, self.silent = project, scope, allow_old, silent
         self.out, self.src, self.outer = [], "", None
-        self.own, self.reads = None, None   # computed_cycle: the entity and the (entity, property) reads
+        self.own, self.reads = None, None   # computed_cycle: the entity and the (entity, property) reads, ("CLOCK", name) for NOW or TODAY
         self.calls = None                   # computed_cycle: the operations with a text returns it calls
 
     def problem(self, rule, msg):
@@ -1092,6 +1093,8 @@ class Expr:
             if i == "ACTOR":
                 return scope.get("ACTOR", ("actor", None))
             if i in ("NOW", "TODAY"):     # TODAY is a day, a TIME at 00:00 (7.2)
+                if self.reads is not None:
+                    self.reads.add(("CLOCK", i))  # no entity is named CLOCK; the runner's clock check
                 return "TIME"
             if i == "RESULT":
                 if "RESULT" not in scope:
