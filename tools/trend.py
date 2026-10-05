@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The problems logged by check.py and run.py over time (reference
-section 11).
+section 11): edda trend, of the edda command (tools/edda.py).
 
+    edda trend [--root DIR] [--log FILE] [--by DIM[,DIM]] [--top N] [--json]
     python3 tools/trend.py [--root DIR] [--log FILE] [--by DIM[,DIM]] [--top N]
 
 Reads .edda/checks.log in the project (--root, Edda's own when not
@@ -14,7 +15,9 @@ Every line is checked before it is counted: a line that is not JSON or
 not a valid record (a field missing or of the wrong type, a date not in
 the log's format, a dimension value the registry does not allow) is
 skipped, and one line says how many were. No output line is ever cut:
-one that would pass 79 characters goes on over indented lines.
+one that would pass 79 characters goes on over indented lines. The log
+is there only when a project turns it on (problem_log: local in its
+edda.yaml); trend reads whatever log is there.
 """
 import argparse
 import datetime
@@ -147,7 +150,20 @@ def say(head, text):
     print("\n".join(wrap(head, text, "  ")))
 
 
-def main(argv):
+def report(problems, by, top):
+    """the report as data, for edda trend --json: the same counts as trend"""
+    days = sorted({p["date"][:10] for p in problems})
+    values = {" x ".join(str(p[d]) for d in by): [str(p[d]) for d in by] for p in problems}
+    return {"total": len(problems), "first": days[0] if days else None, "last": days[-1] if days else None,
+            "per_day": [{"date": day, "total": len(on), "counts": watch.counts(on)}
+                        for day in days for on in [[p for p in problems if p["date"][:10] == day]]],
+            "by": by,
+            "groups": [{"count": n, "values": values[label]}
+                       for n, label in counted(problems, lambda p: " x ".join(str(p[d]) for d in by))],
+            "rules": [{"count": n, "rule": rule} for n, rule in counted(problems, lambda p: p["rule"])[:top]]}
+
+
+def main(argv, result=None):
     ap = argparse.ArgumentParser(
         description="the logged problems over time")
     ap.add_argument("--log", help="the log (default .edda/checks.log, "
@@ -159,6 +175,11 @@ def main(argv):
     ap.add_argument("--top", type=int, default=10,
                     help="how many rules to list (default 10)")
     a = ap.parse_args(argv)
+    import settings     # the options' paths; the log folder stays inside the root (section 9)
+    usage = settings.not_there([a.root], [a.log])
+    if usage:
+        print(usage)
+        return 2
     by = [d.strip() for d in a.by.split(",")]
     wrong = [d for d in by if d not in watch.DIMENSIONS]
     if not 1 <= len(by) <= 2 or wrong:
@@ -166,7 +187,6 @@ def main(argv):
             ", ".join(watch.DIMENSIONS))
         return 2
     root = os.path.abspath(a.root or watch.ROOT)
-    import settings     # the log folder stays inside the root (section 9)
     outside = settings.log_outside(root)
     if outside is not None:
         print(outside)
@@ -179,8 +199,11 @@ def main(argv):
     if path is None:
         print("the log is off (EDDA_LOG=off); name one with --log")
         return 2
-    if not os.path.exists(path):
-        say("nothing logged yet: ", os.path.relpath(path))
+    if not os.path.exists(path):        # the default log or EDDA_LOG's, not written yet
+        if result is not None:      # with --json, the fields say what is printed here
+            result.update(log=os.path.relpath(path), skipped=0, **report([], by, a.top))
+        else:
+            say("nothing logged yet: ", os.path.relpath(path))
         return 0
     if a.log is None and not os.environ.get("EDDA_LOG", "") or a.root is not None and a.log is not None:
         from check import Outside       # the root's own log, not one the operator named alone
@@ -191,6 +214,9 @@ def main(argv):
             return 1
     else:
         problems, bad = read(path)
+    if result is not None:      # with --json, the fields say what is printed here
+        result.update(log=os.path.relpath(path), skipped=bad, **report(problems, by, a.top))
+        return 0
     if bad:
         print(f"{bad} lines of the log skipped: not JSON or not a valid "
               "record")
@@ -202,4 +228,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    import edda     # the one command: its exit codes and --json (section 13)
+    sys.exit(edda.main(["trend", *sys.argv[1:]]))

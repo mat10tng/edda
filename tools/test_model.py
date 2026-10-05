@@ -220,9 +220,9 @@ class Graph(unittest.TestCase):
 
     def test_no_may_change_or_no_property(self):
         self.assertEqual(run("--graph", "fulfillment.reference", "fixtures/inventory_autopart"),
-                         (1, "fulfillment.reference has no may_change\n"))
+                         (2, "fulfillment.reference has no may_change\n"))      # usage errors (section 13)
         self.assertEqual(run("--graph", "fulfillment.nope", "fixtures/inventory_autopart"),
-                         (1, "no such property: fulfillment.nope\n"))
+                         (2, "no such property: fulfillment.nope\n"))
 
 
 class Model(unittest.TestCase):

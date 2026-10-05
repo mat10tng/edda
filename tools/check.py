@@ -3105,39 +3105,43 @@ def status_text(g):
     return out
 
 
-def report(folder, base=ROOT, root=None, guard=None):
+def report(folder, base=ROOT, root=None, guard=None, files=None):
     """print each file of folder, its path from base, with its problems,
     flags and status, as the checker's own run does; root is the project's
     root, which code paths are relative to (links_of); guard, when given,
     the root every file must resolve inside (settings.Settings.guard);
+    files, when given, a list each file's entry goes to, not printed, for
+    edda check --json: file, ok, problems, flags and status;
     (ok, found, links)"""
-    ok = True
     P = project_of(folder, guard)
     paths = sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc"))
     found = {path: check(path, P) for path in paths}
     L = None if any(any(r[:4]) for r in found.values()) else links_of(folder, P, root)
     linked = L[1] if L else None
+    entries = []
     for path in paths:
         src, shape, meaning, history, flags = found[path]
         problems = src + shape + meaning + history
-        print(os.path.relpath(path, base), "OK" if not problems else "")
-        for rule, line, msg in problems:
-            ok = False
-            print(f"    {line}: {rule}: {msg}")
-        for rule, line, msg in flags:
-            print(f"    {line}: flagged: {rule}: {msg}")
+        status = []
         if not problems and not path.endswith(".vc") and not history_refused(path, P):
             source, data = load(path, guard)
-            for s in status_lines(data, P, source, linked):
-                print(f"    {s}")
-    for shown, problems, flags in (L[0] if L else []):
+            status = status_lines(data, P, source, linked)
+        entries.append((os.path.relpath(path, base), problems, flags, status))
+    entries += [(shown, problems, flags, []) for shown, problems, flags in (L[0] if L else [])]
+    for shown, problems, flags, status in entries:
+        if files is not None:
+            files.append({"file": shown, "ok": not problems, "status": list(status),
+                          "problems": [{"rule": r, "line": n, "message": m} for r, n, m in problems],
+                          "flags": [{"rule": r, "line": n, "message": m} for r, n, m in flags]})
+            continue
         print(shown, "OK" if not problems else "")
         for rule, line, msg in problems:
-            ok = False
             print(f"    {line}: {rule}: {msg}")
         for rule, line, msg in flags:
             print(f"    {line}: flagged: {rule}: {msg}")
-    return ok, found, L
+        for s in status:
+            print(f"    {s}")
+    return all(not problems for _, problems, _, _ in entries), found, L
 
 
 def refused(folder, root=None):
@@ -3146,15 +3150,18 @@ def refused(folder, root=None):
     return any(any(check(path, P)[:4]) for path in sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc")))
 
 
-def model_main(args, root=None):
-    """--model [DIR] and --graph ENTITY.PROPERTY [DIR]; the exit code. The
+def model_main(args, root=None, result=None):
+    """--model [DIR] and --graph ENTITY.PROPERTY [DIR]; the exit code (2
+    for a folder or property that is not there to read or draw). The
     folder is DIR, else the one root's edda.yaml names (settings.py); a
-    flag of the settings goes to stderr, so the model stays JSON"""
+    flag of the settings goes to stderr, so the model stays JSON; result,
+    when given, gets the model or the graph's lines (edda check --json)"""
     import settings
     named = args[-1] if len(args) == (2 if args[0] == "--model" else 3) else None
-    if named is not None and not os.path.isdir(named):
-        print(f"no such folder: {named}")
-        return 1
+    usage = settings.not_there([named])
+    if usage:
+        print(usage)
+        return 2
     project, code = settings.open_project(root, named, sys.stderr)
     if project is None:
         return code
@@ -3166,6 +3173,9 @@ def model_main(args, root=None):
         report(folder, ROOT if root is None else project.root, project.root, project.guard)
         return 1
     model = model_of(folder, project.guard)
+    if args[0] == "--model" and result is not None:
+        result["model"] = model
+        return 0
     if args[0] == "--model":
         try:
             print(json.dumps(model, indent=2), flush=True)
@@ -3177,10 +3187,13 @@ def model_main(args, root=None):
     if g is None:
         has = any(e["name"] == ename and any(p["name"] == prop for p in e["properties"]) for e in model["entities"])
         print(f"{args[1]} has no may_change" if has else f"no such property: {args[1]}")
-        return 1
+        return 2
     if not g["nodes"]:
         print(f"{args[1]} has no known values")
-        return 1
+        return 2
+    if result is not None:
+        result["graph"] = status_text(g)
+        return 0
     for s in status_text(g):
         print(s)
     return 0
@@ -3189,67 +3202,7 @@ def model_main(args, root=None):
 USAGE = "usage: check.py [--root DIR] [--model [DIR] | --graph ENTITY.PROPERTY [DIR]]"
 
 if __name__ == "__main__":
-    # --root names the project, the folder holding edda.yaml and the spec
-    # folder; Edda's own when left out, and only then are the fixtures reported
-    import settings
-    args, root = sys.argv[1:], None
-    if args[:1] == ["--root"] and len(args) >= 2:
-        root, args = args[1], args[2:]
-        if not os.path.isdir(root):
-            print(f"no such folder: {root}")
-            sys.exit(1)
-    if args[:1] == ["--model"] and len(args) <= 2 or args[:1] == ["--graph"] and 2 <= len(args) <= 3:
-        sys.exit(model_main(args, root))
-    if args:
-        print(USAGE)
-        sys.exit(2)
-    project, code = settings.open_project(root)
-    if project is None:
-        sys.exit(code)
-    if not os.path.isdir(project.folder):
-        print(f"no such folder: {os.path.relpath(project.folder)}")
-        sys.exit(1)
-    ok, own, own_links = report(project.folder, project.root, project.root, project.guard)
-
-    if project.root == ROOT:
-        print()
-        print("fixtures: which layer catches each file")
-    LAYERS = ("source", "shape", "meaning", "history")      # the fourth layer's refusals; its flags are "flagged"
-    for folder in sorted(os.listdir(f"{ROOT}/fixtures")) if project.root == ROOT else []:
-        FP = project_of(f"{ROOT}/fixtures/{folder}")
-        paths = sorted(glob.glob(f"{ROOT}/fixtures/{folder}/*.edda") + glob.glob(f"{ROOT}/fixtures/{folder}/*.edda.vc"))
-        found = {path: check(path, FP) for path in paths}
-        L = None if any(any(r[:4]) for r in found.values()) else links_of(f"{ROOT}/fixtures/{folder}", FP)
-        for path in paths:
-            src, shape, meaning, history, flags = found[path]
-            refusals = src + shape + meaning + history
-            caught = next((name for name, found in zip(LAYERS, (src, shape, meaning, history)) if found), None)
-            label = ("caught by " + caught) if caught else ("flagged" if flags else "passes")
-            print(f"  {folder}/{os.path.basename(path)}: {label}")
-            for rule, line, msg in refusals:
-                print(f"      {line}: {rule}: {msg}")
-            for rule, line, msg in flags:
-                print(f"      {line}: flagged: {rule}: {msg}")
-            if not refusals and not path.endswith(".vc") and not history_refused(path, FP):
-                source, data = load(path)
-                for s in status_lines(data, FP, source, L and L[1]):
-                    print(f"      {s}")
-        for shown, refusals, flags in (L[0] if L else []):     # the link layer, after the four
-            print(f"  {shown}: " + ("caught by links" if refusals else "flagged" if flags else "passes"))
-            for rule, line, msg in refusals:
-                print(f"      {line}: {rule}: {msg}")
-            for rule, line, msg in flags:
-                print(f"      {line}: flagged: {rule}: {msg}")
-    import watch    # the count line and the log, for the project only (section 11)
-    seen = [(path, r) for path, layers in own.items() for kind in layers for r in kind]
-    seen += [(os.path.join(project.root, shown), r) for shown, refusals, flags in (own_links[0] if own_links else [])
-             for r in refusals + flags]
-    problems = [watch.problem(rule, path, line, watch.found_by(rule), project.root, load, project.guard)
-                for path, (rule, line, _) in seen]
-    problems += [watch.problem(rule, path, line, "reading", project.root, load, project.guard)
-                 for rule, path, line, _ in project.flags]
-    counts = watch.count_line(problems)
-    if counts:
-        print(counts)
-    watch.log(problems, project.root)
-    sys.exit(0 if ok else 1)
+    # the checker's run is the edda command's check (tools/edda.py), so its
+    # exit codes, its --json and the problem log are those of section 13
+    import edda
+    sys.exit(edda.main(["check", *sys.argv[1:]]))

@@ -19,8 +19,11 @@ the project's edda.yaml (tools/settings.py); --root names the project,
 cases on, each story gets one more line: its generated cases
 (tools/generate.py, which needs Hypothesis), under the seed --seed names
 or a random one. Exit 0 when no story failed, 1 when one failed, its
-generated cases included, or the spec or the settings do not check, 3
-when Edda itself failed.
+generated cases included, or the spec or the settings do not check, 2
+for a usage error (a STORY the project does not have, a --root or
+--project not there), 3 when Edda itself failed (reference section 13).
+The edda command (tools/edda.py) runs this as edda run; with --json it
+fills a result and prints only the lines the result does not hold.
 """
 import argparse
 import ast
@@ -54,6 +57,11 @@ class UnsetFail(Fail):
 
 class EddaError(Exception):
     """Edda itself failed: a spec the checker should have refused"""
+
+
+class UnknownStory(EddaError):
+    """a STORY named that the project does not have: a usage error, exit 2;
+    the line printed is the one of revision 68"""
 
 
 class RuleBroken(Exception):
@@ -1227,7 +1235,7 @@ def run(folder, wanted=(), guard=None):
     known = {sid for sid, *_ in stories}
     unknown = [s for s in wanted if s not in known]
     if unknown:
-        raise EddaError(f"unknown story: {', '.join(unknown)}")
+        raise UnknownStory(f"unknown story: {', '.join(unknown)}")
     out = []
     for sid, st, source, path in stories:
         if wanted and sid not in wanted:
@@ -1254,7 +1262,9 @@ def run(folder, wanted=(), guard=None):
     return out
 
 
-def main(argv):
+def main(argv, result=None):
+    """the exit code; result, when given, a dict filled for edda run --json
+    (reference section 13): stories, failures and counts"""
     ap = argparse.ArgumentParser(description="run the examples of Edda's stories through the binding")
     ap.add_argument("--root", help="the project: the folder holding edda.yaml and the spec folder "
                                    "(default Edda's own)")
@@ -1262,10 +1272,14 @@ def main(argv):
     ap.add_argument("--seed", type=int, help="the seed of the generated cases, to replay a run")
     ap.add_argument("stories", nargs="*", metavar="STORY")
     a = ap.parse_args(argv)
+    usage = settings.not_there([a.root, a.project])
+    if usage:
+        print(usage)
+        return 2
     project, code = settings.open_project(a.root, a.project)
     if project is None:
         return code
-    if a.root is not None and not os.path.isdir(project.folder):
+    if not os.path.isdir(project.folder):       # the spec folder edda.yaml names
         print(f"no such folder: {os.path.relpath(project.folder)}")
         return 1
     generated = project.generated
@@ -1282,6 +1296,9 @@ def main(argv):
         replay = shlex.join(["python3", os.path.relpath(os.path.abspath(__file__)), *again, "--seed", str(seed)])
     try:
         out = run(project.folder, a.stories, project.guard)
+    except UnknownStory as e:
+        print(f"edda failed: {e}")
+        return 2
     except EddaError as e:
         print(f"edda failed: {e}")
         return 3
@@ -1291,14 +1308,23 @@ def main(argv):
             print(f"    {line}")
         return 1
     bad = False
-    at = []         # (rule, file, line, found by) of each failure, for the count line and the log
+    at = []         # (rule, file, line, found by, message) of each failure, for the count line and the log
+    shown = []      # each story's result, for --json, filled as it is run
+    say = print if result is None else (lambda *_: None)     # with --json, the fields say it
+    if result is not None:
+        result["stories"] = shown
     for sid, status, detail, failed in out:
-        print(f"{sid}: {status}: {detail}")
+        say(f"{sid}: {status}: {detail}")
+        story = {"id": sid, "status": status, "detail": detail, "examples_failed": [], "generated": []}
+        shown.append(story)
         for title, failures in failed:
-            print(f"    example {show(title)} failed")
+            say(f"    example {show(title)} failed")
+            story["examples_failed"].append({"title": title, "failures": []})
             for line, text, found in failures:
-                print(f"        {line}: " + (f"then {text}: found {found}" if text else found))
-                at.append(("failing_example", *place_of(line), "example run"))
+                said = f"then {text}: found {found}" if text else found
+                say(f"        {line}: " + said)
+                story["examples_failed"][-1]["failures"].append({"at": line, "then": text, "found": found})
+                at.append(("failing_example", *place_of(line), "example run", said))
         if generated["on"]:
             try:
                 lines, broke = generate.cases(sys.modules[__name__], sid, STORIES[sid], generated["runs"],
@@ -1306,18 +1332,23 @@ def main(argv):
             except EddaError as e:
                 print(f"edda failed: {e}")
                 return 3
-            print("\n".join(lines))
+            story["generated"] = lines
+            say("\n".join(lines))
             bad = bad or broke
             if broke:
-                rules = [place_of(m.group(1)) for m in map(BROKEN_RULE.match, lines[1:])
+                rules = [(place_of(m.group(1)), m.string.strip()) for m in map(BROKEN_RULE.match, lines[1:])
                          if m and ": not judged: " not in m.string]
-                at += [("failing_case", *p, "generated case") for p in rules or [(STORY_FILES[sid], None)]]
+                at += [("failing_case", *p, "generated case", said)
+                       for p, said in rules or [((STORY_FILES[sid], None), lines[0])]]
     problems = [watch.problem(rule, path, line, how, project.root, checker.load, project.guard)
-                for rule, path, line, how in at]
+                for rule, path, line, how, _ in at]
     counts = watch.count_line(problems)
     if counts:
-        print(counts)
-    watch.log(problems, project.root)
+        say(counts)
+    if result is not None:
+        result.update(counts=watch.counts(problems),
+                      failures=[dict(p, message=said) for p, (*_, said) in zip(problems, at)])
+    watch.log(problems, project.root, project.problem_log == "local")
     return 1 if bad or any(status == "failing" for _, status, _, _ in out) else 0
 
 
@@ -1332,10 +1363,5 @@ def place_of(at):
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except SystemExit:
-        raise
-    except Exception as e:          # Edda itself failed
-        print(f"edda failed: {type(e).__name__}: {e}")
-        sys.exit(3)
+    import edda     # the one command: its exit codes, Edda failing exits 3
+    sys.exit(edda.main(["run", *sys.argv[1:]]))

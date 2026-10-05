@@ -14,7 +14,10 @@ changed meanwhile. With edda.yaml or a root in play, every file read and
 the folder written resolve inside the root (outside_root); the temporary
 file and the rename are made in the folder the lock holds open, so a
 symlink swapped in after the check is never followed. Who runs the script is not checked here; a guard
-outside the language keeps the agent out of the history."""
+outside the language keeps the agent out of the history. An approval
+refused exits 1; an --by, --because or --at that is not well formed is
+a usage error and exits 2 (reference section 13). The edda command runs
+this as edda approve; with --json it fills a result."""
 
 import argparse
 import datetime
@@ -306,7 +309,7 @@ def approve(folder, name, at, by, because, dry_run, guard=None):
         os.close(lock)
 
 
-def main(argv=None):
+def main(argv=None, result=None):
     ap = argparse.ArgumentParser(description="Append the operator's approval of a story or block to its .edda.vc.")
     ap.add_argument("name", metavar="NAME", help="a story id (ABC-123) or a role or entity name")
     ap.add_argument("--by", required=True, metavar="OPERATOR", help="the operator's name; becomes approved_by")
@@ -318,31 +321,45 @@ def main(argv=None):
                                      "given with --root, the two name one root")
     a = ap.parse_args(argv)
     import settings     # edda.yaml: the spec folder and the pin (section 9)
+    usage = settings.not_there([a.root, a.folder])
+    if usage:
+        print(usage, file=sys.stderr)
+        if result is not None:
+            result["refused"] = usage
+        return 2
     project, code = settings.open_project(a.root, a.folder, sys.stderr)
     if project is None:
         return code
+    at = a.at if a.at is not None else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     try:
-        if not re.fullmatch(E.NAME, a.by) or a.by in E.PY_KEYWORDS:
-            raise Refused(f"not a name: {a.by}")
-        if a.because is not None and not is_one_line(a.because):
-            raise Refused("because is one line")
-        at = a.at if a.at is not None else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        try:
-            ok = re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}", at) and datetime.datetime.strptime(at, "%Y-%m-%d %H:%M")
-        except ValueError:
-            ok = False
-        if not ok:
-            raise Refused(f'not a time "YYYY-MM-DD HH:MM": {at}')
+        ok = re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}", at) and datetime.datetime.strptime(at, "%Y-%m-%d %H:%M")
+    except ValueError:
+        ok = False
+    usage = (f"not a name: {a.by}" if not re.fullmatch(E.NAME, a.by) or a.by in E.PY_KEYWORDS
+             else "because is one line" if a.because is not None and not is_one_line(a.because)
+             else None if ok else f'not a time "YYYY-MM-DD HH:MM": {at}')
+    if usage is not None:       # the options, not the approval: a usage error
+        print(usage, file=sys.stderr)
+        if result is not None:
+            result["refused"] = usage
+        return 2
+    try:
         new, kind, number, vc = approve(project.folder, a.name, at, a.by, a.because, a.dry_run, project.guard)
-        sys.stdout.write(new)
-        if a.dry_run:
+        if result is not None:      # with --json, the fields say what is printed here
+            result.update(name=a.name, kind=kind, number=number, history=os.path.relpath(vc),
+                          version=new, written=not a.dry_run, refused=None)
             return 0
-        print(f"appended {kind} {a.name} v{number} to {vc}")
+        sys.stdout.write(new)
+        if not a.dry_run:
+            print(f"appended {kind} {a.name} v{number} to {vc}")
         return 0
     except Refused as r:
         print(r, file=sys.stderr)
+        if result is not None:
+            result.update(name=a.name, refused=str(r))
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import edda     # the one command: its exit codes and --json (section 13)
+    sys.exit(edda.main(["approve", *sys.argv[1:]]))

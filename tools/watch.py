@@ -1,15 +1,18 @@
-"""Watching problems (reference section 11, revision 67): the six
-dimensions of each problem, the count line and the local log.
+"""Watching problems (reference section 11, revisions 67 and 69): the
+six dimensions of each problem, the count line and the local problem
+log.
 
 Four dimensions are fixed per rule in language/keywords.yaml (category,
 sub, fix, acts, level); where is computed from the problem's line and
-found by is set by the tool. check.py and run.py append one JSON line
-per problem to <project>/.edda/checks.log, the project being the folder
-that holds the specs folder; EDDA_LOG=off turns that off and EDDA_LOG=
-<file> writes there instead. Writing the log never changes output or an
-exit code; the default log is written only if it resolves inside the
-project (settings.py, outside_root), else one line on stderr says it was
-not written. tools/trend.py reads the log.
+found by is set by the tool. The log is opt-in: only when the project's
+edda.yaml says problem_log: local do the checker and the runner append
+one JSON line per problem to <project>/.edda/checks.log, the project
+being the folder that holds the specs folder; EDDA_LOG=off turns that
+off and EDDA_LOG=<file> writes there instead, but EDDA_LOG never turns
+the log on. Writing the log never changes output or an exit code; the
+default log is written only if it resolves inside the project
+(settings.py, outside_root), else one line on stderr says it was not
+written. edda trend (tools/trend.py) reads the log.
 """
 import datetime
 import json
@@ -125,16 +128,20 @@ def problem(rule, path, line, how, folder, load, guard=None):
                 where=where(path, line, load, guard), found_by=how)
 
 
+def counts(problems):
+    """{category: count}, one per category with problems, in the
+    registry's order"""
+    order = registry()[1].get("category") or []
+    found = {}
+    for p in problems:
+        found[p["category"]] = found.get(p["category"], 0) + 1
+    return {c: found[c] for c in sorted(found, key=lambda c: (order.index(c) if c in order else len(order), c))}
+
+
 def count_line(problems):
     """'3 contradiction, 1 weak check': one count per category with
     problems, in the registry's order; None when there are none"""
-    order = registry()[1].get("category") or []
-    counts = {}
-    for p in problems:
-        counts[p["category"]] = counts.get(p["category"], 0) + 1
-    if not counts:
-        return None
-    return ", ".join(f"{counts[c]} {c}" for c in sorted(counts, key=lambda c: (order.index(c) if c in order else len(order), c)))
+    return ", ".join(f"{n} {c}" for c, n in counts(problems).items()) or None
 
 
 def log_file(folder):
@@ -155,14 +162,15 @@ def commit(folder):
     return p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else "none"
 
 
-def log(problems, folder):
-    """append one JSON line per problem; nothing when there are none or the
-    log is off; a log that cannot be written is left alone, silently. The
+def log(problems, folder, on):
+    """append one JSON line per problem when on (the project's problem_log
+    is local); nothing when it is not, when there are no problems or when
+    EDDA_LOG=off; a log that cannot be written is left alone, silently. The
     default log must resolve inside folder as it is opened (check.open_inside):
     a log that resolves outside is not written and one line on stderr says
     so; one EDDA_LOG names is the operator's own choice, written as given"""
     try:
-        to = log_file(folder)
+        to = log_file(folder) if on else None
         if not problems or to is None:
             return
         stamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")

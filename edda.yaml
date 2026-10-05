@@ -1,0 +1,5 @@
+# Edda's own settings (reference section 9): the stories in specs/, the
+# Python tools, and the local problem log in .edda/ (kept out of git).
+edda: 69
+stack: python
+problem_log: local

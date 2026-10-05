@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 68, 5 Oct 2026. Replaces revision 67. Decisions behind it:
+Revision 69, 5 Oct 2026. Replaces revision 68. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
@@ -11,8 +11,11 @@ phase 2623; generated cases: decision T, kb:9379252, and the build
 Plan's phase 2636; the analyser: decision U, kb:9379257, and the build
 Plan's phase 2648; problem dimensions and watching: decision U,
 questions 4 to 6, and the build Plan's phase 2649; the import contract:
-decisions W and X, kb:9380137, and the build Plan's phase 2657), and
-Astra's review rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
+decisions W and X, kb:9380137, and the build Plan's phase 2657; the
+opt-in problem log: decision HH, entry 140, which amends decision Y;
+one `edda` command with `--json` and fixed exit codes: decision AA,
+entry 132; both the build Plan's phase 2809), and Astra's review
+rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
 `language/keywords.yaml` (the registry: every key, expression form,
@@ -870,9 +873,10 @@ refused (`file must be a mapping`); whether it should mean "every
 default" is open.
 
 ```yaml
-edda: 68
+edda: 69
 specs: specs
 stack: python
+problem_log: local
 generated_cases: {on: true, runs: 100, steps: 20}
 ```
 
@@ -883,14 +887,16 @@ The file's keys, for the registry:
 | `edda:` | Settings | at the root of `edda.yaml`; the revision of Edda the project is written against, a whole number of at least 1; left out, no pin | tools older than the pin refuse to run; newer ones say so and run |
 | `specs:` | Settings | at the root of `edda.yaml`; the spec folder, a path relative to the root and inside it (no `..`, not absolute, and resolving inside the root once symlinks are followed); `specs` when left out | a project keeps its stories where it chooses |
 | `stack:` | Settings | at the root of `edda.yaml`; the code stack, `python` the one known; left out, none is named | the import names the stack once; a `glossary.links` that names another `target:` is refused |
+| `problem_log:` | Settings | at the root of `edda.yaml`; `local` or `off`; left out, or no file, `off`; with `local` the checker and the runner append each problem to `.edda/checks.log`, which `edda trend` reads (section 11) | a KB is the main home of a project's history and reads `edda --json` (section 13); a project keeps a history of its own only when it asks for one (decision HH) |
 | `generated_cases:` | Settings | at the root of `edda.yaml`; a mapping; left out, or no file, generated cases are off | one switch per project, off unless asked for |
 | `on:` | Settings | inside `generated_cases:`, required; a yes/no; no default | turning them on is a choice written down, never implied |
 | `runs:` | Settings | inside `generated_cases:`; a whole number of at least 1; 100 when left out | how many random runs a story gets |
 | `steps:` | Settings | inside `generated_cases:`; a whole number of at least 1; 20 when left out | how many calls a run may make at most |
 
 Every tool that reads the spec folder (`check.py`, `run.py`,
-`approve.py`, `view.py`) reads `edda.yaml` through one reader,
-`tools/settings.py`, and `trend.py` finds the log in the same root.
+`approve.py`, `view.py`; `edda check`, `run`, `approve` and `view`,
+section 13) reads `edda.yaml` through one reader, `tools/settings.py`,
+and `trend.py` finds the log in the same root.
 Each takes `--root DIR`, the project's root, Edda's own repository
 when left out. A tool given the spec folder by name (`--project`,
 `--folder`, `DIR`) takes the folder above it as the root and does not
@@ -899,10 +905,13 @@ spec folder by name whose folder above is another root, it prints one
 line, `--root <root> and the spec folder <folder> name two roots; give
 one`, and exits 2; `trend.py` given `--root` and a `--log` that is not
 that root's log does the same (`name two logs`). With no `edda.yaml`,
-every tool does exactly what it did in revision 67. For this revision only, an `edda.yaml` in the spec
+every tool does what it did in revision 67, but writes no log and
+exits as section 13 says. For now, an `edda.yaml` in the spec
 folder (`specs/edda.yaml`, the place of revisions 64 to 67) holding
 only `generated_cases:` is still read; with one at the root too, both
-are refused (`two_settings`). Revision 69 reads only the root.
+are refused (`two_settings`). A later revision reads only the root.
+Edda's own repository has an `edda.yaml` at its root: `edda: 69`,
+`stack: python` and `problem_log: local`, its stories in `specs/`.
 
 The pin: tools older than the pinned revision refuse to run, with one
 line naming both revisions (`pinned_newer`), and exit 3. Tools newer
@@ -912,7 +921,8 @@ the spec folder's `glossary.links` is refused (`stack_mismatch`). The
 refusals and the flag are in section 11.
 
 Every path the host gives stays inside its root. The spec folder
-(however it is named), the log folder `.edda`, each `covers:` path and
+(however it is named), the log folder `.edda` when `problem_log:` is
+`local`, each `covers:` path and
 so each `.links` path (which must be a covered file) is resolved, every
 symlink followed, and one that lands outside the root is refused
 (`outside_root`): the spec folder at the `specs:` line that names it,
@@ -925,7 +935,8 @@ operator's choice and is not held to the root.
 So is every file a tool opens under the root, not only every folder,
 once `edda.yaml` or a root is in play (`--root`, or a spec folder
 named): `edda.yaml` itself, each `.edda`, `.edda.vc` and `.links` file,
-each covered code file, and the default log `.edda/checks.log`. Each is
+each covered code file, and the default log `.edda/checks.log` when the
+log is on. Each is
 checked on the path that is opened, as it is opened: the path is
 resolved, and then opened from the root down without following any
 symlink, so a symlink put in place after the check makes the open fail
@@ -940,8 +951,8 @@ read it, exit 1. `approve.py` holds the spec folder open from the
 first read to the rename and makes its temporary file and the rename
 in that open folder, so it never writes through a symlink; a rename
 replaces a symlink named by the history rather than writing where it
-points. With no `edda.yaml` and no root, the files are read as in
-revision 67.
+points. With no `edda.yaml` and no root (an Edda repository without
+its own `edda.yaml`), the files are read as in revision 67.
 
 **Generated cases.** Off by default. A project turns them on with
 `generated_cases:` in its `edda.yaml` (above).
@@ -1131,9 +1142,9 @@ cancelled
 
 An empty `may_change` (`{status: {}}`) draws every value with no arrow.
 A property with no `may_change`, that does not exist, or whose values
-the checker does not know exits 1 with one line: `<entity>.<property>
-has no may_change`, `no such property: <entity>.<property>` or
-`<entity>.<property> has no known values`. A project that is refused prints its problems
+the checker does not know exits 2, a usage error (section 13), with
+one line: `<entity>.<property> has no may_change`, `no such property:
+<entity>.<property>` or `<entity>.<property> has no known values`. A project that is refused prints its problems
 and exits 1, as `--model` does. The other three graphs are in the
 model only; drawing them is not built.
 
@@ -1399,7 +1410,7 @@ operation resolved by the rule, the marker's line for a marker, and the
 | `pinned_newer` | an `edda.yaml` pinning a revision newer than the tools (section 9) | `edda.yaml pins revision <n>; these tools are revision <m>` |
 | `stack_mismatch` | an `edda.yaml` whose `stack:` differs from the `target:` of the spec folder's `glossary.links` | `stack is <stack> but <glossary.links> names target <target>` |
 | `two_settings` | an `edda.yaml` at the root and one in the spec folder, at the second | `two edda.yaml files; keep <edda.yaml> and move generated_cases: into it` |
-| `outside_root` | a path the host gives that resolves, symlinks followed, outside the project's root: the spec folder, the log folder `.edda`, a `covers:` path, or a file a tool opens under the root (`edda.yaml`, a `.edda`, `.edda.vc` or `.links` file; section 9) | `<what> resolves outside the project root: <resolved path>`, `<what>` being `the spec folder`, `the log folder .edda`, the `covers:` path or the file's name |
+| `outside_root` | a path the host gives that resolves, symlinks followed, outside the project's root: the spec folder, the log folder `.edda` (when the log is on), a `covers:` path, or a file a tool opens under the root (`edda.yaml`, a `.edda`, `.edda.vc` or `.links` file; section 9) | `<what> resolves outside the project root: <resolved path>`, `<what>` being `the spec folder`, `the log folder .edda`, the `covers:` path or the file's name |
 | `bad_marker` | a comment that starts like a marker but is not `# <STORY-ID>@<n>`; a marker not on a line of its own directly above a top-level function; a version its story does not have; one story twice on one function; a marker above a function doing none of its story's operations; a function doing an operation without its story's marker; a marker on a def that a later binding of its name replaces, one every import runs: a direct top-level statement, or in a branch proven to run (section 9) | `not a marker (write # <STORY-ID>@<version>): <text>`, `a marker is a line of its own directly above a function: <text>`, `<function> at line <n> is replaced by a def, a class or a binding at line <m>, so the marker is on code that does not run: <text>`, `<id> has no version <n>`, `marked twice: <id> on <function>`, `<function> does no operation of <id>`, `<function> does <operation> of <id> and carries no # <id>@<version>` |
 
 **Flags** (`problem.kind == flagged`):
@@ -1540,23 +1551,29 @@ counting the problems of the spec folder by `what went wrong`, in the order of
 the table above, for example `3 contradiction, 1 weak check`; nothing
 when there are none. The fixtures are never counted or logged: their
 problems are there on purpose. The runner ends the same way, counting
-its failures. Each run of either appends one line per problem to
-`.edda/checks.log` at the project's root, the folder that holds
-`edda.yaml` and the spec folder (section 9; for Edda itself, the
-repository's root); keep `.edda/`
-out of git, as Edda's own `.gitignore` does. A line is one JSON object: `date` (local time with its
+its failures. The log is opt-in (decision HH, amending decision Y for
+this case): only in a project whose `edda.yaml` says `problem_log:
+local` (section 9) does each run of either append one line per problem
+to `.edda/checks.log` at the project's root, the folder that holds
+`edda.yaml` and the spec folder (for Edda itself, which turns it on,
+the repository's root); keep `.edda/` out of git, as Edda's own
+`.gitignore` does. With `problem_log: off`, with none, or with no
+`edda.yaml`, nothing is written and no `.edda/` is made. A KB, the
+main home of a project's history, reads `edda check --json` and `edda
+run --json` instead (section 13). A line is one JSON object: `date` (local time with its
 offset, to the second), `rule`, `file` (from the project's root),
 `line` (`null` when there is none), `category`, `sub`, `fix`, `acts`,
 `level`, `where`, `found_by` and `commit` (the project's short SHA, or
 `none` outside git). A run with no problems appends nothing. Writing
 the log never changes the output or an exit code: a folder that cannot
-be written is left alone. `EDDA_LOG=off` turns the log off;
-`EDDA_LOG=<file>` writes to that file instead; the tests set one of
-them, so they never write into the repository. The runner logs only
+be written is left alone. `EDDA_LOG=off` turns the log off even when
+`problem_log:` is `local`; `EDDA_LOG=<file>` writes to that file
+instead, when the log is on; `EDDA_LOG` never turns it on. The tests
+set one of them, so they never write into the repository. The runner logs only
 its own failures: when the spec does not check it logs nothing, as the
 checker's own run logs those. `--model` and `--graph` neither count nor
-log. `python3 tools/trend.py [--root DIR] [--log FILE] [--by DIM[,DIM]] [--top N]`
-reads the log: the problems per day, then the counts grouped by one
+log. `edda trend [--root DIR] [--log FILE] [--by DIM[,DIM]] [--top N]`
+(`python3 tools/trend.py`, the same) reads the log, whatever wrote it: the problems per day, then the counts grouped by one
 dimension or a pair (`--by where,fix`; `category` when none is named),
 then the rules that come up most. Every line is checked before it is
 counted: a line that is not JSON, or a record with a field missing or
@@ -1719,8 +1736,8 @@ check:`;
 the tool then does nothing and exits 1. In the old place (section 9)
 the only key is `generated_cases:`. A pin older than the tools prints
 `<file>:<line>: flagged: pinned_older: <message>` first, and the tool
-runs; the checker's plain run counts and logs it with its other
-problems. `--model`, `--graph` and `approve.py` print these lines to
+runs; the checker's plain run counts it, and logs it when the log is
+on, with its other problems. `--model`, `--graph` and `approve.py` print these lines to
 stderr, so what they print to stdout is unchanged.
 
 **Runs, test only.** Examples through the binding, every call of a
@@ -1806,8 +1823,9 @@ names (section 9), renders every sentence from the model
 file order, one per line, a blank line between stories, each marked
 by its shade: `~ ` grey, `? ` warning, two spaces plain; `--lines`
 puts `<file>:<line>: ` before each. A project that does not check
-prints its problems as the checker does and exits 1; so does a
-`STORY` the project does not have (`no such story: <id>`).
+prints its problems as the checker does and exits 1; a `STORY` the
+project does not have (`no such story: <id>`) exits 2, a usage error
+(section 13).
 
 Where the rules above are silent, the view reads so:
 
@@ -1981,31 +1999,34 @@ added and removed lines; drifted pairs side by side.
 ## 13. Importing Edda
 
 Edda is the framework; a host project imports it (decisions W and X,
-kb:9380137). The project gets three things.
+kb:9380137). The project gets three things, and one command runs
+Edda's tools on it.
 
 1. **`edda.yaml`** at its root (section 9): the one file that says the
    project uses Edda and how. With it, the tools run on the project:
 
    ```
-   python3 <edda>/tools/check.py --root .
-   python3 <edda>/tools/run.py --root .
-   python3 <edda>/tools/view.py --root . [STORY ...]
+   <edda>/edda check --root .
+   <edda>/edda run --root .
+   <edda>/edda view --root . [STORY ...]
    ```
 
    `<edda>` is where Edda's repository is. The operator approves with
-   `python3 <edda>/tools/approve.py NAME --by OPERATOR --root .`
+   `<edda>/edda approve NAME --by OPERATOR --root .`
    (section 10). An agent runs the check after each change and acts
    on each problem's `acts`, who must act (decision X, operator
-   decision, 3 Oct 2026).
+   decision, 3 Oct 2026); with `--json` it reads each problem and its
+   dimensions from one JSON document, and the exit code says whether
+   anything was refused or failed.
 2. **The agent guide**, `language/guide.md`, for the agents working in
    the host's repository, then a short part for people. It is
-   generated by `python3 tools/guide.py` from Edda's own stories,
+   generated by `edda guide` from Edda's own stories,
    through the read view's sentences (section 12), and from named
    passages of this reference, never written by hand, so it cannot
    drift from what Edda does; `tools/test_import.py` fails when the
    file differs from what the script writes.
 3. **The pointer line**, one line that tells the host's agents to load
-   the guide, printed by `python3 tools/guide.py --pointer [--root HOST]`.
+   the guide, printed by `edda guide --pointer [--root HOST]`.
 
    It reads:
 
@@ -2022,6 +2043,50 @@ kb:9380137). The project gets three things.
    Where it goes is the host's choice: its `CLAUDE.md` or `AGENTS.md`,
    its KB's skill routing, or wherever its agents read first. Edda does
    not place it.
+
+**The `edda` command** (decision AA). `edda`, at the root of Edda's
+repository, runs `tools/edda.py` with `python3`: `edda <command>
+[--root DIR] [--json] ...`, the command one of `check`, `run`, `view`,
+`approve`, `guide` and `trend`. Each takes the options of the tool it
+runs (`tools/check.py`, `run.py`, `view.py`, `approve.py`, `guide.py`
+and `trend.py`, sections 9 to 12 and above) and prints what that tool
+prints. The tools still run on their own, with the same options and
+output, and exit as the command does. Every command exits with one of
+four codes:
+
+| exit | means |
+|---|---|
+| 0 | nothing refused and nothing failed; flags alone are 0 |
+| 1 | a refusal (of the settings, of the spec, or of the log folder by `trend`), a failing example or generated case, or an approval refused |
+| 2 | a usage error: no command or an unknown one, an unknown or missing option, a folder or file an option names that is not there or not of its kind (`no such folder`, `not a folder`, `no such file`, `not a file`, one line, before anything is done), a story or property named that is not there (or a property with no graph to draw), `--root` with a spec folder or a log of another root, an `--at`, `--by` or `--because` not well formed, `--root` to `guide` without `--pointer`, `trend` with the log off and no `--log` |
+| 3 | Edda itself failed: an error the tools did not foresee (`edda failed: <error>`), a spec the runner meets that the checker should have refused, generated cases on and Hypothesis missing, a pin newer than the tools (`pinned_newer`), a passage the guide needs missing from this reference |
+
+**`--json`.** With `--json` a command prints one JSON document on
+stdout instead of its text, and exits as above. Its shape is format 1;
+a change to it is a new number. Every document has `format` (1), `edda`
+(the revision of the tools), `command` (`null` for an unknown one),
+`exit` (the exit code), the command's own fields below, and `messages`:
+every line the plain output would print that the fields do not hold,
+in the order printed, whatever the outcome (a flag or refusal of the
+settings, such as `pinned_older`, the lines of a usage error, of a spec
+that does not check when the command stops there, of Edda failing, and
+every line written to stderr); only the fixture report of Edda's own
+repository stays plain output alone. A field the
+command did not reach keeps its empty value (`[]`, `{}`, `null`, `0` or
+`false`). A problem is `rule`, `file` (from the project's root), `line`
+(`null` when there is none), the six dimensions of section 11
+(`category` with its `sub`, `fix`, `acts`, `level`, `where` and
+`found_by`) and `message`; `counts` maps each category that has problems to how many,
+in the order of section 11.
+
+| command | fields |
+|---|---|
+| `check` | `files`: in the plain run's order, each `.edda` and `.edda.vc` file of the spec folder, then each `.links` and covered code file, each with `file`, `ok` (no refusal), `status` (its status, change and link lines), `problems` and `flags` (each `rule`, `line` and `message`); `problems`: every problem of the project, a flag of the settings included; `counts`; `model`, the model, with `--model`; `graph`, its lines, with `--graph`. The fixtures are not in it |
+| `run` | `stories`: each `id`, `status`, `detail`, `examples_failed` (each `title` and `failures`, each `at`, the `file:line`, `then`, the fact or `null`, and `found`) and `generated` (the lines of its generated cases); `failures`: each failure as a problem; `counts` |
+| `view` | `blocks`: in the plain order, each `file`, `kind` (`story`, or `entity` for an entity's invariants), `name` and `sentences`, each `line`, `kind`, `shade` and `text` (section 12) |
+| `approve` | `name`, `kind`, `number`, `history` (the `.edda.vc`), `version` (the new version's text), `written` (`false` with `--dry-run`) and `refused` (why it was refused, or `null`) |
+| `guide` | `pointer` (the line, with `--pointer`, else `null`), `guide` (the guide's path) and `written` |
+| `trend` | `log`, `skipped`, `total`, `first` and `last` (the first and last day), `per_day` (each `date`, `total` and `counts`), `by`, `groups` (each `count` and `values`, one value per dimension of `by`) and `rules` (each `count` and `rule`) |
 
 What `check`, `approve`, `view` and `run` take, give back and refuse
 is to be stated as Edda's own stories, which the checker holds Edda's
@@ -2040,7 +2105,59 @@ the running of examples and the rule wrapping round every call are
 begun (sections 6 and 9: Edda's own `check`); the rest of the done
 computation gets its own stories.
 
-## 15. Changes from revision 67
+## 15. Changes from revision 68
+
+Build Plan kb:9379223, phase 2809, and decisions HH (entry 140) and AA
+(entry 132): the problem log is opt-in, and one `edda` command.
+
+- New key `problem_log:` in `edda.yaml`, `local` or `off`, `off` when
+  left out or with no file; in the registry. With `local`, the checker
+  and the runner append to `.edda/checks.log` as revisions 67 and 68
+  did, the log folder held inside the root; otherwise nothing is
+  written and no `.edda/` is made. `EDDA_LOG=off` still turns the log
+  off and `EDDA_LOG=<file>` still redirects it, but it never turns the
+  log on. Decision HH amends decision Y for this one opt-in case; the
+  KB stays the main home of history and reads `--json` (9, 11).
+- The log folder `.edda` is held to the root only when the log is on:
+  with it off, a `.edda` that resolves outside is no longer refused
+  (9).
+- One command, `edda` at the root of Edda's repository, runs
+  `tools/edda.py`: `edda check`, `run`, `view`, `approve`, `guide` and
+  `trend`, each with its tool's options and `--json`. The checker's run
+  moved from `check.py`'s main block to `tools/edda.py`, since
+  `check.py` is linked code; every tool's own script runs through the
+  command, with the same options and output (13).
+- Fixed exit codes, one table: 0, 1, 2 for a usage error, 3 when Edda
+  failed. Every folder or file an option names must be there and of
+  its kind, checked before anything is done, else one line and exit 2:
+  `check --root`, `--model DIR`, `--graph ... DIR`, `run --root` and
+  `--project`, `view DIR` and `--root`, `approve --root` and
+  `--folder`, `guide --pointer --root`, `trend --root` and `--log`
+  (`run --project` with a missing folder ran nothing and exited 0;
+  `approve` exited 1; `trend` with a missing `--log` said nothing was
+  logged; `run --root` and `view --root` named the spec folder, not
+  the root). Changed to fit the table, the printed lines unchanged:
+  `no such story` (`view`), `unknown story` (`run`, from 3),
+  `--graph` with no graph to draw, and `approve` with an `--at`, `--by`
+  or `--because` not well formed now exit 2, not 1; a source the guide
+  needs missing, 3, not 1, and a reference with no revision line says
+  so instead of failing; any error the tools did not foresee is
+  `edda failed: <error>`, 3, in every tool, not only the runner (9, 12,
+  13).
+- `--json`: one document on stdout, format 1, its fields per command
+  named in section 13; every other line the plain output prints is in
+  `messages`, in order.
+- Edda's own repository has an `edda.yaml`: `edda: 69`, `stack:
+  python`, `problem_log: local`. Its checker's and runner's plain
+  output is unchanged but for the lines of the flags of the linked
+  tools that were edited; its model's `revision` stays 63. Every file
+  a tool opens there is now opened inside the root (section 9).
+- Revision 68 said revision 69 reads `edda.yaml` only at the root; the
+  old place in the spec folder is still read, for a later revision.
+- The guide and the README name the `edda` command; the guide is
+  regenerated. No block's text changes.
+
+## 16. Changes from revision 67
 
 Build Plan kb:9379223, phase 2657, and decisions W and X (kb:9380137):
 the import contract.
@@ -2095,7 +2212,7 @@ the import contract.
   `edda.yaml`, so its checker's run, its runner and its model are
   unchanged; the model's `revision` stays 63. No block's text changes.
 
-## 16. Changes from revision 66
+## 17. Changes from revision 66
 
 Build Plan kb:9379223, phase 2649, and decision U (kb:9379257,
 questions 4 to 6): every problem carries six dimensions, and problems
@@ -2129,7 +2246,7 @@ are counted and logged.
   `tools/test_dimensions.py` tests them. The model's `revision` stays
   63, and no block's text changes.
 
-## 17. Changes from revision 65
+## 18. Changes from revision 65
 
 Build Plan kb:9379223, phase 2648, and decision U (kb:9379257,
 questions 1 to 3): the analyser, four flags found from the spec alone.
@@ -2162,7 +2279,7 @@ questions 1 to 3): the analyser, four flags found from the spec alone.
   and the model are unchanged, the model's `revision` stays 63, and
   no block's text changes.
 
-## 18. Changes from revision 64
+## 19. Changes from revision 64
 
 Build Plan kb:9379223, phase 2636, and decision T (kb:9379252):
 generated cases, off by default.
@@ -2240,7 +2357,7 @@ generated cases, off by default.
   run, the checker's run and the model are unchanged; the model's
   `revision` stays 63. No block's text changes.
 
-## 19. Changes from revision 63
+## 20. Changes from revision 63
 
 Build Plan kb:9379223, phase 2623, and decision N (kb:9379218, Q6):
 every operation is linked to the code that does it.
@@ -2313,7 +2430,7 @@ every operation is linked to the code that does it.
   the model's `revision` stays 63, as nothing in it changed (9). No
   block's text changes, so nothing needs re-approval.
 
-## 20. Changes from revision 62
+## 21. Changes from revision 62
 
 Build Plan kb:9379223, phase 2622: the read view, built.
 
@@ -2416,7 +2533,7 @@ Build Plan kb:9379223, phase 2622: the read view, built.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 21. Changes from revision 61
+## 22. Changes from revision 61
 
 Build Plan kb:9379223, phase 2621, and decision N (kb:9379218, Q7): one
 versioned JSON model of the whole spec, the graphs in it as data.
@@ -2453,7 +2570,7 @@ versioned JSON model of the whole spec, the graphs in it as data.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 22. Changes from revision 60
+## 23. Changes from revision 60
 
 Build Plan kb:9379223, phase 2625: every bound operation is held to its
 contract, on every call the runner makes.
@@ -2490,7 +2607,7 @@ contract, on every call the runner makes.
   wrapping as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 23. Changes from revision 59
+## 24. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -2531,7 +2648,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 24. Changes from revision 58
+## 25. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -2549,7 +2666,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 25. Changes from revision 57
+## 26. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -2636,7 +2753,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 26. Changes from revision 56
+## 27. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -2655,7 +2772,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 27. Changes from revision 55
+## 28. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -2679,7 +2796,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 28. Changes from revision 54
+## 29. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -2694,7 +2811,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 29. Changes from revision 53
+## 30. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -2729,7 +2846,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 30. Changes from revision 52
+## 31. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -2745,7 +2862,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 31. Changes from revision 51
+## 32. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -2767,7 +2884,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 32. Changes from revision 50
+## 33. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -2777,7 +2894,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 33. Changes from revision 49
+## 34. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -2786,14 +2903,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 34. Changes from revision 48
+## 35. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 35. Changes from revision 47
+## 36. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -2803,7 +2920,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 36. Changes from revision 46
+## 37. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -2812,7 +2929,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 37. Changes from revision 45
+## 38. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -2822,7 +2939,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 38. Changes from revision 44
+## 39. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -2831,7 +2948,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 39. Changes from revision 43
+## 40. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -2840,7 +2957,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 40. Changes from revision 42
+## 41. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -2851,7 +2968,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 41. Changes from revision 41
+## 42. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -2860,21 +2977,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 42. Changes from revision 40
+## 43. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 43. Changes from revision 39
+## 44. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 44. Changes from revision 38
+## 45. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -2882,7 +2999,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 45. Changes from revision 37
+## 46. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -2891,7 +3008,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 46. Changes from revision 36
+## 47. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -2902,7 +3019,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 47. Changes from revision 35
+## 48. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -2915,7 +3032,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 48. Changes from revision 34
+## 49. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -2928,7 +3045,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 49. Changes from revision 33
+## 50. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -2944,7 +3061,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 50. Changes from revision 32
+## 51. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -2962,7 +3079,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 51. Changes from revision 31
+## 52. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -2981,7 +3098,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 52. Changes from revision 30
+## 53. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -3002,7 +3119,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 53. Changes from revision 29
+## 54. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -3023,7 +3140,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 54. Changes from revision 28
+## 55. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -3040,7 +3157,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 55. Changes from revision 27
+## 56. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -3062,7 +3179,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 56. Changes from revision 26
+## 57. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

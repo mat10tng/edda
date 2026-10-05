@@ -819,7 +819,7 @@ class Command(unittest.TestCase):
         self.assertNotIn("\n\n", out)
 
     def test_unknown_story(self):
-        self.assertEqual(cli("specs/", "EDDA-999"), (1, "no such story: EDDA-999\n"))
+        self.assertEqual(cli("specs/", "EDDA-999"), (2, "no such story: EDDA-999\n"))      # a usage error
 
     def test_refused_project(self):
         code, out = cli("fixtures/unknown_key")

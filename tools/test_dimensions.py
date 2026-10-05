@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Problem dimensions and watching (reference section 11, revision 67).
+"""Problem dimensions and watching (reference section 11, revisions 67
+and 69).
 
     python3 tools/test_dimensions.py
 
@@ -7,9 +8,11 @@ Every rule of the registry has its four fixed dimensions with allowed
 values, and every rule the checker raises on the fixtures is one of
 them. Where in the spec is computed for problems in each place, and is
 unknown where it cannot be told; a # edda: language comment re-tags a
-problem. The count line, the log line's format, the log turned off, a
-log that cannot be written (the output and exit code unchanged), a
-runner failure counted and logged, and trend.py grouping by one
+problem. The count line, the log line's format, the log turned off (by
+EDDA_LOG=off, or by a project that does not turn it on), a log that
+cannot be written (the output and exit code unchanged), a runner
+failure counted and logged in a project with problem_log: local, and
+trend.py grouping by one
 dimension and by two. No test writes into the repository: the log is
 off or in a temporary folder.
 """
@@ -295,7 +298,7 @@ class LogTest(unittest.TestCase):
     def test_one_json_line_per_problem(self):
         to = os.path.join(self.dir.name, "logs", "checks.log")
         os.environ["EDDA_LOG"] = to
-        watch.log(self.problems * 2, self.dir.name)
+        watch.log(self.problems * 2, self.dir.name, True)
         with open(to) as f:
             lines = [json.loads(s) for s in f]
         self.assertEqual(len(lines), 2)
@@ -315,9 +318,12 @@ class LogTest(unittest.TestCase):
 
     def test_off_or_no_problems_writes_nothing(self):
         os.environ["EDDA_LOG"] = "off"
-        watch.log(self.problems, self.dir.name)
+        watch.log(self.problems, self.dir.name, True)
         os.environ.pop("EDDA_LOG")
-        watch.log([], self.dir.name)
+        watch.log([], self.dir.name, True)
+        watch.log(self.problems, self.dir.name, False)      # the project did not turn it on
+        os.environ["EDDA_LOG"] = os.path.join(self.dir.name, "mine.log")
+        watch.log(self.problems, self.dir.name, False)      # EDDA_LOG never turns it on
         self.assertEqual(os.listdir(self.dir.name), ["box.edda"])
 
     def test_a_log_that_cannot_be_written_changes_nothing(self):
@@ -347,6 +353,7 @@ class RunnerTest(unittest.TestCase):
         os.mkdir(self.specs)
         with open(os.path.join(self.specs, "box.edda"), "w") as f:
             f.write(BOX)
+        self.settings("problem_log: local\n")
         binding.ENTITIES["box"] = lambda name, values, workdir: binding.Thing("box", values)
         binding.OPERATIONS.update({"put": put_one_more, "size": lambda actor, box: box.count})
 
@@ -356,6 +363,10 @@ class RunnerTest(unittest.TestCase):
             del binding.OPERATIONS[name]
         os.environ["EDDA_LOG"] = "off"
         self.dir.cleanup()
+
+    def settings(self, text):
+        with open(os.path.join(self.dir.name, "edda.yaml"), "w") as f:
+            f.write(text)
 
     def main(self, log):
         os.environ["EDDA_LOG"] = log
@@ -376,8 +387,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(self.main(os.path.join(self.dir.name, "box.edda", "no")), (code, out))   # unwritable
 
     def test_a_failing_generated_case_is_logged(self):
-        with open(os.path.join(self.specs, "edda.yaml"), "w") as f:
-            f.write("generated_cases: {on: true, runs: 30, steps: 6}\n")
+        self.settings("problem_log: local\ngenerated_cases: {on: true, runs: 30, steps: 6}\n")
         to = os.path.join(self.dir.name, "checks.log")
         os.environ["EDDA_LOG"] = to
         out = io.StringIO()

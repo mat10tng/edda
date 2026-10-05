@@ -3,13 +3,15 @@ sections 9 and 11).
 
 edda.yaml sits at the host root, the folder that holds the spec folder.
 Its keys, all optional: edda (the pinned revision), specs (the spec
-folder, default specs), stack (the code stack, python) and
+folder, default specs), stack (the code stack, python), problem_log
+(local or off, the local problem log; off when left out) and
 generated_cases. No file: the spec folder is specs and every setting is
 off. For this revision a specs/edda.yaml holding only generated_cases is
 still read; both files at once are refused. A tool given the spec folder
 by name takes the folder above it as the root; given --root as well, the
 two must name one root. Every path the host gives (the spec folder, the
-log folder .edda; covers: and .links paths in check.py) must resolve,
+log folder .edda when the log is on; covers: and .links paths in
+check.py) must resolve,
 symlinks followed, inside the root (outside_root). So must every file a
 tool opens under the root once edda.yaml or a root is in play (guard):
 edda.yaml, each .edda, .edda.vc and .links file and each covered code
@@ -22,13 +24,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check as checker          # noqa: E402
 
-REVISION = 68       # the revision of these tools; edda.yaml may pin it
+REVISION = 69       # the revision of these tools; edda.yaml may pin it
 STACKS = ("python",)
+PROBLEM_LOGS = ("local", "off")
 GENERATED = {
     "type": "object", "additionalProperties": False, "required": ["on"],
     "properties": {"on": {"type": "boolean"}, "runs": {}, "steps": {}}}
 SCHEMA = {"type": "object", "additionalProperties": False,
-          "properties": {"edda": {}, "specs": {"type": "string"}, "stack": {}, "generated_cases": GENERATED}}
+          "properties": {"edda": {}, "specs": {"type": "string"}, "stack": {}, "problem_log": {},
+                         "generated_cases": GENERATED}}
 OLD_SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"generated_cases": GENERATED}}
 VALIDATOR, OLD_VALIDATOR = checker.Draft202012Validator(SCHEMA), checker.Draft202012Validator(OLD_SCHEMA)
 GENERATED_OFF = {"on": False, "runs": 100, "steps": 20}
@@ -51,13 +55,16 @@ class Refused(Exception):
 class Settings:
     """root, the host root; folder, the spec folder; file, the edda.yaml
     read or None; generated, the generated_cases setting; pin and stack,
-    None when not given; flags, (rule, path, line, message); guard, the
+    None when not given; problem_log, local or off; flags, (rule, path,
+    line, message); guard, the
     root every file of the host must resolve inside as it is opened, or
-    None when neither edda.yaml nor a root is in play (Edda's own
-    repository, read as before)"""
+    None when neither edda.yaml nor a root is in play (an Edda
+    repository without its own edda.yaml, read as before)"""
 
-    def __init__(self, root, folder, file=None, generated=None, pin=None, stack=None, flags=(), guard=None):
+    def __init__(self, root, folder, file=None, generated=None, pin=None, stack=None, flags=(), guard=None,
+                 problem_log="off"):
         self.root, self.folder, self.file, self.guard = root, folder, file, guard
+        self.problem_log = problem_log
         self.generated = dict(GENERATED_OFF, **(generated or {}))
         self.pin, self.stack, self.flags = pin, stack, list(flags)
 
@@ -89,6 +96,19 @@ def log_outside(root):
     return None if inside(root, dot) else outside_line(dot, "the log folder .edda")
 
 
+def not_there(folders=(), files=()):
+    """the one usage line (exit 2, section 13) for the first folder or file
+    an option names that is not there or not of its kind, else None; each
+    tool checks its options with it before it does anything"""
+    for path in folders:
+        if path is not None and not os.path.isdir(path):
+            return f"{'not a folder' if os.path.exists(path) else 'no such folder'}: {path}"
+    for path in files:
+        if path is not None and not os.path.isfile(path):
+            return f"{'not a file' if os.path.exists(path) else 'no such file'}: {path}"
+    return None
+
+
 def whole(v):
     return type(v) is int and v >= 1
 
@@ -113,6 +133,9 @@ def problems(path, validator, schema, root):
                           f"specs must be a folder inside the project, without ..: {specs}"))
         if "stack" in data and data["stack"] not in STACKS:
             found.append(("wrong_type", source.line(("stack",), False), f"stack must be {' or '.join(STACKS)}"))
+        if "problem_log" in data and data["problem_log"] not in PROBLEM_LOGS:
+            found.append(("wrong_type", source.line(("problem_log",), False),
+                          f"problem_log must be {' or '.join(PROBLEM_LOGS)}"))
     return source, data, found
 
 
@@ -169,7 +192,7 @@ def read(root=None, folder=None):
     if not inside(root, folder):
         at = (path, source.line(("specs",), False)) if "specs" in data and not named else None
         raise Refused([outside_line(folder, "the spec folder", at)])
-    dot = log_outside(root)
+    dot = log_outside(root) if data.get("problem_log") == "local" else None    # off: nothing is written
     if dot is not None:
         raise Refused([dot])
     old = os.path.join(folder, "edda.yaml")
@@ -193,7 +216,8 @@ def read(root=None, folder=None):
     if pin is not None and pin < REVISION:
         flags.append(("pinned_older", path, source.line(("edda",), False),
                       f"edda.yaml pins revision {pin}; these tools are revision {REVISION}"))
-    return Settings(root, folder, path, data.get("generated_cases"), pin, stack, flags, guard)
+    return Settings(root, folder, path, data.get("generated_cases"), pin, stack, flags, guard,
+                    data.get("problem_log", "off"))
 
 
 def open_project(root=None, folder=None, out=None):

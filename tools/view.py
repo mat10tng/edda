@@ -11,7 +11,9 @@ stories of its file. A grey sentence (a note) starts with "~ ", a
 warning (a question, a drifted pair) with "? ", a plain one with two
 spaces; --lines puts "<file>:<line>: " before each. A project that does
 not check prints its problems, as the checker does, and exits 1; a
-STORY that is not in the project exits 1 too.
+STORY that is not in the project, or a DIR that is no folder, is a usage
+error and exits 2 (reference section 13). The edda command runs this as
+edda view; with --json it fills a result, each block's sentences.
 
 The renderer, story_sentences and version_sentences, is the one the
 binding (tools/edda_binding.py) calls for view and view_at.
@@ -832,7 +834,7 @@ def invariant_sentences(entity, types=None):
 MARK = {"plain": "  ", "grey": "~ ", "warning": "? "}
 
 
-def main(argv):
+def main(argv, result=None):
     ap = argparse.ArgumentParser(description="print each story as plain sentences (reference section 12)")
     ap.add_argument("--lines", action="store_true", help="put <file>:<line>: before each sentence")
     ap.add_argument("--root", help="the project: the folder holding edda.yaml and the spec folder; "
@@ -842,15 +844,16 @@ def main(argv):
     a = ap.parse_args(argv)
     if a.root is not None and a.folder is not None:
         a.folder, a.stories = None, [a.folder] + a.stories
-    if a.folder is not None and not os.path.isdir(a.folder):
-        print(f"no such folder: {a.folder}")
-        return 1
     import settings     # edda.yaml: the spec folder and the pin (section 9)
+    usage = settings.not_there([a.root, a.folder])
+    if usage:
+        print(usage)
+        return 2
     project, code = settings.open_project(a.root, a.folder)
     if project is None:
         return code
     folder = project.folder
-    if not os.path.isdir(folder):
+    if not os.path.isdir(folder):       # the spec folder edda.yaml names
         print(f"no such folder: {os.path.relpath(folder)}")
         return 1
     if checker.refused(folder, project.guard):
@@ -860,17 +863,24 @@ def main(argv):
     unknown = [s for s in a.stories if s not in {st["id"] for st in model["stories"]}]
     if unknown:
         print(f"no such story: {', '.join(unknown)}")
-        return 1
+        return 2
     types = Types(model["entities"], model["roles"], model["operations"])
-    blocks = []         # (file, sentences): invariants before the stories of each file
+    blocks = []         # (file, kind, name, sentences): invariants before the stories of each file
     for f in model["files"]:
         if not a.stories:
-            blocks += [(f["name"], ss) for e in model["entities"] if e["file"] == f["name"]
+            blocks += [(f["name"], "entity", e["name"], ss) for e in model["entities"] if e["file"] == f["name"]
                        for ss in [invariant_sentences(e, types)] if ss]
-        blocks += [(f["name"], story_sentences(st, model["operations"], model["entities"], model["roles"]))
+        blocks += [(f["name"], "story", st["id"],
+                    story_sentences(st, model["operations"], model["entities"], model["roles"]))
                    for st in model["stories"]
                    if st["file"] == f["name"] and (not a.stories or st["id"] in a.stories)]
-    for n, (fname, ss) in enumerate(blocks):
+    if result is not None:      # with --json, the blocks say what is printed here
+        result["blocks"] = [{"file": fname, "kind": kind, "name": name,
+                             "sentences": [{"line": s["line"], "kind": s["kind"], "shade": s["shade"], "text": s["text"]}
+                                           for s in ss]}
+                            for fname, kind, name, ss in blocks]
+        return 0
+    for n, (fname, _, _, ss) in enumerate(blocks):
         if n:
             print()
         for s in ss:
@@ -879,4 +889,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    import edda     # the one command: its exit codes and --json (section 13)
+    sys.exit(edda.main(["view", *sys.argv[1:]]))

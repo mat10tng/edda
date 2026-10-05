@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The import contract (reference sections 9, 11 and 13, revision 68).
+"""The import contract (reference sections 9, 11 and 13, revisions 68
+and 69).
 
     python3 tools/test_import.py
 
@@ -100,9 +101,9 @@ class SettingsTest(unittest.TestCase):
         s = settings.read(self.host.root)
         self.assertEqual((s.folder, s.file, s.generated, s.pin, s.stack, s.flags),
                          (self.host.folder, None, settings.GENERATED_OFF, None, None, []))
-        own = settings.read()
-        self.assertEqual((own.root, own.folder, own.file), (ROOT, os.path.join(ROOT, "specs"), None))
-        self.assertFalse(os.path.exists(os.path.join(ROOT, "edda.yaml")))      # Edda has none: its runs are unchanged
+        self.assertEqual(s.problem_log, "off")                                  # nothing is logged
+        own = settings.read()       # Edda's own edda.yaml (revision 69) names no specs: specs/
+        self.assertEqual((own.root, own.folder, own.file), (ROOT, os.path.join(ROOT, "specs"), os.path.join(ROOT, "edda.yaml")))
 
     def test_every_key_valid(self):
         os.rename(self.host.folder, os.path.join(self.host.root, "docs"))
@@ -216,12 +217,12 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual([f["name"] for f in json.loads(out)["files"]], ["order.edda"])
         code, out, _ = self.host.tool("check.py", "--root", "nowhere")
-        self.assertEqual((code, out), (1, "no such folder: nowhere\n"))
+        self.assertEqual((code, out), (2, "no such folder: nowhere\n"))
 
     def test_run(self):
         code, out, _ = self.host.tool("run.py", "--root", ".")
         self.assertEqual((code, out), (0, "FIX-001: not run: no binding for entity order\n"))
-        self.assertEqual(self.host.tool("run.py", "--root", "nowhere")[:2], (1, "no such folder: nowhere/specs\n"))
+        self.assertEqual(self.host.tool("run.py", "--root", "nowhere")[:2], (2, "no such folder: nowhere\n"))
 
     def test_approve_dry_run(self):
         vc = os.path.join(self.host.folder, "order.edda.vc")
@@ -238,7 +239,7 @@ class ToolsTest(unittest.TestCase):
         code, out, _ = self.host.tool("view.py", "--root", ".", "FIX-001")
         self.assertEqual(code, 0, out)
         self.assertTrue(out.startswith("  Remove an order. As a shop user,"), out)
-        self.assertEqual(self.host.tool("view.py", "--root", ".", "NOPE-001")[:2], (1, "no such story: NOPE-001\n"))
+        self.assertEqual(self.host.tool("view.py", "--root", ".", "NOPE-001")[:2], (2, "no such story: NOPE-001\n"))
 
     def test_a_pin_older_flags_once_and_runs(self):
         self.host.write("edda.yaml", f"edda: {REV - 1}\nspecs: stories\n")
@@ -269,7 +270,7 @@ class ToolsTest(unittest.TestCase):
             self.assertEqual(self.host.tool(tool, "--root", ".")[:2], (1, bad), tool)
 
     def test_the_log_goes_to_the_root(self):
-        self.host.write("edda.yaml", f"edda: {REV - 1}\nspecs: stories\n")
+        self.host.write("edda.yaml", f"edda: {REV - 1}\nspecs: stories\nproblem_log: local\n")
         env = {k: v for k, v in os.environ.items() if k != "EDDA_LOG"}
         self.host.tool("check.py", "--root", ".", env=env)
         log = os.path.join(self.host.root, ".edda", "checks.log")
@@ -357,6 +358,7 @@ class InsideTheRootTest(unittest.TestCase):
         self.assertEqual(settings.read(self.host.root).folder, os.path.join(self.host.root, "alias"))
 
     def test_a_log_folder_outside_is_refused(self):
+        self.host.write("edda.yaml", f"edda: {REV}\nspecs: docs/specs\nproblem_log: local\n")    # off: not read
         os.symlink(self.host.away("logs"), os.path.join(self.host.root, ".edda"))
         self.assertEqual([tail(x) for x in self.refused()],
                          ["outside_root: the log folder .edda resolves outside the project root: <path>"])
@@ -470,11 +472,13 @@ class FilesInsideTheRootTest(unittest.TestCase):
                                              "project root: <path>"])
 
     def test_no_file_and_no_root_reads_as_before(self):
-        self.assertIsNone(settings.read().guard)
+        with mock.patch.object(settings.checker, "ROOT", self.host.away("bare")):     # an Edda with no edda.yaml
+            self.assertIsNone(settings.read().guard)
+        self.assertEqual(settings.read().guard, ROOT)       # Edda's own edda.yaml puts its root in play
         self.assertEqual(settings.read(self.host.root).guard, self.host.root)
 
     def test_a_log_linked_outside_is_not_written(self):
-        self.host.write("edda.yaml", f"edda: {REV - 1}\nspecs: docs/specs\n")     # one flag, so one line to log
+        self.host.write("edda.yaml", f"edda: {REV - 1}\nspecs: docs/specs\nproblem_log: local\n")     # one flag to log
         os.makedirs(os.path.join(self.host.root, ".edda"))
         away = os.path.join(self.host.away("logs"), "checks.log")
         with open(away, "w") as f:
@@ -588,6 +592,9 @@ class OneRootTest(unittest.TestCase):
 
     def test_trend_root_and_log(self):
         log = os.path.join(self.other.root, ".edda", "checks.log")
+        for root in (self.other.root, self.host.root):      # an empty log in each
+            os.makedirs(os.path.join(root, ".edda"), exist_ok=True)
+            open(os.path.join(root, ".edda", "checks.log"), "w").close()
         code, out, _ = self.host.tool("trend.py", "--root", ".", "--log", log)
         self.assertEqual((code, out), (2, f"--root . and --log {log} name two logs; give one\n"))
         code, out, _ = self.host.tool("trend.py", "--root", ".", "--log", ".edda/checks.log")
@@ -610,9 +617,10 @@ class GuideTest(unittest.TestCase):
         for said in ("An agent writes level 1 from the customer's words.",
                      "only the operator's approve command, `tools/approve.py`, writes it;",
                      "`acts`: `agent`, the agent fixes it alone;",
-                     "python3 <edda>/tools/check.py --root .",
+                     "<edda>/edda check --root .",
                      "An agent runs the check after each change and acts on each problem's `acts`, "
-                     "who must act (decision X, operator decision, 3 Oct 2026).",
+                     "who must act (decision X, operator decision, 3 Oct 2026); with `--json`",
+                     "the exit code says whether anything was refused or failed.",
                      "The code carries `# <STORY-ID>@<n>`",
                      "**Done.** A story is done when",
                      "## For people",
