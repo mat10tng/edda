@@ -146,11 +146,11 @@ def version(P, kind, name):
     return len(P.versions.get((kind, name), ()))
 
 
-def decide(folder, name):
+def decide(folder, name, clock=None):
     """(path, kind, number, pins or None, text) for the next version of name,
-    or Refused"""
+    or Refused; clock as for check.project_of"""
     path, kind = find(folder, name)
-    P = E.project_of(folder)
+    P = E.project_of(folder, clock=clock)
     if refusals(path, P):
         raise Refused("the file does not check")
     files = Files(folder)
@@ -201,20 +201,21 @@ def version_text(kind, name, number, at, by, because, pins, text):
     return "\n".join(out) + "\n"
 
 
-def try_on_copy(reading, path, kind, name, number, at, by, because, new_bytes, old_versions):
+def try_on_copy(reading, path, kind, name, number, at, by, because, new_bytes, old_versions, clock=None):
     """check the would-be folder, built from the reading: no refusal in the
     file or its history; the old versions kept and one added; its name,
     number, approved_at, approved_by and because the ones given, its text
     the block's or story's text; for a story every block of story.blocks
     approved and pinned at its version, in story.blocks order; and the
     block or story then approved (and its pins current); raises Refused
-    with the reason otherwise"""
+    with the reason otherwise; clock, the project's, as for
+    check.project_of"""
     with tempfile.TemporaryDirectory(prefix="edda-approve-") as tmp:
         materialise(reading, tmp)
         copy = os.path.join(tmp, os.path.basename(path))
         with open(copy + ".vc", "wb") as f:
             f.write(new_bytes)
-        P = E.project_of(tmp)
+        P = E.project_of(tmp, clock=clock)
         problems = refusals(copy, P)
         if problems:
             file, rule, line, msg = problems[0]
@@ -276,12 +277,18 @@ def write_atomic(folder, reading, vc, new_bytes, held, guard=None):
 
 # EDDA-005@0
 # EDDA-008@0
-def approve(folder, name, at, by, because, dry_run, guard=None):
+def approve(folder, name, at, by, because, dry_run, guard=None, clock=None):
     """the approval, under the folder's lock and on one reading; returns
     (the new version's text, kind, number, vc); guard, the root the folder
-    and its files must resolve inside, or None (settings.Settings.guard)"""
+    and its files must resolve inside, or None (settings.Settings.guard);
+    clock, the project's (clock_start, zone), else read from the edda.yaml
+    of guard, or of the folder above folder: the copies checked here
+    live elsewhere"""
     if not os.path.isdir(folder):
         raise Refused(f"not a folder: {folder}")
+    if clock is None:
+        import settings
+        clock = settings.clock_at(guard if guard is not None else os.path.dirname(os.path.abspath(folder)))
     try:                                      # the folder itself is the lock: no file to leave behind
         lock = os.open(folder, os.O_RDONLY) if guard is None else E.open_inside(guard, folder, os.O_RDONLY | os.O_DIRECTORY)
     except E.Outside as o:
@@ -291,7 +298,7 @@ def approve(folder, name, at, by, because, dry_run, guard=None):
         reading = read_folder(folder, guard)
         with tempfile.TemporaryDirectory(prefix="edda-reading-") as tmp:
             materialise(reading, tmp)
-            path, kind, number, pins, text = decide(tmp, name)
+            path, kind, number, pins, text = decide(tmp, name, clock)
         path = os.path.join(folder, os.path.basename(path))
         new = version_text(kind, name, number, at, by, because, pins, text)
         vc = path + ".vc"
@@ -301,7 +308,7 @@ def approve(folder, name, at, by, because, dry_run, guard=None):
             new_bytes = new.encode()
         else:
             new_bytes = old_bytes + (b"" if old_bytes.endswith(b"\n") else b"\n") + new.encode()
-        try_on_copy(reading, path, kind, name, number, at, by, because, new_bytes, old_versions)
+        try_on_copy(reading, path, kind, name, number, at, by, because, new_bytes, old_versions, clock)
         if not dry_run:
             write_atomic(folder, reading, vc, new_bytes, lock, guard)
         return new, kind, number, vc
@@ -344,7 +351,8 @@ def main(argv=None, result=None):
             result["refused"] = usage
         return 2
     try:
-        new, kind, number, vc = approve(project.folder, a.name, at, a.by, a.because, a.dry_run, project.guard)
+        new, kind, number, vc = approve(project.folder, a.name, at, a.by, a.because, a.dry_run, project.guard,
+                                        project.clock)
         if result is not None:      # with --json, the fields say what is printed here
             result.update(name=a.name, kind=kind, number=number, history=os.path.relpath(vc),
                           version=new, written=not a.dry_run, refused=None)

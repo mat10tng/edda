@@ -12,6 +12,7 @@ glossary.links, the links from each operation to the code (section 9).
 A partial checker: the running of examples is not here. Each folder
 (specs/, one fixture folder) is one project."""
 import ast, copy, datetime, glob, io, json, os, re, sys, tokenize
+from zoneinfo import ZoneInfo
 import yaml
 from jsonschema import Draft202012Validator
 import analyse
@@ -90,6 +91,7 @@ TEXT_PATHS = [
     "stories/*/examples/*/notes/#",
     "stories/*/examples/*/steps/#/then/#/refused",
     "stories/*/examples/*/steps/#/when/at",
+    "stories/*/examples/*/starts_at",
 ]
 EXPR_PATHS = [
     "entities/*/properties/*/computed",
@@ -732,11 +734,16 @@ def words(t):
 # --- the project: declarations across the files of one folder ---------------
 
 class Project:
-    def __init__(self, files, histories=(), root=None):
+    def __init__(self, files, histories=(), root=None, clock=None):
         """files: list of (stem, data) for every .edda that passed the shape layer;
         histories: (stem, versions) of every .edda.vc that did; root, the
-        host root its files must resolve inside, or None (load)"""
+        host root its files must resolve inside, or None (load); clock,
+        (clock_start, zone) of the project's edda.yaml (section 9), no
+        start and UTC when None"""
         self.root = root
+        self.clock_start, self.zone = clock or (None, ZONE)
+        self._clock_reach = None
+        self._call_reach = None
         self.entities, self.roles, self.operations, self.epics, self.stories = {}, {}, {}, set(), {}
         self.files = {stem for stem, _ in files}
         self.dups = {}            # stem -> [(path, name)]: a name declared twice across the project
@@ -796,7 +803,11 @@ class Project:
                             self.operations[oname] = {"inputs": inputs, "returns": mapping(op).get("returns"), "returns_type": None,
                                                       "ordered_by": "ordered_by" in mapping(op), "who": who, "story": sid, "file": stem,
                                                       "order_exprs": listing(mapping(op).get("ordered_by")),
-                                                      "refuse_when": [r.get("when") for r in listing(mapping(op).get("refuse")) if isinstance(r, dict)]}
+                                                      "who_when": [w["when"] for w in listing(mapping(op).get("who"))
+                                                                   if isinstance(w, dict) and "when" in w],
+                                                      "ensure": [fact_text(f) for f in listing(mapping(op).get("ensure"))],
+                                                      "refuse_when": [r.get("when") for r in listing(mapping(op).get("refuse")) if isinstance(r, dict)],
+                                                      "also_changes": listing(mapping(op).get("also_changes"))}
         while True:               # computed properties and returns, until no type gets more precise
             changed = False
             for ename, ent in self.entities.items():
@@ -890,15 +901,11 @@ class Project:
             loops[start] = "computed properties loop: " + " -> ".join(p if one else f"{e}.{p}" for e, p in path)
         return loops
 
-    def operation_reads(self):
-        """computed_cycle: each operation with a text returns to its summary, the
-        (entity, property) pairs a call can read: its refuse conditions and
-        returns, each input typed by its declared type, and its ordered_by
-        over one result item, plus the summary of every operation it calls;
-        ("CLOCK", name) for NOW or TODAY read in any of them.
-        who is left out: a call inside an expression has no actor and no
-        permission check; ensure is left out: such a call is always a read.
-        Each expression is walked once and the summaries grow to a fixed point"""
+    def operation_walks(self):
+        """(own, calls): each operation with a text returns to the (entity,
+        property) pairs and the operations with a text returns its refuse
+        conditions, returns and ordered_by read and call directly, as
+        operation_reads walks them"""
         own, calls = {}, {}
         for o, op in self.operations.items():
             if not isinstance(op["returns"], str):
@@ -921,6 +928,18 @@ class Project:
                 if isinstance(x, str):
                     I.run(x)
             own[o], calls[o] = E.reads, E.calls
+        return own, calls
+
+    def operation_reads(self):
+        """computed_cycle: each operation with a text returns to its summary, the
+        (entity, property) pairs a call can read: its refuse conditions and
+        returns, each input typed by its declared type, and its ordered_by
+        over one result item, plus the summary of every operation it calls;
+        ("CLOCK", name) for NOW or TODAY read in any of them.
+        who is left out: a call inside an expression has no actor and no
+        permission check; ensure is left out: such a call is always a read.
+        Each expression is walked once and the summaries grow to a fixed point"""
+        own, calls = self.operation_walks()
         callers = {o: set() for o in own}
         for o in own:
             for c in calls[o]:
@@ -934,6 +953,20 @@ class Project:
                 summary[o] = new
                 work.extend(callers[o])
         return summary
+
+    def clock_reach(self):
+        """(the operations, the computed properties) that read the clock
+        (clock_paths), worked out once"""
+        if self._clock_reach is None:
+            self._clock_reach = clock_paths(self)
+        return self._clock_reach
+
+    def call_reach(self):
+        """the operations each read and computed property makes run
+        (call_paths), worked out once"""
+        if self._call_reach is None:
+            self._call_reach = call_paths(self)
+        return self._call_reach
 
     def home(self, ename):
         """the file an entity lives in: its own name, or its owner's through part_of"""
@@ -974,19 +1007,73 @@ ONE_ARG = {"len", "OLD"}
 OP_WORD = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}
 CMP_WORD = {ast.Lt: "<", ast.Gt: ">", ast.LtE: "<=", ast.GtE: ">="}
 FIXED = {"ACTOR", "RESULT", "NOW", "TODAY", "OLD", "TIME"}
+CLOCK = {"NOW", "TODAY"}
+DURATIONS = {"DAYS": "day", "HOURS": "hour", "MINUTES": "minute"}     # section 7.1, each with its word
+ZONE = "UTC"      # the business zone when edda.yaml names none (section 9)
 TIME_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d")     # section 7.2
 REACHED = set()   # the entities a dot path has reached, the declared type of each step (story.blocks)
 
 
 def time_text(v):
     """is v a time written as section 7.2 says"""
+    return parse_time(v) is not None
+
+
+def parse_time(v):
+    """the time a text written as section 7.2 says stands for, a datetime
+    with no zone (the business zone's wall clock), or None"""
     for f in TIME_FORMATS:
         try:
-            if datetime.datetime.strptime(v, f).strftime(f) == v:
-                return True
-        except ValueError:
+            t = datetime.datetime.strptime(v, f)
+            if t.strftime(f) == v:
+                return t
+        except (TypeError, ValueError):
             pass
-    return False
+    return None
+
+
+# --- the clock (sections 7.2 and 8) --------------------------------------------
+# A time is a datetime with no zone: the wall clock of the business zone, its
+# fold telling the second of a doubled hour from the first. Ordering and
+# elapsed time go through UTC; a wall-clock time that does not exist, or is
+# doubled, is read as zoneinfo reads it with fold=0.
+
+def instant(t, zone):
+    """the moment t stands for, in UTC: a time with no zone read in zone"""
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=ZoneInfo(zone))
+    return t.astimezone(datetime.timezone.utc)
+
+
+def wall(u, zone):
+    """the business zone's wall clock at the moment u, its fold kept"""
+    return u.astimezone(ZoneInfo(zone)).replace(tzinfo=None)
+
+
+def resolved(t, zone):
+    """t as a real wall-clock time: a time that does not exist moves on as
+    zoneinfo reads it with fold=0 (02:30 in a gap of an hour is 03:30)"""
+    return wall(instant(t, zone), zone)
+
+
+def shift(t, unit, n, zone):
+    """t moved by n DAYS, HOURS or MINUTES: DAYS(n) n calendar days, the same
+    wall-clock time, read with fold=0; HOURS and MINUTES elapsed time
+    (decision Z). A zero move of any unit is t itself"""
+    if n == 0:      # no move at all: the same time, its fold kept
+        return t
+    if unit == "DAYS":
+        return resolved(t.replace(fold=0) + datetime.timedelta(days=n), zone)
+    step = datetime.timedelta(hours=n) if unit == "HOURS" else datetime.timedelta(minutes=n)
+    return wall(instant(t, zone) + step, zone)
+
+
+def clock_words(t):
+    return t.strftime("%Y-%m-%d %H:%M")
+
+
+def is_duration(n):
+    return isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in DURATIONS
 
 
 def mentions_result(n):
@@ -1022,6 +1109,7 @@ class Expr:
         self.out, self.src, self.outer = [], "", None
         self.own, self.reads = None, None   # computed_cycle: the entity and the (entity, property) reads, ("CLOCK", name) for NOW or TODAY
         self.calls = None                   # computed_cycle: the operations with a text returns it calls
+        self.durations, self.placed = [], set()     # DAYS, HOURS, MINUTES calls, and those after TIME + or -
 
     def problem(self, rule, msg):
         if not self.silent:
@@ -1047,7 +1135,13 @@ class Expr:
                     self.problem("not_an_expression", f"not an expression (a call of an operation was expected): {text}")
                 return None
             self.outer = body        # the actor's request may be a changing operation
-        return self.visit(body, self.scope)
+        self.durations, self.placed = [], set()
+        t = self.visit(body, self.scope)
+        for d in self.durations:     # a duration only moves a time (7.1)
+            if id(d) not in self.placed:
+                self.problem("type_mismatch", f"{d.func.id} expects to move a time, as TIME + {d.func.id}(n) "
+                                              f"or TIME - {d.func.id}(n): {text}")
+        return t
 
     def choice_value(self, name, other, node, scope):
         """type a bare name compared with node, a value of type other"""
@@ -1240,6 +1334,12 @@ class Expr:
             if type(n.op) not in OP_WORD:
                 self.problem("not_an_expression", f"not an expression ({type(n.op).__name__}): {src}")
                 return None
+            if is_duration(n.left) or is_duration(n.right):     # TIME + or - a duration is a TIME; any other use is refused in run
+                if isinstance(n.op, (ast.Add, ast.Sub)) and is_duration(n.right) and not is_duration(n.left) \
+                        and all_alts(lt, lambda a: a == "TIME"):
+                    self.placed.add(id(n.right))
+                    return "TIME"
+                return None
             ll, rl = as_list(lt), as_list(rt)
             if isinstance(n.op, ast.Add) and (ll or rl):
                 if lt is not None and rt is not None and not (ll and rl):
@@ -1281,6 +1381,15 @@ class Expr:
                             self.visit(x, scope)
                     self.problem("type_mismatch", f"TIME expects one quoted time, \"YYYY-MM-DD HH:MM\" or \"YYYY-MM-DD\": {src}")
                 return "TIME"
+            if f.id in DURATIONS:     # a duration: one INTEGER, placed only after TIME + or - (run)
+                if len(n.args) != 1 or n.keywords:
+                    for x in n.args + [kw.value for kw in n.keywords]:
+                        self.visit(x, scope)
+                    self.problem("type_mismatch", f"{f.id} expects one INTEGER: {src}")
+                elif not all_alts(self.visit(n.args[0], scope), lambda a: a == "INTEGER"):
+                    self.problem("type_mismatch", f"{f.id} expects one INTEGER: {src}")
+                self.durations.append(n)
+                return None
             if f.id in GEN_ONLY:
                 if not (len(n.args) == 1 and isinstance(n.args[0], ast.GeneratorExp) and not n.keywords):
                     self.problem("type_mismatch", f"{f.id} expects one generator: {src}")
@@ -1348,6 +1457,305 @@ class Expr:
             return None
         self.problem("not_an_expression", f"not an expression ({type(n).__name__}): {src}")
         return None
+
+
+# --- what reads the clock (sections 8 and 9) ------------------------------------
+
+def fact_text(f):
+    """a fact as an expression: a quoted fact, or the fact of {fact, means}"""
+    return f.get("fact") if isinstance(f, dict) else f
+
+
+def uses_clock(text):
+    """the clock names text reads directly"""
+    try:
+        tree = ast.parse(text, mode="eval")
+    except (SyntaxError, TypeError, ValueError):
+        return []
+    return [n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in CLOCK]
+
+
+def walk_reads(P, text, scope, own=None):
+    """what text reads, typed as the checker types it: its (entity,
+    property) pairs, ("CLOCK", name) for NOW or TODAY, and the operations
+    with a text returns it calls; own is the entity whose bare property
+    names text reads (an always-rule's)"""
+    E = Expr(P, scope, silent=True)
+    E.own, E.reads, E.calls = own, set(), set()
+    if isinstance(text, str):
+        E.run(text)
+    return E.reads, E.calls
+
+
+def on_clock(reads, timed):
+    return any(e == "CLOCK" for e, _ in reads) or bool(reads & timed)
+
+
+def clock_paths(P):
+    """the operations and the computed properties that read the clock. An
+    operation's summary is operation_reads' (its returns, refuse
+    conditions and ordered_by, and those of every operation it calls,
+    nested calls included); a computed property reads its own expression
+    and the summaries of the operations it calls. Either reads the clock
+    directly or through a computed property that does; that grows to a
+    fixed point (computed_cycle refuses loops of computed properties)"""
+    summary = P.operation_reads()
+    reads = {}
+    for e, ent in P.entities.items():
+        for p, expr in ent["computed"].items():
+            if isinstance(expr, str):
+                r, calls = walk_reads(P, expr, dict(ent["props"]), e)
+                reads[(e, p)] = r.union(*(summary[o] for o in calls))
+    timed = set()
+    while True:
+        more = {x for x, r in reads.items() if on_clock(r, timed)} - timed
+        if not more:
+            return {o for o, r in summary.items() if on_clock(r, timed)}, timed
+        timed |= more
+
+
+def entity_kinds(t):
+    """the entities a value of type t may be or hold"""
+    if is_entity(t):
+        return {t[1]}
+    if is_list(t):
+        return entity_kinds(t[1])
+    if is_either(t):
+        return set().union(*(entity_kinds(a) for a in t[1]))
+    return set()
+
+
+def kinds_reached(P, kinds):
+    """kinds and every entity their properties reach, as declared"""
+    seen, stack = set(), list(kinds)
+    while stack:
+        e = stack.pop()
+        if e in seen or e not in P.entities:
+            continue
+        seen.add(e)
+        for t in P.entities[e]["props"].values():
+            stack.extend(entity_kinds(t))
+    return seen
+
+
+def call_texts(op):
+    """every expression the runner evaluates, in the operation's own scope
+    (its inputs and ACTOR), when a step calls op (section 6), one list for
+    the runner's and generation's checks of what a call needs: its
+    who-line conditions, refuse conditions, ensure facts (their OLD
+    captures and the frame rule's ensure paths among them) and
+    also_changes paths, which the frame rule reads through the computed
+    properties they name. A read's returns and ordered_by, evaluated when
+    another expression calls it, are in its summary (operation_reads)"""
+    return [x for x in op["who_when"] + op["refuse_when"] + op["ensure"] + op["also_changes"]
+            if isinstance(x, str)]
+
+
+def call_name(text, P):
+    """the operation a step's call: names, or None"""
+    try:
+        body = ast.parse(text, mode="eval").body
+    except (SyntaxError, TypeError, ValueError):
+        return None
+    if isinstance(body, ast.Call) and isinstance(body.func, ast.Name) and body.func.id in P.operations:
+        return body.func.id
+    return None
+
+
+def call_paths(P):
+    """each read (an operation with a text returns) and each computed
+    property to the operations it makes run, nested to the end: those
+    its expressions call (a read's refuse conditions, returns and
+    ordered_by, as operation_walks walks them; a computed property's
+    own expression), and those of every read it calls and every
+    computed property it reads"""
+    own, calls = P.operation_walks()
+    edges = {o: calls[o] | own[o] for o in own}
+    for e, ent in P.entities.items():
+        for p, expr in ent["computed"].items():
+            if isinstance(expr, str):
+                r, c = walk_reads(P, expr, dict(ent["props"]), e)
+                edges[(e, p)] = c | r
+    reach = {}
+    for k in edges:
+        seen, stack = set(), list(edges[k])
+        while stack:
+            x = stack.pop()
+            if x in edges and x not in seen:
+                seen.add(x)
+                stack.extend(edges[x])
+        reach[k] = {x for x in seen if isinstance(x, str)}
+    return reach
+
+
+def evaluated(P, exm):
+    """every expression the runner evaluates in an example (sections 6
+    and 8), in the order it meets them, as (what, text, reads, calls):
+    what is "at" for a step's at:, else "expr"; reads and calls as
+    walk_reads gives them (none for an at: written as a time). Each
+    step's at:, its call (its arguments among it) and then facts; for
+    the called operation every expression in call_texts, in its own
+    scope; and the always facts of every entity the givens, the
+    operations called (by a step or inside an expression) through
+    their inputs and returns reach, as declared. What these reach in
+    turn, the computed properties they read and the reads they call,
+    is in clock_paths and call_paths. One list for the clock
+    (time_uses) and for what needs a binding (run.needs, through
+    run.operations_run)"""
+    out, scope, called, kinds = [], {}, set(), set()
+
+    def add(what, text, scope, own=None):
+        if not isinstance(text, str):
+            return
+        if what == "at" and parse_time(text) is not None:
+            out.append((what, text, set(), set()))
+            return
+        reads, calls = walk_reads(P, text, scope, own)
+        called.update(calls)
+        out.append((what, text, reads, calls))
+
+    for g in listing(exm.get("given")):
+        kind = [k for k in mapping(g) if k != "with"]
+        if not kind or not isinstance(g[kind[0]], str):
+            continue
+        if kind[0] == "actor":
+            roles = [r for r in listing(mapping(g.get("with")).get("roles")) if isinstance(r, str)]
+            scope[g["actor"]] = ("actor", ("all", frozenset(roles)))
+        else:
+            scope[g[kind[0]]] = ("entity", kind[0])
+            kinds.add(kind[0])
+    for step in listing(exm.get("steps")):
+        when, then = mapping(mapping(step).get("when")), listing(mapping(step).get("then"))
+        if isinstance(when.get("call"), str):
+            scope["ACTOR"] = scope.get(when.get("actor"))
+            scope.pop("RESULT", None)
+        if "at" in when:
+            add("at", when["at"], scope)
+        if isinstance(when.get("call"), str):
+            add("expr", when["call"], scope)
+            rt = Expr(P, scope, silent=True).run(when["call"], call_slot=True)
+            scope["RESULT"] = "NONE" if then and isinstance(then[0], dict) else rt
+            name = call_name(when["call"], P)
+            if name is not None:
+                op = P.operations[name]
+                inputs = {n: t for n, t, _ in op["inputs"]}
+                inputs["ACTOR"] = ("actor", ("one", frozenset(r for r in op["who"] if isinstance(r, str))))
+                for text in call_texts(op):
+                    add("expr", text, inputs)
+                called.add(name)
+        for text in then:
+            if isinstance(text, str) and text != "DONE":
+                add("expr", text, scope)
+    if called:      # the always-rules every call is held to (section 6)
+        for o in called:
+            for _, t, _ in P.operations[o]["inputs"]:
+                kinds.update(entity_kinds(t))
+            kinds.update(entity_kinds(P.operations[o]["returns_type"]))
+        for e in sorted(kinds_reached(P, kinds)):
+            for f in P.entities[e]["always"]:
+                add("expr", fact_text(f), dict(P.entities[e]["props"]), e)
+    return out
+
+
+def time_uses(P, exm):
+    """how an example uses time (section 8), each as words, in the order
+    found; empty when it does not. An example uses time when a step
+    moves it with at:, or NOW or TODAY is read in what the runner
+    evaluates (evaluated) or the code decides for it: directly, through
+    the computed properties those read or the operations they call
+    (clock_paths)"""
+    timed_ops, timed = P.clock_reach()
+    found = []
+    for what, text, reads, calls in evaluated(P, exm):
+        if what == "at":
+            found.append("moves time with at:")
+            continue
+        found.extend(f"reads {name}" for name in uses_clock(text))
+        found.extend(f"reads {e}.{p}, which reads the clock" for e, p in sorted(reads & timed))
+        found.extend(f"calls {o}, which reads the clock" for o in sorted(calls & timed_ops))
+    return found
+
+
+def clock_start(P, exm):
+    """the text of an example's start: its starts_at:, else the project's
+    clock_start:, else None"""
+    return exm.get("starts_at") if isinstance(exm.get("starts_at"), str) else P.clock_start
+
+
+def at_spine(n):
+    """the moves of an at: expression whose only time is NOW, outermost
+    last, each (unit, the node of n, +1 or -1); None when it is anything
+    else (7.1, section 8)"""
+    moves = []
+    while isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Add, ast.Sub)) and is_duration(n.right):
+        moves.append((n.right.func.id, n.right.args[0] if len(n.right.args) == 1 else None,
+                      1 if isinstance(n.op, ast.Add) else -1))
+        n = n.left
+    return moves[::-1] if isinstance(n, ast.Name) and n.id == "NOW" else None
+
+
+def constant(n):
+    """a whole number written as a constant, or None"""
+    if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub):
+        v = constant(n.operand)
+        return None if v is None else -v
+    if isinstance(n, ast.Constant) and type(n.value) is int:
+        return n.value
+    return None
+
+
+def clock_steps(P, exm):
+    """the example's clock as far as the checker can tell (section 8): the
+    start, a time or None, and for each step (its time or None, the at:
+    text or None, the time before it or None). A step's time is the
+    clock's after its at:; an at: of NOW moved by durations whose counts
+    are not constants is not known before the run, nor is any time after
+    it until an at: that is a time"""
+    def known(f, *args):        # a time past the calendar's end is not known either
+        try:
+            return f(*args)
+        except OverflowError:
+            return None
+    text = clock_start(P, exm)
+    start = parse_time(text) if isinstance(text, str) else None
+    start = known(resolved, start, P.zone) if start else None
+    now, out = start, []
+    for step in listing(exm.get("steps")):
+        at = mapping(mapping(step).get("when")).get("at")
+        before = now
+        if isinstance(at, str):
+            t = parse_time(at)
+            if t is not None:
+                now = known(resolved, t, P.zone)
+            else:
+                try:
+                    moves = at_spine(ast.parse(at, mode="eval").body)
+                except SyntaxError:
+                    moves = None
+                for unit, n, sign in moves or []:
+                    k = constant(n) if n is not None else None
+                    now = None if now is None or k is None else known(shift, now, unit, sign * k, P.zone)
+                if moves is None:
+                    now = None
+        out.append((now, at if isinstance(at, str) else None, before))
+    return start, out
+
+
+def backwards(at, t, before):
+    """the message of an at: that moves the clock back (section 8)"""
+    said = at if parse_time(at) is not None else f"{at} ({clock_words(t)})"
+    return f"at {said} is before the clock's {clock_words(before)}; time never goes backwards"
+
+
+def since(start, t):
+    """t after start in words: "the start", or "start + 1 day 2 hours",
+    the difference of the two wall clocks"""
+    d = t - start
+    if d == datetime.timedelta(0):
+        return "the start"
+    sign, d = ("+", d) if d > datetime.timedelta(0) else ("-", -d)
+    parts = [(d.days, "day"), (d.seconds // 3600, "hour"), (d.seconds % 3600 // 60, "minute")]
+    return f"start {sign} " + " ".join(f"{n} {w}{'s' if n != 1 else ''}" for n, w in parts if n)
 
 
 # --- the meaning layer -------------------------------------------------------
@@ -1540,6 +1948,9 @@ def walk_meaning(data, stem, P, source):
                         continue
                     yield from given_value(v, props[p], p, pw, givens, names, source)
             scope = dict(givens)
+            if "starts_at" in exm and not time_text(exm["starts_at"]):
+                yield "type_mismatch", where + ("starts_at",), \
+                    f'starts_at expects a time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": {exm["starts_at"]}'
             for i, step in enumerate(listing(exm.get("steps"))):
                 sw = where + ("steps", i)
                 verdict_first = False
@@ -1550,7 +1961,20 @@ def walk_meaning(data, stem, P, source):
                         yield "unknown_name", sw + ("when", "actor"), f"unknown name: {actor}"
                     else:
                         scope["ACTOR"] = givens[actor]
-                    c = Expr(P, {k: v for k, v in scope.items() if k not in ("RESULT", "RESULT_OP")})
+                    request = {k: v for k, v in scope.items() if k not in ("RESULT", "RESULT_OP")}
+                    if isinstance(w.get("at"), str) and not time_text(w["at"]):     # NOW moved by durations (section 8)
+                        c = Expr(P, request)
+                        t = c.run(w["at"])
+                        for rule, p in c.out:
+                            yield rule, sw + ("when", "at"), p
+                        try:
+                            spine = at_spine(ast.parse(w["at"], mode="eval").body)
+                        except SyntaxError:
+                            spine = None
+                        if not c.out and (spine is None or not all_alts(t, lambda a: a == "TIME")):
+                            yield "type_mismatch", sw + ("when", "at"), \
+                                f'at expects a time, "YYYY-MM-DD HH:MM", or NOW moved by DAYS, HOURS or MINUTES: {w["at"]}'
+                    c = Expr(P, request)
                     rt = c.run(w["call"], call_slot=True) if isinstance(w.get("call"), str) else None
                     for rule, p in c.out:
                         yield rule, sw + ("when", "call"), p
@@ -1563,6 +1987,24 @@ def walk_meaning(data, stem, P, source):
                         continue
                     if isinstance(item, str) and item != "DONE":
                         yield from ex(item, sw + ("then", j), scope)
+
+
+def clock_problems(data, P):
+    """no_clock_start and clock_backwards (section 8), yielded as
+    walk_meaning yields; judged only when the rest of the meaning layer
+    found nothing in the file, since an example's use of time is read
+    through expressions that must check first"""
+    for sid, st in mapping(data.get("stories")).items():
+        for title, exm in mapping(st.get("examples")).items():
+            where = ("stories", sid, "examples", title)
+            uses = time_uses(P, exm)
+            if uses and clock_start(P, exm) is None:
+                yield "no_clock_start", where, (f'example "{title}" uses time ({uses[0]}) but has no start; '
+                                                "give it starts_at: or the project clock_start:")
+            elif uses:
+                for i, (t, at, before) in enumerate(clock_steps(P, exm)[1]):
+                    if t is not None and before is not None and instant(t, P.zone) < instant(before, P.zone):
+                        yield "clock_backwards", where + ("steps", i, "when", "at"), backwards(at, t, before)
 
 
 def given_names(exm):
@@ -1762,7 +2204,8 @@ def history_problems(versions, P, source, stem):
 
 # --- run ---------------------------------------------------------------------
 
-KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "computed_cycle", "wider_than_entity", "declared_twice", "no_rule"}
+KEY_LINE_RULES = {"returns_and_ensure", "wrong_file", "computed_cycle", "wider_than_entity", "declared_twice", "no_rule",
+                  "no_clock_start"}
 
 def block_text(text, line):
     """the normalised text (section 10) of the block whose key line is line
@@ -1891,6 +2334,13 @@ def flag_problems(data, stem, P, source):
         if not mapping(st).get("examples"):
             out.append(("no_example", source.line(("stories", sid)),
                 f"story {sid} has no example"))
+
+    # clock_unused: a start on an example that uses no time
+    for sid, st in mapping(data.get("stories", {})).items():
+        for title, exm in mapping(mapping(st).get("examples")).items():
+            if "starts_at" in mapping(exm) and not time_uses(P, exm):
+                out.append(("clock_unused", source.line(("stories", sid, "examples", title, "starts_at"), key=False),
+                            f'example "{title}" uses no time; its starts_at: is never read'))
 
     # dead_refusal, conflicting_ensure, empty_ensure, forbidden_change: the analyser
     out += analyse.flags(data, P, lambda p: source.line(p, key=False))
@@ -2093,6 +2543,9 @@ def check(path, P):
     else:
         meaning = [(rule, source.line(where, key=rule in KEY_LINE_RULES), msg)
                    for rule, where, msg in walk_meaning(data, stem, P, source)]
+        if not meaning:
+            meaning = [(rule, source.line(where, key=rule in KEY_LINE_RULES), msg)
+                       for rule, where, msg in clock_problems(data, P)]
         meaning = sorted(set(meaning), key=lambda p: (p[1], p[0]))
         if not meaning:
             flags = flag_problems(data, stem, P, source)
@@ -2105,9 +2558,14 @@ def history_refused(path, P):
     return os.path.exists(vc) and any(check(vc, P)[:4])
 
 
-def project_of(folder, root=None):
+def project_of(folder, root=None, clock=None):
     """the project of folder; root, when given, the host root its files
-    must resolve inside (load)"""
+    must resolve inside (load); clock, (clock_start, zone), else read from
+    the edda.yaml of root, or of the folder above folder when no root is
+    given (settings.clock_at)"""
+    if clock is None:
+        import settings
+        clock = settings.clock_at(root if root is not None else os.path.dirname(os.path.abspath(folder)))
     files, histories = [], []
     for path in sorted(glob.glob(f"{folder}/*.edda")):
         source, data = load(path, root)
@@ -2117,7 +2575,7 @@ def project_of(folder, root=None):
         source, data = load(path, root)
         if isinstance(data, list) and not schema_problems(VC, VC_SCHEMA, data, source):
             histories.append((os.path.basename(path)[:-8], data))
-    return Project(files, histories, root)
+    return Project(files, histories, root, clock)
 
 
 # --- links (sections 9 and 11) ---------------------------------------------------
@@ -2729,7 +3187,7 @@ def links_of(folder, P, base=None):
 # --- the JSON model (section 9) ------------------------------------------------
 
 MODEL_VERSION = 1     # the model's own version, edda_model
-REVISION = 63         # the language revision the model follows
+REVISION = 70         # the language revision the model follows
 
 
 def ast_json(n):
@@ -2894,14 +3352,19 @@ def story_json(sid, st, fname, P, M, pins):
                     values[p] = with_json(v, types.get(p), ga + ("with", p), givens, names, M.source)
             given.append({"kind": kind, "name": g[kind], "with": values, "line": M.line(ga)})
         steps = []
+        uses = time_uses(P, x)
+        start, times = clock_steps(P, x) if uses else (None, [])
         for i, s in enumerate(listing(x.get("steps"))):
             sa = xa + ("steps", i)
             then = listing(s.get("then"))
             when, verdict = None, None
             if "when" in s:
                 w = s["when"]
+                t = times[i][0] if times else None
                 when = {"actor": w["actor"], "call": M.expr(w["call"], sa + ("when", "call")),
-                        "at": w.get("at"), "line": M.line(sa + ("when",))}
+                        "at": w.get("at"), "line": M.line(sa + ("when",)),
+                        "time": None if not uses else {"at": clock_words(t) if t else None,
+                                                       "since": since(start, t) if t and start else None}}
                 verdict = {"kind": "DONE" if then[0] == "DONE" else "refused",
                            "reason": None if then[0] == "DONE" else then[0]["refused"], "line": M.line(sa + ("then", 0))}
                 then = then[1:]
@@ -2909,7 +3372,9 @@ def story_json(sid, st, fname, P, M, pins):
             steps.append({"when": when, "verdict": verdict,
                           "then": [M.expr(t, sa + ("then", j + skip)) for j, t in enumerate(then)],
                           "then_line": M.line(sa + ("then",)) if "then" in s else None, "line": M.line(sa)})
-        examples.append({"title": title, "given": given,
+        examples.append({"title": title, "starts_at": x.get("starts_at"),
+                         "clock": None if not uses else {"start": clock_words(start) if start else None, "zone": P.zone},
+                         "given": given,
                          "given_line": M.line(xa + ("given",)) if "given" in x else None, "steps": steps,
                          "notes": listing(x.get("notes")), "note_lines": M.text_lines(x.get("notes"), xa + ("notes",)),
                          "line": M.line(xa)})
@@ -2957,7 +3422,7 @@ def snapshot_data(text, kind):
     return Source(wrapped, False), yaml.load(wrapped, Loader=Core)
 
 
-def versions_json(sid, fname, entries, snapshots):
+def versions_json(sid, fname, entries, snapshots, clock=None):
     """the approved versions of a story, oldest first (section 9): each
     with its own record and its snapshot modelled as the story is, its
     lines counted from its key line, read against the blocks it pins at
@@ -2973,7 +3438,7 @@ def versions_json(sid, fname, entries, snapshots):
         for k, n, v in pins:
             sources[(k, n)], block = snapshots.get((k, n, v), (None, None))
             pinned[SECTION[k]][n] = mapping(block)
-        VP = Project([(fname[:-5], dict(pinned, stories={sid: st}))])
+        VP = Project([(fname[:-5], dict(pinned, stories={sid: st}))], clock=clock)
         blocks = {}
         for k, n, v in pins:
             ps = mapping(pinned[SECTION[k]][n].get("properties"))
@@ -3045,7 +3510,8 @@ def model_of(folder, root=None):
             entities.append(dict(ent, file=fname, line=line(at)))
         for sid, st in mapping(data.get("stories")).items():
             story, ops = story_json(sid, st, fname, P, M, pins_of(P.newest_version.get(("story", sid)) or {}))
-            versions = versions_json(sid, fname, sorted(story_versions.get(sid, []), key=lambda v: v[0]["number"]), snapshots)
+            versions = versions_json(sid, fname, sorted(story_versions.get(sid, []), key=lambda v: v[0]["number"]), snapshots,
+                                     (P.clock_start, P.zone))
             stories.append(dict(story, versions=versions, file=fname, line=line(("stories", sid))))
             operations += ops
     return {"edda_model": MODEL_VERSION, "revision": REVISION, "files": files, "epics": epics, "roles": roles,

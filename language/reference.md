@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 69, 5 Oct 2026. Replaces revision 68. Decisions behind it:
+Revision 70, 5 Oct 2026. Replaces revision 69. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
@@ -14,7 +14,10 @@ questions 4 to 6, and the build Plan's phase 2649; the import contract:
 decisions W and X, kb:9380137, and the build Plan's phase 2657; the
 opt-in problem log: decision HH, entry 140, which amends decision Y;
 one `edda` command with `--json` and fixed exit codes: decision AA,
-entry 132; both the build Plan's phase 2809), and Astra's review
+entry 132; both the build Plan's phase 2809; the frozen clock in
+examples: decision FF, entry 138, kb:9380368 section 2, with decisions
+Z (a day is a calendar day) and GG (`TODAY` is the day of `NOW`), and
+the build Plan's phase 2727), and Astra's review
 rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -232,6 +235,10 @@ literal     := number | "text" | "time" | True | False
 number      := -?[0-9]+ (an INTEGER) | -?[0-9]+.[0-9]+ (a NUMBER)
 ```
 
+There is no duration type: `DAYS`, `HOURS` and `MINUTES` (7.1) only
+move a time inside an expression; no property, input or `DEFAULT`
+holds one.
+
 `DEFAULT` fixes the type from what follows: `DEFAULT 0` is an INTEGER,
 `DEFAULT 1.5` a NUMBER, `DEFAULT "none"` a TEXT, `DEFAULT False` a
 YES_NO, `DEFAULT incoming | removed` a choice whose first value is the
@@ -424,8 +431,8 @@ operations:
   (`not_an_expression`). `call:` in a step is the example asking as an
   actor.
 - **One at a time.** Operations have the results they would have if run
-  one at a time. Without `at:`, `NOW` is the example's start, fixed by
-  the binding.
+  one at a time. `NOW` is the example's clock (section 8): its start,
+  moved only by a step's `at:`; nothing reads the machine's clock.
 
 **How the runner holds a call to these rules** (section 9). The spec
 checks the code's refusals; it never stands in for them. Every call of
@@ -509,6 +516,7 @@ form are Python's.
 | `+ - * /`, `( )` | arithmetic; `+` joins two lists into a new list | Python |
 | `"text"`, `\n`, `\"` | a text literal | Python |
 | `TIME("2026-10-03 10:00")`, `TIME("2026-10-03")` | a time: one quoted text literal in the time format of 7.2; any other argument, or a text in another format, is `type_mismatch` | Python syntax, Edda meaning |
+| `NOW + DAYS(1)`, `order.due - HOURS(2)`, `NOW + MINUTES(n)` | a time moved by a duration, giving a time: `DAYS(n)` n calendar days in the business zone, the same wall-clock time across a daylight-saving change; `HOURS(n)` and `MINUTES(n)` elapsed time; a count of 0 leaves the time as it is; n an INTEGER expression; only `TIME + duration` and `TIME - duration`, in any expression slot; a duration anywhere else, or a count that is no INTEGER, is `type_mismatch` | Python syntax, Edda meaning (decision Z) |
 | `3`, `-2`, `1.5`, `True`, `False`, `None`, `[]`, `[a, b]` | integer, number, yes/no, no value (`None`) and list literals | Python |
 | `NOW`, `TODAY`, `ACTOR`, `RESULT` | the four fixed names: the time, the day, the asker, the latest call's return | Edda |
 | `OLD(x)` | the value before the operation, one argument, only under `ensure` | Edda, after Eiffel's `old` |
@@ -518,8 +526,8 @@ form are Python's.
 Nothing else: no lambda, dict, set, tuple, slice, conditional
 (`a if c else b`), comparison chain (`a <= x <= b`), f-string, walrus,
 star, `is` against anything but `None`, no bare generator, and no
-method or function beyond those listed. Percent, rounding, money,
-durations and date arithmetic are backlog #2494. A list word on a
+method or function beyond those listed. Percent, rounding, money and
+date arithmetic beyond moving a time by a duration are backlog #2494. A list word on a
 non-list, `len` on a number, `+` between a list and a number, a
 NUMBER as an index, an index on a text, or a comparison of two values
 that do not compare is `type_mismatch`; the checker knows a list from
@@ -549,8 +557,9 @@ comprehension of `RESULT` as well.
 | `OLD` | the value before the operation, only under `ensure` | Design by Contract |
 | `ACTOR` | the asker: `name`, `roles`, and the properties of its roles | Edda |
 | `RESULT` | what the latest call returned; no value after `refused`; in scope only in a `then` item after a call (`not_an_expression` elsewhere) | Edda |
-| `NOW` | the time of the request, in the business zone | Edda |
-| `TODAY` | the day of `NOW` in the business zone: the time 00:00 that day, the same value as `TIME("YYYY-MM-DD")` for that date | Edda |
+| `NOW` | the clock's time, in the business zone: the example's start, moved only by a step's `at:` (section 8); in generated cases the project's `clock_start:`; never the machine's clock | Edda (decision FF) |
+| `TODAY` | the day of `NOW` in the business zone: the time 00:00 that day, the same value as `TIME("YYYY-MM-DD")` for that date | Edda (decision GG) |
+| `DAYS` `HOURS` `MINUTES` | durations, only as `TIME + DAYS(n)` or `TIME - DAYS(n)` (7.1): a day a calendar day, an hour or a minute elapsed time | Edda (decision Z) |
 | `DONE` | the verdict of a successful call, as the first `then` item, not inside an expression | Edda |
 | `MANY` `IN ORDER` `DEFAULT` `OPTIONAL` `DERIVED` `TEXT` `NUMBER` `INTEGER` `TIME` `YES_NO` | type-phrase words, section 4, not inside an expression, except `TIME("...")` (7.1) | Edda |
 
@@ -571,11 +580,27 @@ as its 00:00 instant. So `TODAY == NOW` is true only at 00:00, while
 true all day after midnight. Write a calendar-day contract against a
 property that holds a day.
 
+**The business zone and daylight saving.** The business zone is the
+`zone:` of `edda.yaml` (section 9), UTC when it names none. `DAYS(1)`
+keeps the wall-clock time: in `Europe/Oslo`, `TIME("2026-03-28 09:00")
++ DAYS(1)` is `2026-03-29 09:00`, 23 hours later, while `+ HOURS(24)`
+is `2026-03-29 10:00`. A wall-clock time that does not exist, or
+happens twice, around a daylight-saving change is read as Python's
+zoneinfo reads it with fold=0: a time in the gap moves on by the gap
+(`02:30` in a gap of an hour is `03:30`), and of a doubled time the
+first is meant, also where `DAYS(n)` lands on one. A move by 0 of any
+unit is the time itself, so `NOW + DAYS(0)` at the second `02:30` stays
+there. A time is the moment it stands for everywhere it is compared:
+`==`, `!=`, `<`, `in`, inside lists, and the frame rule's check that a
+stored value did not change; the two `02:30`s of a doubled hour are two
+times, an hour apart, though both show as `02:30`.
+
 ## 8. Examples
 
 ```yaml
 examples:
   "Ta bort frees held stock":
+    starts_at: "2026-10-03 09:00"
     given:
       - actor: erik
         with: {roles: [shop_user], shop: butik}
@@ -589,7 +614,7 @@ examples:
           - DONE
           - "purchase.status == removed"
           - "held.units_held == 0"
-      - when: {actor: erik, call: "remove(purchase)"}
+      - when: {actor: erik, call: "remove(purchase)", at: "NOW + DAYS(1)"}
         then:
           - refused: "the order is already removed"
     notes: ["erik is the shop's buyer"]
@@ -598,16 +623,45 @@ examples:
 | key | means | why |
 |---|---|---|
 | `examples:` | quoted title to example; one concrete run | the acceptance criteria that run |
+| `starts_at:` | the example's start, a quoted time (7.2); only on an example that uses time | the clock it runs on (below); left out, the project's `clock_start:` (section 9); an example that uses time with neither is `no_clock_start`, and a `starts_at:` on one that does not is flagged `clock_unused` |
 | `given:` | a list of things to make; each item has exactly one key besides `with`: `- <entity>: <name>` or `- actor: <name>` | order-independent, schema-checked; names declared here are used below; the binding makes them (section 9); no glue is written |
 | `with:` | property name to value: a number, quoted text, a quoted time, `True`, `False`, a choice value, a given name, or a flat list of those; `roles:` (a list of role names) for an actor, `fixture:` for a `spec_file` only | a property left out takes its `DEFAULT`, `[]` for `MANY`, `None` for `OPTIONAL`, otherwise unset: reading it fails the example; a derived or computed property, or an actor's `name`, is `derived_in_given`; every value is checked against the property's declared type, and a value whose property may be of several types must fit one of them as a whole, a list included: a plain text or time is `unquoted_text`, the wrong kind `type_mismatch`, a choice value not one of its property's values `unknown_choice`, a name no given declares `unknown_name`; `roles:` written as one name is `not_a_list` |
 | `fixture:` | the folder under `fixtures/`; its file, and its history when present, become the given `spec_file` | the whole spec is the given, never a hand-made fragment |
 | `steps:` | a list of `when` and `then`; `when` may be left out to check the given state | a flow is several steps |
-| `when:` | `actor` (a declared given), `call` (a call of a declared operation with its arguments, Python call form; anything else is `not_an_expression`), `at` (optional time) | one fixed shape; every actor is declared (`unknown_name` otherwise) |
+| `when:` | `actor` (a declared given), `call` (a call of a declared operation with its arguments, Python call form; anything else is `not_an_expression`), `at` (optional: a time, or `NOW` moved by durations; it moves the example's clock, below) | one fixed shape; every actor is declared (`unknown_name` otherwise) |
 | `then:` | with `when`: the verdict first, `DONE` or `refused: "<reason>"`, then facts; without `when`: facts only | the checker compares; `RESULT` is what the latest call returned |
 | `notes:` | free text | as on stories |
 
 After `refused`, `RESULT` has no value; a changing operation returns
 nothing. Facts after `refused` check that nothing changed.
+
+**The clock** (decision FF). Only an example that uses time has one.
+An example uses time when a step has `at:`, or `NOW` or `TODAY` is
+read in what the runner evaluates or the code decides for it: a step's
+call and its `then` facts, the called operation's who-line conditions,
+`refuse` conditions, `ensure` facts and `also_changes` paths (the
+frame rule reads them), a computed property they read
+and an operation they call whose `returns`, `refuse` conditions or
+`ordered_by` read it (nested calls and computed properties included),
+and the `always` facts of every entity the givens, the called
+operations' inputs and their returns reach, as declared. Its clock
+starts at its `starts_at:`, else at the project's `clock_start:`; with
+neither the example is refused (`no_clock_start`). The clock stands
+still: only a step's `at:` moves it, before that step's call, and it
+stays there for the later steps until another `at:`. `at:` is a time
+(quoted, 7.2) or an expression whose only time is `NOW`, the clock
+before the step, moved by durations: `NOW + DAYS(1)`, `NOW + HOURS(2)
+- MINUTES(30)`; like the call, it sees the givens and the step's
+`ACTOR`, never `RESULT`. Time never goes backwards: an `at:` earlier
+than the clock is refused (`clock_backwards`) when the checker can
+tell, the start and every count being constants, else the example
+fails at the `at:` line. An `at:` is judged as a step's call is: a
+read inside it that breaks a rule fails the example at the rule's line.
+`NOW` is the clock's time and `TODAY` its day
+(7.2). Nothing reads the machine's clock. `no_clock_start` and
+`clock_backwards` are judged only when the rest of the meaning layer
+found nothing in the file, since an example's use of time is read
+through expressions that must check first.
 
 A failure of the generated cases (section 9) is printed in this form,
 ready to paste under a story's `examples:`; pasted, it is an example
@@ -627,7 +681,7 @@ defines it:
 | `means:` | Operations | in an `ensure` item, the fact's meaning in words | the meaning beside the mechanics (decision 40) |
 | `actor:` | Examples | in a step's `when`, the given actor who asks | one fixed request shape |
 | `call:` | Examples | in a step's `when`, the call of a declared operation | one fixed request shape |
-| `at:` | Examples | in a step's `when`, the time of the request; optional | one fixed request shape |
+| `at:` | Examples | in a step's `when`, the time of the request: a quoted time, or `NOW` moved by durations; optional; it moves the example's clock | one fixed request shape; one key moves time, never a separate set and advance |
 | `refused:` | Examples | the verdict of a refused call, as the first `then` item, with the reason given | tests match the reason |
 | `roles:` | Examples | inside `with:`, an actor's roles, a list | the binding reads them |
 | `fixture:` | Examples | inside `with:`, a spec_file's folder under `fixtures/` | the binding reads them |
@@ -818,8 +872,9 @@ version" itself, and the runner holds it to the spec's refusal).
 over the spec folder `--project` names, else the one the project's
 `edda.yaml` names (Settings, below). The spec must check first. For each
 story, or each one named, and each example: make the givens through
-the binding, in a fresh work folder; for each step with `when`, check
-permission (section 3: any of the actor's roles passes any who-line,
+the binding, in a fresh work folder, on the example's clock (section
+8) when it uses time; for each step with `when`, move the clock by its
+`at:`, check permission (section 3: any of the actor's roles passes any who-line,
 condition included; otherwise refused, `"<operation> is not allowed
 for <roles>"`), then call the operation, held to its rules (section 6:
 the spec's refusal, `ensure` with `OLD`, `always`, the frame rule);
@@ -842,20 +897,28 @@ line. A property or operation found to have no
 binding while running ends that example; the failures found before it
 stay.
 
+The binding is told the time: a binding may define `clock(now)`, which
+the runner calls whenever the clock is set or moves, before anything
+is read at that time: at an example's start, before its givens are
+made; at each step's `at:`, before its call's permission, refusal and
+`OLD` values are judged; and at the start of generated cases, with
+their `clock_start:`. `now` is the clock's time, or `None` in an
+example that uses no time. A time is a `datetime` with no zone, the
+business zone's wall clock (its `fold` set for the second of a doubled
+hour), as every time the binding is given is, a `with:` time
+included. Edda's own binding has none: its operations read no time.
+
 Per example: passed, or failed with, for each failing `then` item,
 its file and line, its text and what was found (the left side of a
 comparison, or why it could not be read). Per story: `examples
 passed` (every example passed), `failing` (any example failed, even
 when something after the failure had no binding), or `not run` with
-the reason: no binding for an operation, entity or property, the
-clock (`at:`, `NOW`, `TODAY`, not built yet, read directly, through a
-computed property whose expression reads it, or through an operation
-whose `returns`, `refuse` conditions or `ordered_by` read it; computed
-properties and operations reach it through one another, nested calls
-included, and the called operation's own who-line, `refuse` conditions
-and `ensure` facts count, and so do the `always` facts of every entity
-the givens, the called operations' inputs and their returns reach, as
-declared), or no examples. The
+the reason: no binding for an operation, entity or property, or no
+examples. The clock is no reason any more: an example that uses time
+runs on its clock (section 8), and one with no start is refused
+before the runner sees it (`no_clock_start`); a `NOW` or `TODAY` read
+on no clock all the same is Edda's own failure, exit 3 (`edda failed:
+... read the clock without a start`). The
 runner never reports `done` (section 11): that needs more than it
 computes. A draft story runs like an approved one. Exit 0 when no
 story failed; 1 when one failed or the spec does not check; 3 when
@@ -873,10 +936,12 @@ refused (`file must be a mapping`); whether it should mean "every
 default" is open.
 
 ```yaml
-edda: 69
+edda: 70
 specs: specs
 stack: python
 problem_log: local
+zone: Europe/Oslo
+clock_start: "2026-10-01 09:00"
 generated_cases: {on: true, runs: 100, steps: 20}
 ```
 
@@ -892,6 +957,8 @@ The file's keys, for the registry:
 | `on:` | Settings | inside `generated_cases:`, required; a yes/no; no default | turning them on is a choice written down, never implied |
 | `runs:` | Settings | inside `generated_cases:`; a whole number of at least 1; 100 when left out | how many random runs a story gets |
 | `steps:` | Settings | inside `generated_cases:`; a whole number of at least 1; 20 when left out | how many calls a run may make at most |
+| `zone:` | Settings | at the root of `edda.yaml`; the business zone, a time zone name Python's zoneinfo knows, such as `Europe/Oslo`; `UTC` when left out, or with no file; any other value is refused (`wrong_type`) | `NOW`, `TODAY` and `DAYS` mean one calendar in every example (7.2) |
+| `clock_start:` | Settings | at the root of `edda.yaml`; a time (7.2), quoted: the start of the clock of every example that uses time and has no `starts_at:`, and of generated cases; left out, none; a value that is no time is refused (`wrong_type`) | one start for a project's examples, each free to give its own (section 8) |
 
 Every tool that reads the spec folder (`check.py`, `run.py`,
 `approve.py`, `view.py`; `edda check`, `run`, `approve` and `view`,
@@ -903,15 +970,18 @@ when left out. A tool given the spec folder by name (`--project`,
 read `specs:`. A tool works on one root per run: given `--root` and a
 spec folder by name whose folder above is another root, it prints one
 line, `--root <root> and the spec folder <folder> name two roots; give
-one`, and exits 2; `trend.py` given `--root` and a `--log` that is not
+one`, and exits 2. A spec folder given alone, to a tool or to
+`check.project_of`, takes its `zone:` and `clock_start:` from the
+`edda.yaml` of the folder above; `trend.py` given `--root` and a `--log` that is not
 that root's log does the same (`name two logs`). With no `edda.yaml`,
 every tool does what it did in revision 67, but writes no log and
 exits as section 13 says. For now, an `edda.yaml` in the spec
 folder (`specs/edda.yaml`, the place of revisions 64 to 67) holding
 only `generated_cases:` is still read; with one at the root too, both
 are refused (`two_settings`). A later revision reads only the root.
-Edda's own repository has an `edda.yaml` at its root: `edda: 69`,
-`stack: python` and `problem_log: local`, its stories in `specs/`.
+Edda's own repository has an `edda.yaml` at its root: `edda: 70`,
+`stack: python`, `problem_log: local` and `clock_start: "2026-10-01
+09:00"` (no `zone:`, so UTC), its stories in `specs/`.
 
 The pin: tools older than the pinned revision refuse to run, with one
 line naming both revisions (`pinned_newer`), and exit 3. Tools newer
@@ -1019,10 +1089,12 @@ line is followed by one more, its generated cases
    shell, a test calling its `main`). The pasted example is the lasting
    reproduction.
 
-An operation with no binding, with a required single-record input of
-an entity no binding makes or reaches, calling an operation with no
-binding in a condition or fact, or reading the clock (`needs the
-clock, not built yet`), as the runner counts it for examples, is
+An operation that reads the clock, as section 8 counts it for
+examples, runs on a clock stopped at the project's `clock_start:`,
+never moved. An operation with no binding, with a required
+single-record input of an entity no binding makes or reaches, calling
+an operation with no binding in a condition or fact, or reading the
+clock in a project with no `clock_start:` (`no clock start`), is
 skipped and listed. What the binding cannot give never fails a run by
 itself and never stops the runner: a property or operation with no
 binding (`no binding for <entity>.<property>`), or a value nothing gave
@@ -1072,7 +1144,7 @@ skipped follows as `; skipped <operation>: <why>` or `; skipped entity
 
 Linked now means the marker resolves; it changes nothing the runner
 does: the runner still holds the bound operations to their rules.
-Not built yet: bindings in other stacks, the clock.
+Not built yet: bindings in other stacks.
 
 **The model.** Built. `python3 tools/check.py [--root DIR] --model [DIR]` (`DIR`
 the spec folder, else the one the project's `edda.yaml` names) prints one JSON model of the whole
@@ -1090,7 +1162,7 @@ A value left out is `null`, a list left out `[]`.
 | field | holds |
 |---|---|
 | `edda_model` | the model's own version, 1; a reader refuses a version it does not know |
-| `revision` | the language revision the model follows, 63; revisions 64 and 65 changed nothing in the model |
+| `revision` | the language revision the model follows, 70: revision 70 added the clock of an example and the time of a step; revisions 64 to 69 left it as revision 63 made it |
 | `files` | each `.edda` file: `name`, `history` (its `.edda.vc` or `null`), `blocks`: each role, entity and story in the order of the status lines (section 11) with `kind`, `name`, `line`, `status` (`approved` or `draft`), `version` and `pins_stale` |
 | `epics` | `id`, `text`, `file`, `line` |
 | `roles` | `name`, `is`, `properties`, `file`, `line` |
@@ -1102,9 +1174,9 @@ A value left out is `null`, a list left out `[]`.
 | a who-line | `role`, `when` (an expression), `line` |
 | a fact | `fact` (an expression), `means`, `drift`, `line` |
 | `drift` | on a refusal or an `ensure` fact: `true` when `wording_drift` (section 10) flags one side of it |
-| an example | `title`, `given` (`kind`: `actor` or the entity, `name`, `with`: each property to a value, `line`), `given_line` (of the `given:` key), `steps`, `notes` and `note_lines`, `line` |
+| an example | `title`, `starts_at` (as written, or `null`), `clock` (`null` for an example that uses no time, else `start`, the resolved start or `null`, and `zone`), `given` (`kind`: `actor` or the entity, `name`, `with`: each property to a value, `line`), `given_line` (of the `given:` key), `steps`, `notes` and `note_lines`, `line` |
 | a `with:` value | `kind`, `value`: the kind the checker resolved it to, for a property that may be of several types the one it fits, a given before a choice value as the runner reads it: `given` (a given's name), `choice`, `text`, `time`, `integer`, `number`, `yes_no`, `role` (in an actor's `roles`), `fixture` (a `spec_file`'s), or `list` with a list of these as its `value`; `null` where the property's type is not known |
-| a step | `when` (`actor`, `call` as an expression, `at`, `line`), `verdict` (`kind`: `DONE` or `refused`, `reason` (a refusal's, else `null`), `line` (its `then` item's); `null` without `when`), `then` (the facts after the verdict, expressions), `then_line` (of the `then:` key), `line` |
+| a step | `when` (`actor`, `call` as an expression, `at` as written, `time`: `null` in an example that uses no time, else `at`, the clock's time at the call, `YYYY-MM-DD HH:MM`, or `null` when it is known only when it runs, and `since`, its distance from the start in words, `line`), `verdict` (`kind`: `DONE` or `refused`, `reason` (a refusal's, else `null`), `line` (its `then` item's); `null` without `when`), `then` (the facts after the verdict, expressions), `then_line` (of the `then:` key), `line` |
 | an expression | `text` as written, `line`, `ast`: the tree of `ast.parse(text, mode="eval").body` as `{"node": "<ast class>", <field>: ...}`, every field of the class in its order, lists as lists, constants as JSON values, no positions |
 | `graphs` | `status_life`, `entity_map`, `role_inclusion`, `who_may`: below |
 
@@ -1325,7 +1397,9 @@ anchor and its aliases are one problem, at the anchor.
 3. meaning: `unknown_name`, `unknown_choice`, `bad_type_phrase`,
    `not_an_expression`, `type_mismatch`,
    `returns_and_ensure`, `wrong_file`, `not_ordered`,
-   `computed_cycle`, `derived_in_given`, `wider_than_entity`, `no_rule`;
+   `computed_cycle`, `derived_in_given`, `wider_than_entity`, `no_rule`,
+   then, only when those found nothing in the file, `no_clock_start`
+   and `clock_backwards` (section 8);
 4. history and flags: in a `.edda.vc`, `bad_version`, `bad_pin` and
    `bad_snapshot`; in a `.edda`, every flag. The checker's fixture
    report names the layer that refused a file, or says `flagged` or
@@ -1363,7 +1437,8 @@ expression's line, the property's line for `unknown_choice`,
 for `computed_cycle`, the `then` item's line for
 `not_ordered`, the operation's key line for `returns_and_ensure`, the
 entity's key line for `wrong_file` on a part, the example's title
-line for `no_rule`, the title's line under `shown_by:` for
+line for `no_rule` and `no_clock_start`, the `at:` line for
+`clock_backwards`, the `starts_at:` line for `clock_unused`, the title's line under `shown_by:` for
 `unknown_name` on a title, the
 story's key line for `wrong_file`, `no_example` and
 `question_on_approved`, the changed
@@ -1394,7 +1469,7 @@ operation resolved by the rule, the marker's line for a marker, and the
 | `unknown_choice` | a choice value that is not one of its property's values: in a comparison, `may_change` or a given | `not one of <property>'s values: <value>` |
 | `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>` |
 | `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation, `RESULT` outside a `then` item after a call (a `call` itself never sees it) | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
-| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, an index on a text, a `TIME` call whose argument is not one quoted time in the format of 7.2, a comparison of two values of different kinds (`==`), of a non-element with a list (`in`) or of anything but two numbers, texts or times (`<`), a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, `may_change` on a property that is no choice, a given value of another type than its property or fitting none of its possible types | `<what> expects <kind>: <text>`; for a comparison `== expects two values of one kind: <text>`, `in expects an element of the list: <text>`, `in expects a text in a text: <text>`, `in expects a list or a text: <text>`, `< expects two numbers, two texts or two times: <text>`; `may_change expects a choice property: <property>`; `TIME expects one quoted time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": <text>` |
+| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, an index on a text, a `TIME` call whose argument is not one quoted time in the format of 7.2, a comparison of two values of different kinds (`==`), of a non-element with a list (`in`) or of anything but two numbers, texts or times (`<`), a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, `may_change` on a property that is no choice, a given value of another type than its property or fitting none of its possible types, a duration (`DAYS`, `HOURS`, `MINUTES`) anywhere but after `TIME +` or `TIME -` or with a count that is no INTEGER, an `at:` that is neither a time nor `NOW` moved by durations, a `starts_at:` that is no time | `<what> expects <kind>: <text>`; for a comparison `== expects two values of one kind: <text>`, `in expects an element of the list: <text>`, `in expects a text in a text: <text>`, `in expects a list or a text: <text>`, `< expects two numbers, two texts or two times: <text>`; `may_change expects a choice property: <property>`; `TIME expects one quoted time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": <text>`; `DAYS expects to move a time, as TIME + DAYS(n) or TIME - DAYS(n): <text>`, `DAYS expects one INTEGER: <text>` (and so for `HOURS` and `MINUTES`); `at expects a time, "YYYY-MM-DD HH:MM", or NOW moved by DAYS, HOURS or MINUTES: <text>`; `starts_at expects a time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": <text>` |
 | `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `returns and also_changes on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
 | `wrong_file` | a story in another entity's file; a part outside its owner's file | `story <id> is about <entity> and belongs in <entity>.edda`; `entity <name> is part of <owner> and belongs in <entity>.edda` |
 | `not_ordered` | `RESULT[n]` on an unordered return, through an `or` or comprehension of `RESULT` as well | `<operation> gives no order; RESULT[<n>] needs ordered_by or IN ORDER` |
@@ -1402,6 +1477,8 @@ operation resolved by the rule, the marker's line for a marker, and the
 | `derived_in_given` | a `with:` value for a derived or computed property, or for an actor's `name` | `<property> is derived and cannot be given`, `<property> is computed and cannot be given`, `name is fixed and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
 | `no_rule` | a story with `rules:` has an example no rule names | `example "<title>" belongs to no rule` |
+| `no_clock_start` | an example that uses time (section 8) with no `starts_at:` and no project `clock_start:` | `example "<title>" uses time (<how>) but has no start; give it starts_at: or the project clock_start:`, `<how>` the first use found: `reads NOW`, `moves time with at:`, `reads <entity>.<property>, which reads the clock` or `calls <operation>, which reads the clock` |
+| `clock_backwards` | an `at:` the checker can tell is earlier than the clock before it (section 8) | `at <at> is before the clock's <time>; time never goes backwards`, an expression followed by its time in brackets |
 | `bad_version` | a `.vc` number out of sequence, an unknown story or block, or a version of a block of another file | `<kind> <name> v<n> out of sequence; expected v<m>`; for an unknown block, `<kind> <name> v<n>: no such <kind>`; for another file's block, `<kind> <name> v<n>: belongs in <file>.edda.vc` |
 | `bad_pin` | a pin on a block version, a story version without pins, a duplicate `(kind, name)`, a pin to no such block or version; a version exists when a history of the project holds it | `pin <kind> <name> v<n>: no such version`, `pin <kind> <name> v<n>: no such <kind>`, `pin <kind> <name> v<n>: pinned twice`, `story <id> v<n>: no pins`, `<kind> <name> v<n>: a block version has no pins` |
 | `bad_snapshot` | a version's text that is not already normalised, is outside the subset of section 2 or fails the shape layer (a bad name, a wrong key, a duplicate; a retired key of section 10 is not wrong here), does not read as one block under the version's name, or does not name it on its first line | `text of <kind> <name> v<n> is not a normalised block` |
@@ -1430,12 +1507,13 @@ operation resolved by the rule, the marker's line for a marker, and the
 | `maybe_replaced` | a marker on a def that a later binding of its name may replace on some imports: one nested in a branch of any compound statement not proven to run (`with`, `if`, `try`, `for`, `while`, `match`), or in an operand that may not be evaluated (section 9) | `<function> at line <n> may be replaced by a def, a class or a binding at line <m>, which not every import runs: <text>` |
 | `no_story` | a top-level function or class of a covered file that no linked function reaches (section 9) | `no linked function reaches <name>` |
 | `pinned_older` | an `edda.yaml` pinning a revision older than the tools (section 9); the tool runs | `edda.yaml pins revision <n>; these tools are revision <m>` |
+| `clock_unused` | a `starts_at:` on an example that uses no time (section 8) | `example "<title>" uses no time; its starts_at: is never read` |
 
 **Failures** (found by the runner, section 9; not the checker's):
 
 | rule | when | message |
 |---|---|---|
-| `failing_example` | an example of a story whose operations are bound fails: a wrong verdict, a `then` fact that does not hold, a given that cannot be made, or a call or a read inside a fact that breaks a rule of its operation; one per failure line, at that line | the runner's line under `example "<title>" failed`: `<file>:<line>: then <text>: found <found>`, or `<file>:<line>: <found>` |
+| `failing_example` | an example of a story whose operations are bound fails: a wrong verdict, a `then` fact that does not hold, a given that cannot be made, an `at:` that would move the clock back, or a call or a read inside a fact that breaks a rule of its operation; one per failure line, at that line | the runner's line under `example "<title>" failed`: `<file>:<line>: then <text>: found <found>`, or `<file>:<line>: <found>` |
 | `failing_case` | a generated case breaks a rule (section 9); one per broken rule the failure names, at the rule's line, or one at no line when it names none | `<id>: generated cases: failed (seed <n>)`, then `<file>:<line>: <what>` for each broken rule |
 
 **Dimensions.** Every problem, a refusal, a flag or a failure, carries
@@ -1490,6 +1568,8 @@ a problem, and is neither counted nor logged.
 | `wider_than_entity` | misplaced | permission scope | extra | person | blocks |
 | `computed_cycle` | misplaced | computed loop | wrong | person | blocks |
 | `no_rule` | misplaced | example ungrouped | missing | agent | blocks |
+| `no_clock_start` | weak check | no clock start | missing | agent | blocks |
+| `clock_backwards` | contradiction | time backwards | wrong | agent | blocks |
 | `bad_version` | out of date | history broken | wrong | person | blocks |
 | `bad_pin` | out of date | history broken | wrong | person | blocks |
 | `bad_snapshot` | out of date | history broken | wrong | person | blocks |
@@ -1512,6 +1592,7 @@ a problem, and is neither counted nor logged.
 | `maybe_replaced` | code differs | marker | wrong | agent | warns |
 | `no_story` | code differs | unlinked code | missing | agent | warns |
 | `pinned_older` | out of date | pin behind | wrong | person | warns |
+| `clock_unused` | misplaced | unused start | extra | agent | warns |
 | `failing_example` | code differs | behaviour | wrong | agent | blocks |
 | `failing_case` | code differs | behaviour | wrong | agent | blocks |
 
@@ -1527,8 +1608,8 @@ block written in flow form, `box: {is: ..., may_read: [...]}`) is
 or its own keys (its own `notes` among them), `story`, but `rules`,
 `story rules`; an operation's `who`, `operation who`; `refuse`,
 `refuse`; `ensure` and `also_changes`, `ensure`; `returns` and
-`ordered_by`, `returns`; an example's `given`, `example given`;
-`steps`, `example step`. Anything else (`epics`, an entity's or an
+`ordered_by`, `returns`; an example's `given` and `starts_at`,
+`example given`; `steps`, `example step`. Anything else (`epics`, an entity's or an
 operation's key line, `is`, `part_of`, `inputs`, an operation's or an
 example's `notes`, an example's title, a file that does not parse, a
 problem with no line) is `unknown`; it is never guessed.
@@ -1770,7 +1851,7 @@ rule:
 | rule | `Rule: <sentence>.` as a heading line before its examples; with `rules:`, the rules come where the examples stood, in `rules` order, each followed by its examples in `shown_by` order; without `rules:`, no rule sentence and the examples in file order |
 | example | `Example: <title>.` |
 | given | one sentence for all givens: `Given <item>, and <item>.`; an actor reads `<name>, a <role>`; an entity `<name>, a <entity> with <property> <value> and <property> <value>`; items are joined with `, ` and the last with `, and ` (the comma stays because each item carries its own apposition) |
-| when | `When <actor> asks to <name> <arguments>.` |
+| when | `When <actor> asks to <name> <arguments>[, at <time> (<since>)].`; the time only in an example that uses time (section 8): the clock's time at the call and its distance from the start, `the start` or `start + 1 day 2 hours`, the difference of the two wall clocks; a time known only when it runs, `, at <at:> (known when it runs)`, or `, at a time (known when it runs)` on a step with no `at:` |
 | then | with facts: `Then it is done and <facts>.` or `Then it is refused: <reason>, and <facts>.`; without: `Then it is done.` or `Then it is refused: <reason>.`; a step without `when`: `Then <facts>.`; facts joined with "and" |
 
 Expressions in words, one reading per form of 7.1, composed inside out:
@@ -1789,7 +1870,8 @@ every x in l, c; `[e for x in l if c]`
 e for every x in l where c (the projection `e` is kept; a bare `x`
 reads "every x in l where c"); nested generators read in order; `l[0]`
 the first of l; `l[-1]` the last of l; `l[n]` item n of l, counted
-from 0; `TIME("t")` the time t; `+ - * /` plus, minus, times, divided by; `OLD(x)` x before; `ACTOR`
+from 0; `TIME("t")` the time t; `DAYS(n)` n days, `HOURS(n)` n
+hours, `MINUTES(n)` n minutes (`DAYS(1)` 1 day); `+ - * /` plus, minus, times, divided by; `OLD(x)` x before; `ACTOR`
 the asker; `TODAY` today; `RESULT` the result; `True` yes, `False` no; `None`
 no value; a text literal in double quotes, a double quote or a
 backslash inside it with a backslash before it, so that a quote never
@@ -2098,14 +2180,67 @@ Qualities and infrastructure (#2487), time-triggered operations
 (#2486), screens (#2488), timing and concurrency
 (#2489), an analyser beyond the simple rules of section 11 (#2491), drafting from
 existing code (#2492), story to Plan tasks (#2493), richer calculations
-and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512),
+and durations beyond moving a time (#2494), tooling (#2495), the KDL skeleton trial (#2512),
 rule packs a project follows and their key in `edda.yaml` (#2612), the
 agent guide served by the KB as a skill;
 the running of examples and the rule wrapping round every call are
 begun (sections 6 and 9: Edda's own `check`); the rest of the done
 computation gets its own stories.
 
-## 15. Changes from revision 68
+## 15. Changes from revision 69
+
+Build Plan kb:9379223, phase 2727, and decision FF (entry 138,
+kb:9380368 section 2), with decisions Z and GG: the frozen clock in
+examples.
+
+- An example that uses time (section 8) runs on a clock of its own: it
+  starts at the new key `starts_at:`, else at the project's new
+  `clock_start:` in `edda.yaml`, and only a step's `at:` moves it.
+  Nothing reads the machine's clock. "Uses time" is what the runner
+  counted as "needs the clock" in revision 69: `NOW` or `TODAY` read
+  in what the runner evaluates or the code decides for the example,
+  or any `at:` (8).
+- New refusals `no_clock_start` (an example that uses time with no
+  start) and `clock_backwards` (an `at:` the checker can tell is
+  earlier than the clock), judged after the rest of the meaning layer
+  found nothing in the file; a new flag `clock_unused` (a
+  `starts_at:` on an example that uses no time). All three are in the
+  registry with their dimensions, and have a fixture each (11).
+- `at:`, a free text before, is a time or an expression whose only
+  time is `NOW` moved by durations; anything else is `type_mismatch`.
+  An `at:` the checker cannot place fails the example at its line when
+  it would move the clock back (8, 11).
+- New expression words `DAYS(n)`, `HOURS(n)` and `MINUTES(n)`: only
+  `TIME + duration` and `TIME - duration`, giving a TIME. `DAYS` is a
+  calendar day in the business zone, `HOURS` and `MINUTES` elapsed
+  time (decision Z); a wall-clock time that does not exist or happens
+  twice is read as zoneinfo reads it with fold=0. No property holds a
+  duration (4, 7.1, 7.2).
+- New key `zone:` in `edda.yaml`, the business zone, a name zoneinfo
+  knows; UTC when left out. `NOW` is the clock's time and `TODAY` its
+  day in that zone (decision GG). An unknown zone or a `clock_start:`
+  that is no time is refused (`wrong_type`) (9).
+- The runner no longer reports `not run: ... needs the clock, not built
+  yet`. The binding may define `clock(now)`, told the time whenever the
+  clock is set or moves, before anything is read at it; times reach the binding as before, a
+  `datetime` with no zone, now the business zone's wall clock (9).
+- Generated cases run an operation that reads the clock on a clock
+  stopped at the project's `clock_start:`; with none, it is skipped,
+  `no clock start` (9).
+- The read view gives each step's time in an example that uses time:
+  `When ..., at 2026-10-02 09:00 (start + 1 day).` (12). The model
+  gains an example's `starts_at` and `clock` and a step's `time`, and
+  its `revision` is now 70.
+- Edda's own repository: 14 examples of EDDA-004, EDDA-005 and
+  EDDA-008 read `NOW` through `approve`'s and `approve_block`'s
+  `ensure` facts or move time with `at:`, so its `edda.yaml` gains
+  `clock_start: "2026-10-01 09:00"` (UTC) and pins `edda: 70`. No
+  `.edda` file changes. Those three stories stay `not run: no binding
+  for ...`; no story changes status, and `edda run` prints what it did
+  in revision 69. `edda check` adds the three new fixtures to its
+  fixture report.
+
+## 16. Changes from revision 68
 
 Build Plan kb:9379223, phase 2809, and decisions HH (entry 140) and AA
 (entry 132): the problem log is opt-in, and one `edda` command.
@@ -2157,7 +2292,7 @@ Build Plan kb:9379223, phase 2809, and decisions HH (entry 140) and AA
 - The guide and the README name the `edda` command; the guide is
   regenerated. No block's text changes.
 
-## 16. Changes from revision 67
+## 17. Changes from revision 67
 
 Build Plan kb:9379223, phase 2657, and decisions W and X (kb:9380137):
 the import contract.
@@ -2212,7 +2347,7 @@ the import contract.
   `edda.yaml`, so its checker's run, its runner and its model are
   unchanged; the model's `revision` stays 63. No block's text changes.
 
-## 17. Changes from revision 66
+## 18. Changes from revision 66
 
 Build Plan kb:9379223, phase 2649, and decision U (kb:9379257,
 questions 4 to 6): every problem carries six dimensions, and problems
@@ -2246,7 +2381,7 @@ are counted and logged.
   `tools/test_dimensions.py` tests them. The model's `revision` stays
   63, and no block's text changes.
 
-## 18. Changes from revision 65
+## 19. Changes from revision 65
 
 Build Plan kb:9379223, phase 2648, and decision U (kb:9379257,
 questions 1 to 3): the analyser, four flags found from the spec alone.
@@ -2279,7 +2414,7 @@ questions 1 to 3): the analyser, four flags found from the spec alone.
   and the model are unchanged, the model's `revision` stays 63, and
   no block's text changes.
 
-## 19. Changes from revision 64
+## 20. Changes from revision 64
 
 Build Plan kb:9379223, phase 2636, and decision T (kb:9379252):
 generated cases, off by default.
@@ -2357,7 +2492,7 @@ generated cases, off by default.
   run, the checker's run and the model are unchanged; the model's
   `revision` stays 63. No block's text changes.
 
-## 20. Changes from revision 63
+## 21. Changes from revision 63
 
 Build Plan kb:9379223, phase 2623, and decision N (kb:9379218, Q6):
 every operation is linked to the code that does it.
@@ -2430,7 +2565,7 @@ every operation is linked to the code that does it.
   the model's `revision` stays 63, as nothing in it changed (9). No
   block's text changes, so nothing needs re-approval.
 
-## 21. Changes from revision 62
+## 22. Changes from revision 62
 
 Build Plan kb:9379223, phase 2622: the read view, built.
 
@@ -2533,7 +2668,7 @@ Build Plan kb:9379223, phase 2622: the read view, built.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 22. Changes from revision 61
+## 23. Changes from revision 61
 
 Build Plan kb:9379223, phase 2621, and decision N (kb:9379218, Q7): one
 versioned JSON model of the whole spec, the graphs in it as data.
@@ -2570,7 +2705,7 @@ versioned JSON model of the whole spec, the graphs in it as data.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 23. Changes from revision 60
+## 24. Changes from revision 60
 
 Build Plan kb:9379223, phase 2625: every bound operation is held to its
 contract, on every call the runner makes.
@@ -2607,7 +2742,7 @@ contract, on every call the runner makes.
   wrapping as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 24. Changes from revision 59
+## 25. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -2648,7 +2783,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 25. Changes from revision 58
+## 26. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -2666,7 +2801,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 26. Changes from revision 57
+## 27. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -2753,7 +2888,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 27. Changes from revision 56
+## 28. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -2772,7 +2907,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 28. Changes from revision 55
+## 29. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -2796,7 +2931,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 29. Changes from revision 54
+## 30. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -2811,7 +2946,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 30. Changes from revision 53
+## 31. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -2846,7 +2981,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 31. Changes from revision 52
+## 32. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -2862,7 +2997,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 32. Changes from revision 51
+## 33. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -2884,7 +3019,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 33. Changes from revision 50
+## 34. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -2894,7 +3029,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 34. Changes from revision 49
+## 35. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -2903,14 +3038,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 35. Changes from revision 48
+## 36. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 36. Changes from revision 47
+## 37. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -2920,7 +3055,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 37. Changes from revision 46
+## 38. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -2929,7 +3064,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 38. Changes from revision 45
+## 39. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -2939,7 +3074,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 39. Changes from revision 44
+## 40. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -2948,7 +3083,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 40. Changes from revision 43
+## 41. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -2957,7 +3092,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 41. Changes from revision 42
+## 42. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -2968,7 +3103,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 42. Changes from revision 41
+## 43. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -2977,21 +3112,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 43. Changes from revision 40
+## 44. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 44. Changes from revision 39
+## 45. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 45. Changes from revision 38
+## 46. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -2999,7 +3134,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 46. Changes from revision 37
+## 47. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -3008,7 +3143,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 47. Changes from revision 36
+## 48. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -3019,7 +3154,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 48. Changes from revision 35
+## 49. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -3032,7 +3167,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 49. Changes from revision 34
+## 50. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -3045,7 +3180,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 50. Changes from revision 33
+## 51. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -3061,7 +3196,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 51. Changes from revision 32
+## 52. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -3079,7 +3214,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 52. Changes from revision 31
+## 53. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -3098,7 +3233,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 53. Changes from revision 30
+## 54. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -3119,7 +3254,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 54. Changes from revision 29
+## 55. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -3140,7 +3275,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 55. Changes from revision 28
+## 56. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -3157,7 +3292,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 56. Changes from revision 27
+## 57. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -3179,7 +3314,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 57. Changes from revision 26
+## 58. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

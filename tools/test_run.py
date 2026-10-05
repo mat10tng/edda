@@ -12,18 +12,18 @@ binding, ACTOR and RESULT stay across a step without a call, and with:
 values name a given only where an entity or actor is declared, and a bad
 value or a crash in the code fails its example or fact, never the run.
 It also holds the reference's rules for inputs (required by position,
-optional by keyword, None when left out), the clock on a who-line (not
-run) and left-out properties (DEFAULT, [] for MANY, None for OPTIONAL,
+optional by keyword, None when left out), the clock on a who-line (run
+from the example's start) and left-out properties (DEFAULT, [] for MANY, None for OPTIONAL,
 otherwise unset: failing when read, never "no binding", in the runner
 or inside bound code, by every ordinary path to a thing's fields or a
 maker's values, carried unread only by Thing(entity, values)), and the clock read through computed properties
-and the operations they call (not run). A small account project holds
+and the operations they call (run from the example's start). A small account project holds
 every call to its operation's rules: the refusal the spec gives, reason
 for reason; ensure, with OLD, inside a comprehension too; always, with
 a read it calls not judging it again; the frame rule, the actor
 included, also_changes and a computed property naming only what it
 reads on that entity; a read inside a fact that changes nothing; an
-ensure on the clock (not run). A small item project leaves out a
+ensure on the clock, the binding told the call's time. A small item project leaves out a
 DEFAULT of every kind, 01, a text with a backslash and a time
 included: the runner gives each the value the checker's model gives,
 a time as a time, and "2026-02-30" stays a text.
@@ -241,6 +241,7 @@ stories:
         returns: "order.units_sent"
     examples:
       "a who-line reads TODAY":
+        starts_at: "2026-10-05 09:00"
         given:
           - actor: erik
             with: {roles: [shop_user], shop: "north"}
@@ -301,6 +302,7 @@ stories:
     so_that: "no story runs on a clock that is not built"
     examples:
       "a fact reads a computed property through another":
+        starts_at: "2026-10-05 09:00"
         given:
           - order: purchase
         steps:
@@ -349,6 +351,7 @@ stories:
         returns: "TODAY > TIME(\\"2020-01-01\\")"
     examples:
       "a fact reads a computed property that calls a nested operation on the clock":
+        starts_at: "2026-10-05 09:00"
         given:
           - order: purchase
         steps:
@@ -616,10 +619,13 @@ class OwnProjectTest(unittest.TestCase):
         sid, status, detail, failed = story(run.run(self.dir.name, ["TST-006"]), "TST-006")
         self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
 
-    def test_the_clock_on_a_who_line_is_not_run(self):
+    def test_the_clock_on_a_who_line_runs_from_the_examples_start(self):
         binding.OPERATIONS["late"] = lambda actor, order: 0
-        sid, status, detail, failed = story(run.run(self.dir.name, ["TST-007"]), "TST-007")
-        self.assertEqual((status, detail), ("not run", "TODAY needs the clock, not built yet"))
+        try:
+            sid, status, detail, failed = story(run.run(self.dir.name, ["TST-007"]), "TST-007")
+        finally:
+            del binding.OPERATIONS["late"]
+        self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
 
     def test_left_out_properties_take_default_empty_list_or_none(self):
         binding.ENTITIES["order"] = lambda name, values, workdir: binding.Thing("order", values)
@@ -638,9 +644,10 @@ class OwnProjectTest(unittest.TestCase):
         sid, status, detail, failed = story(run.run(self.dir.name, ["TST-009"]), "TST-009")
         self.assertEqual((status, detail), ("not run", "no binding for order.ref"))
 
-    def test_a_computed_property_on_the_clock_is_not_run(self):
+    def test_a_computed_property_on_the_clock_runs_from_the_examples_start(self):
+        binding.ENTITIES["order"] = lambda name, values, workdir: binding.Thing("order", values, late_flag=False)
         sid, status, detail, failed = story(run.run(self.dir.name, ["TST-010"]), "TST-010")
-        self.assertEqual((status, detail), ("not run", "order.late_flag needs the clock, not built yet"))
+        self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
 
     def test_an_unset_value_compared_inside_bound_code_fails_the_example(self):
         binding.ENTITIES["order"] = lambda name, values, workdir: binding.Thing("order", values)
@@ -740,12 +747,15 @@ class OwnProjectTest(unittest.TestCase):
         self.assertEqual([f[1:] for f in dict(failed)["a left-out value is not read"]],
                          [(None, "given purchase could not be made: purchase.ref is unset")])
 
-    def test_a_computed_property_calling_an_operation_on_the_clock_is_not_run(self):
+    def test_a_computed_property_calling_an_operation_on_the_clock_runs_from_the_examples_start(self):
         binding.OPERATIONS["late_day"] = lambda actor, n: False
-        binding.OPERATIONS["after_day"] = lambda actor: False
+        binding.OPERATIONS["after_day"] = lambda actor: True
         binding.ENTITIES["order"] = lambda name, values, workdir: binding.Thing("order", values, sent_late=False)
-        sid, status, detail, failed = story(run.run(self.dir.name, ["TST-012"]), "TST-012")
-        self.assertEqual((status, detail), ("not run", "order.sent_late needs the clock, not built yet"))
+        try:
+            sid, status, detail, failed = story(run.run(self.dir.name, ["TST-012"]), "TST-012")
+        finally:
+            del binding.OPERATIONS["late_day"], binding.OPERATIONS["after_day"]
+        self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
 
 
 ACCOUNT = """\
@@ -904,6 +914,7 @@ stories:
           - "account.stamped == NOW"
     examples:
       "an account is stamped":
+        starts_at: "2026-10-05 09:00"
         given:
           - actor: ann
             with: {roles: [clerk]}
@@ -1310,9 +1321,19 @@ class RulesTest(unittest.TestCase):
             "a closed account takes no money": [
                 (self.line("deposit:"), None, "deposit changed ann.tries, which the spec does not name")]})
 
-    def test_an_ensure_that_reads_now_is_not_run(self):
-        sid, status, detail, failed = story(run.run(self.dir.name, ["RUL-003"]), "RUL-003")
-        self.assertEqual((status, detail), ("not run", "NOW needs the clock, not built yet"))
+    def test_an_ensure_that_reads_now_is_held_to_the_examples_start(self):
+        seen = []
+        binding.clock = seen.append      # the binding is told each call's time (section 9)
+
+        def stamp(actor, account):
+            account.stamped = seen[-1]
+        binding.OPERATIONS["stamp"] = stamp
+        try:
+            sid, status, detail, failed = story(run.run(self.dir.name, ["RUL-003"]), "RUL-003")
+        finally:
+            del binding.clock        # tearDown restores stamp with the rest of GOOD
+        self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
+        self.assertEqual([str(t) for t in seen], ["2026-10-05 09:00:00"])
 
     def test_a_broken_rule_is_printed_at_its_line(self):
         binding.OPERATIONS["close"] = lambda actor, account: None

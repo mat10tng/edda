@@ -4,9 +4,11 @@ sections 9 and 11).
 edda.yaml sits at the host root, the folder that holds the spec folder.
 Its keys, all optional: edda (the pinned revision), specs (the spec
 folder, default specs), stack (the code stack, python), problem_log
-(local or off, the local problem log; off when left out) and
-generated_cases. No file: the spec folder is specs and every setting is
-off. For this revision a specs/edda.yaml holding only generated_cases is
+(local or off, the local problem log; off when left out),
+generated_cases, zone (the business zone, an IANA name; UTC when left
+out) and clock_start (the start of the clock of every example that uses
+time and gives no starts_at of its own; none when left out). No file:
+the spec folder is specs and every setting is off. For this revision a specs/edda.yaml holding only generated_cases is
 still read; both files at once are refused. A tool given the spec folder
 by name takes the folder above it as the root; given --root as well, the
 two must name one root. Every path the host gives (the spec folder, the
@@ -20,11 +22,12 @@ default log .edda/checks.log (watch.py, trend.py).
 """
 import os
 import sys
+import zoneinfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check as checker          # noqa: E402
 
-REVISION = 69       # the revision of these tools; edda.yaml may pin it
+REVISION = 70       # the revision of these tools; edda.yaml may pin it
 STACKS = ("python",)
 PROBLEM_LOGS = ("local", "off")
 GENERATED = {
@@ -32,7 +35,7 @@ GENERATED = {
     "properties": {"on": {"type": "boolean"}, "runs": {}, "steps": {}}}
 SCHEMA = {"type": "object", "additionalProperties": False,
           "properties": {"edda": {}, "specs": {"type": "string"}, "stack": {}, "problem_log": {},
-                         "generated_cases": GENERATED}}
+                         "generated_cases": GENERATED, "zone": {}, "clock_start": {}}}
 OLD_SCHEMA = {"type": "object", "additionalProperties": False, "properties": {"generated_cases": GENERATED}}
 VALIDATOR, OLD_VALIDATOR = checker.Draft202012Validator(SCHEMA), checker.Draft202012Validator(OLD_SCHEMA)
 GENERATED_OFF = {"on": False, "runs": 100, "steps": 20}
@@ -55,16 +58,20 @@ class Refused(Exception):
 class Settings:
     """root, the host root; folder, the spec folder; file, the edda.yaml
     read or None; generated, the generated_cases setting; pin and stack,
-    None when not given; problem_log, local or off; flags, (rule, path,
-    line, message); guard, the
+    None when not given; problem_log, local or off; zone, the business
+    zone, UTC when not given; clock_start, a time text or None; clock,
+    the two as check.project_of takes them; flags, (rule, path, line,
+    message); guard, the
     root every file of the host must resolve inside as it is opened, or
     None when neither edda.yaml nor a root is in play (an Edda
     repository without its own edda.yaml, read as before)"""
 
     def __init__(self, root, folder, file=None, generated=None, pin=None, stack=None, flags=(), guard=None,
-                 problem_log="off"):
+                 problem_log="off", zone=checker.ZONE, clock_start=None):
         self.root, self.folder, self.file, self.guard = root, folder, file, guard
         self.problem_log = problem_log
+        self.zone, self.clock_start = zone, clock_start
+        self.clock = (clock_start, zone)        # as check.project_of takes it
         self.generated = dict(GENERATED_OFF, **(generated or {}))
         self.pin, self.stack, self.flags = pin, stack, list(flags)
 
@@ -113,6 +120,17 @@ def whole(v):
     return type(v) is int and v >= 1
 
 
+def known_zone(v):
+    """is v the name of a time zone zoneinfo knows, such as Europe/Oslo"""
+    if not isinstance(v, str) or not v:
+        return False
+    try:
+        zoneinfo.ZoneInfo(v)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError, OSError):
+        return False
+    return True
+
+
 def problems(path, validator, schema, root):
     """(source, data, found) of one edda.yaml, read inside root: the
     source layer, then its shape and its values"""
@@ -136,6 +154,12 @@ def problems(path, validator, schema, root):
         if "problem_log" in data and data["problem_log"] not in PROBLEM_LOGS:
             found.append(("wrong_type", source.line(("problem_log",), False),
                           f"problem_log must be {' or '.join(PROBLEM_LOGS)}"))
+        if "zone" in data and not known_zone(data["zone"]):
+            found.append(("wrong_type", source.line(("zone",), False),
+                          f"zone must be a time zone name, such as Europe/Oslo: {data['zone']}"))
+        if "clock_start" in data and not checker.time_text(data["clock_start"]):
+            found.append(("wrong_type", source.line(("clock_start",), False),
+                          f'clock_start must be a time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": {data["clock_start"]}'))
     return source, data, found
 
 
@@ -217,7 +241,23 @@ def read(root=None, folder=None):
         flags.append(("pinned_older", path, source.line(("edda",), False),
                       f"edda.yaml pins revision {pin}; these tools are revision {REVISION}"))
     return Settings(root, folder, path, data.get("generated_cases"), pin, stack, flags, guard,
-                    data.get("problem_log", "off"))
+                    data.get("problem_log", "off"), data.get("zone", checker.ZONE), data.get("clock_start"))
+
+
+def clock_at(root):
+    """(clock_start, zone) of the edda.yaml at root, for a tool given only a
+    spec folder (check.project_of); no start and UTC when there is no
+    file or it does not check: the tool that reads it reports that"""
+    path = os.path.join(root, "edda.yaml")
+    if not os.path.isfile(path):
+        return None, checker.ZONE
+    try:
+        _, data, found = problems(path, VALIDATOR, SCHEMA, root)
+    except (checker.Outside, OSError, ValueError):     # unreadable here; the settings reader refuses it where it matters
+        return None, checker.ZONE
+    if found or not isinstance(data, dict):
+        return None, checker.ZONE
+    return data.get("clock_start"), data.get("zone", checker.ZONE)
 
 
 def open_project(root=None, folder=None, out=None):

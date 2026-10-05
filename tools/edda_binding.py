@@ -14,9 +14,14 @@ follows too:
               the properties of its roles
   OPERATIONS  operation name -> run(actor, *inputs, **optional_inputs):
               the operation's return, or raise Refused(reason)
+  clock       optional: clock(now), called whenever the clock is set
+              or moves, before anything is read at it (section 8), or
+              None in an example that uses no time. Edda's own binding
+              has none: its operations read no time
 
 The runner applies the spec's rules before it calls the binding: values
-hold every with: value, a time as a datetime, a given name as the thing
+hold every with: value, a time as a datetime with no zone (the business
+zone's wall clock, as the clock's time is), a given name as the thing
 made, and every stored property left out at its DEFAULT, [] for MANY,
 None for OPTIONAL, or else an Unset (reference section 8); optional_inputs
 holds every optional input, None when the call leaves it out (section 6).

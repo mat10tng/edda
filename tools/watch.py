@@ -39,7 +39,7 @@ ENTITY_PLACES = {"properties": "entity property", "may_change": "status rules", 
                  "may_delete": "permissions"}
 OPERATION_PLACES = {"who": "operation who", "refuse": "refuse", "ensure": "ensure", "also_changes": "ensure",
                     "returns": "returns", "ordered_by": "returns"}
-EXAMPLE_PLACES = {"given": "example given", "steps": "example step"}
+EXAMPLE_PLACES = {"given": "example given", "starts_at": "example given", "steps": "example step"}
 LANGUAGE_TAG = re.compile(r"#\s*edda:\s*language\s*$")
 
 _REGISTRY = []

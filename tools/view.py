@@ -151,7 +151,7 @@ def loose(n):
     if isinstance(n, ast.Attribute):
         return loose(n.value)           # "the <property> of <value>", the value without brackets
     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
-        if n.func.id in ("len", "OLD", "TIME"):
+        if n.func.id in ("len", "OLD", "TIME") or n.func.id in checker.DURATIONS:
             return False
         if n.func.id in ("sum", "any", "all"):
             return True
@@ -159,7 +159,7 @@ def loose(n):
     return False
 
 
-LIST_WORDS = ("len", "OLD", "TIME", "sum", "any", "all")
+LIST_WORDS = ("len", "OLD", "TIME", "sum", "any", "all", *checker.DURATIONS)
 
 
 def value_form(n):
@@ -479,6 +479,11 @@ class Words:
             if not (len(n.args) == 1 and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)):
                 raise Unread
             return "the time " + n.args[0].value
+        if f in checker.DURATIONS:          # DAYS(1) reads "1 day", DAYS(n) "n days"
+            if len(n.args) != 1 or n.keywords:
+                raise Unread
+            k, unit = self.item(n.args[0], bound), checker.DURATIONS[f]
+            return f"{k} {unit}" + ("" if k == "1" else "s")
         if f in ("sum", "any", "all"):
             if len(n.args) != 1 or n.keywords or not isinstance(n.args[0], ast.GeneratorExp):
                 raise Unread
@@ -768,6 +773,7 @@ def example_sentences(x, types):
                 text = f"When {s['when']['actor']} asks to {words(call.func.id)}" + (" " + args if args else "")
             except Unread:
                 text = f"When {s['when']['actor']} asks {W.as_written(s['when']['call'])}"
+            text += clock_said(s["when"])
             out.append(sentence("when", stop(text), s["when"]["line"], shaded(W)))
             v = s["verdict"]
             said = "it is done" if v["kind"] == "DONE" else f"it is refused: {v['reason']}"
@@ -779,6 +785,19 @@ def example_sentences(x, types):
     parts.sort(key=lambda p: p[0])
     return ([sentence("example", stop(f"Example: {x['title']}"), x["line"])]
             + [s for _, ss in parts for s in ss] + notes(x["notes"], x["note_lines"]))
+
+
+def clock_said(when):
+    """the time of a step's call in an example that uses time (section
+    12): ", at 2026-10-05 09:00 (start + 1 day)"; an at: whose time is
+    known only when it runs, ", at <at:> (known when it runs)", or "at a
+    time" on a step with no at:; nothing in an example that uses no time"""
+    t = when.get("time")
+    if not t:
+        return ""
+    if t["at"] is None:
+        return f", at {when['at'] or 'a time'} (known when it runs)"
+    return f", at {t['at']}" + (f" ({t['since']})" if t["since"] else "")
 
 
 # EDDA-007@0

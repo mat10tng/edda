@@ -1,0 +1,46 @@
+# A fixture is one whole spec in one file. Line numbers matter: the
+# examples in specs/spec_file.edda name them.
+roles:
+  shop_user:
+    is: "a person at a shop"
+
+entities:
+  order:
+    is: "what a workshop buys"
+    properties:
+      status: DEFAULT incoming | removed
+      units_sent: DEFAULT 0
+      removed_at: TIME, OPTIONAL
+    may_change: {status: {incoming: [removed]}}
+    may_update: [{role: shop_user}]
+
+stories:
+  FIX-001:
+    story: "remove an order"
+    about: order
+    as_a: shop_user
+    i_want: "to remove an order"
+    so_that: "the list is clean"
+    operations:
+      remove:
+        is: "takes an unsent order off the list"
+        inputs: {order: order}
+        who: [{role: shop_user}]
+        refuse:
+          - when: "order.status == removed"
+            reason: "already removed"
+          - when: "order.units_sent > 0"
+            reason: "already sent"
+        ensure:
+          - "order.status == removed"
+          - "order.removed_at == NOW"
+    examples:
+      "a fresh order is removed":
+        given:
+          - actor: erik
+            with: {roles: [shop_user]}
+          - order: purchase
+            with: {status: incoming, units_sent: 0}
+        steps:
+          - when: {actor: erik, call: "remove(purchase)"}
+            then: [DONE, "purchase.status == removed"]

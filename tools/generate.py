@@ -13,8 +13,11 @@ one of the story's bound operations, an actor its who-lines name,
 inputs from the records that exist, the givens and what their
 properties reach at any depth; the call goes through the runner's
 run_operation, the rule wrapping of section 6, the only oracle. Up to
-`runs` runs, under one seed. An operation with no binding, that needs
-the clock, with a required single-record input no record can fill, or
+`runs` runs, under one seed. An operation that reads the clock runs on
+a clock stopped at the project's clock_start (edda.yaml), never moved
+and never the machine's. An operation with no binding, that reads the
+clock in a project with no clock_start, with a required single-record
+input no record can fill, or
 that no run called, and an entity no record can be made of, is skipped
 and listed; a story none of whose runs called an operation is not run,
 never passed. What the binding cannot give (no binding, an unset value)
@@ -191,14 +194,14 @@ class Plan:
             if not more:
                 break
             self.reached |= more
-        timed_ops, timed = R.clock_paths(P)
-        world_clock = [f"{e}.always needs the clock, not built yet" for e in sorted(made | self.reached)
-                       for text, _ in R.RULES["always"].get(e) or [] if clock(P, text, dict(P.entities[e]["props"]), timed, timed_ops, e)]
+        timed_ops, timed = P.clock_reach()
+        self.world = [(text, dict(P.entities[e]["props"]), e)    # the always facts every call is held to
+                      for e in sorted(made | self.reached) for text, _ in R.RULES["always"].get(e) or []]
         self.roles = sorted(r for r, role in P.roles.items()      # an actor can be made for these
                             if all(generable(t, made) for t in role["properties"].values()))
         self.ops, self.skipped = [], list(self.unmade)
         for name in (story.get("operations") or {}):
-            why = self.why_not(name, made, timed_ops, timed) or (world_clock[:1] or [None])[0]
+            why = self.why_not(name, made, timed_ops, timed)
             if why:
                 self.skipped.append((name, why))
             else:
@@ -230,24 +233,24 @@ class Plan:
                 return f"no {e} record can be made" if e in R.binding.ENTITIES else f"no binding for entity {e}"
         scope = {n: t for n, t, _ in op["inputs"]}
         scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op.get("who") or [] if isinstance(r, str))))
-        texts = [w["when"] for w in R.OPERATIONS[name].get("who") or [] if "when" in w]
-        texts += [w for w, _, _ in R.RULES["operations"][name]["refuse"]]
-        texts += [t for t, _ in R.RULES["operations"][name]["ensure"]]
-        for text in texts:
-            for n in ast.walk(ast.parse(text, mode="eval")):
-                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in R.OPERATIONS \
-                        and n.func.id not in R.binding.OPERATIONS:
-                    return f"no binding for {n.func.id}"
-        if name in timed_ops or any(clock(P, text, scope, timed, timed_ops) for text in texts):
-            return "needs the clock, not built yet"
+        # what the runner evaluates for the call: call_texts, the frame rule's paths included, then the world's always facts
+        walked = [(text, *R.checker.walk_reads(P, text, sc, own))
+                  for text, sc, own in [(t, scope, None) for t in R.checker.call_texts(op)] + self.world]
+        for text, reads, calls in walked:
+            for o in R.operations_run(P, text, reads, calls):
+                if o not in R.binding.OPERATIONS:
+                    return f"no binding for {o}"
+        if P.clock_start is None and (name in timed_ops or any(
+                clock(text, reads, calls, timed, timed_ops) for text, reads, calls in walked)):
+            return "no clock start"
         return None
 
 
-def clock(P, text, scope, timed, timed_ops, own=None):
-    """does text read the clock: directly, through a computed property or
-    through an operation it calls (run.py's clock_paths)"""
-    reads, calls = R.walk(P, text, scope, own)
-    return bool(R.uses_clock(text)) or bool(reads & timed) or bool(calls & timed_ops)
+def clock(text, reads, calls, timed, timed_ops):
+    """does text, with the reads and calls walk_reads gives it, read the
+    clock: directly, through a computed property or through an operation
+    it calls (check.clock_paths)"""
+    return bool(R.checker.uses_clock(text)) or bool(reads & timed) or bool(calls & timed_ops)
 
 
 # --- the machine ------------------------------------------------------------------
@@ -475,6 +478,8 @@ def cases(runner, sid, story, runs, steps, seed, replay):
     home = tempfile.TemporaryDirectory()    # Hypothesis's caches, never in the project
     set_hypothesis_home_dir(home.name)
     R.UNSET_ENDS[0] = True
+    P = R.PROJECT[0]        # the clock, stopped at the project's start for every run
+    R.set_clock(R.checker.resolved(R.checker.parse_time(P.clock_start), P.zone) if P.clock_start else None)
     try:
         run_state_machine_as_test(Cases, settings=Settings(
             max_examples=runs, stateful_step_count=steps + 1, database=None, deadline=None,
@@ -490,6 +495,7 @@ def cases(runner, sid, story, runs, steps, seed, replay):
         return [f"{sid}: generated cases: failed once, and not again on replay (seed {seed}){skips(plan)}: {e}"], True
     finally:
         R.UNSET_ENDS[0] = False
+        R.set_clock(None)
         set_hypothesis_home_dir(None)
         home.cleanup()
     if not any(plan.calls.values()):

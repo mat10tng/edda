@@ -43,7 +43,12 @@ import edda_binding as binding   # noqa: E402
 import settings                  # noqa: E402
 import watch                     # noqa: E402
 
-CLOCK = {"NOW", "TODAY"}
+NOW = [None]        # the clock: its time in the example being run, None when the example uses no time
+ZONE = [checker.ZONE]   # the business zone, set by run()
+
+
+class Duration(tuple):
+    """DAYS(n), HOURS(n) or MINUTES(n): (unit, n); it only moves a time (7.1)"""
 
 
 class Fail(Exception):
@@ -163,19 +168,38 @@ def ordered(a, b):
     return (is_number(a) and is_number(b)) or any(isinstance(a, t) and isinstance(b, t) for t in (datetime.datetime, str))
 
 
+def today(t):
+    """TODAY at time t: 00:00 of t's day in the business zone (decision GG)"""
+    return checker.resolved(datetime.datetime(t.year, t.month, t.day), ZONE[0])
+
+
+def moment(v):
+    """a value as what it stands for when compared (section 7.2): a time
+    as its moment, so the two 02:30s of a doubled hour differ and an hour
+    that does not exist is read as zoneinfo reads it; a list element by
+    element; any other value as it is. Every comparison of values goes
+    through it: ==, !=, <, <=, in, not in, and the frame rule's same"""
+    if isinstance(v, datetime.datetime):
+        return checker.instant(v, ZONE[0])
+    if type(v) is list:
+        return [moment(x) for x in v]
+    return v
+
+
 def compare(op, a, b):
-    if isinstance(op, ast.Eq):
-        return a == b
-    if isinstance(op, ast.NotEq):
-        return a != b
     if isinstance(op, (ast.Is, ast.IsNot)):
         return (a is None) == isinstance(op, ast.Is)
     if isinstance(op, (ast.In, ast.NotIn)):
         if not isinstance(b, (list, str)) or (isinstance(b, str) and not isinstance(a, str)):
             raise Fail(f"in of {show(a)} on {show(b)}")
-        return (a in b) == isinstance(op, ast.In)
-    if not ordered(a, b):
+        return (moment(a) in moment(b)) == isinstance(op, ast.In)
+    if not isinstance(op, (ast.Eq, ast.NotEq)) and not ordered(a, b):
         raise Fail(f"a comparison of {show(a)} with {show(b)}")
+    a, b = moment(a), moment(b)
+    if isinstance(op, ast.Eq):
+        return a == b
+    if isinstance(op, ast.NotEq):
+        return a != b
     return {ast.Lt: a < b, ast.Gt: a > b, ast.LtE: a <= b, ast.GtE: a >= b}[type(op)]
 
 
@@ -205,6 +229,11 @@ def value(n, env):
             raise Fail("RESULT has no value after a refusal")
         if n.id == "ACTOR":
             raise Fail("ACTOR has no value before any call")
+        if n.id in checker.CLOCK:
+            if NOW[0] is None:      # the checker's time_uses missed a read: Edda's own failure
+                raise EddaError(f"{n.id} was read, but the example has no clock: "
+                                "the runner read the clock without a start")
+            return NOW[0] if n.id == "NOW" else today(NOW[0])
         if re.fullmatch(checker.NAME, n.id):
             return n.id                         # a choice value
         raise EddaError(f"{n.id} has no value here")
@@ -239,6 +268,13 @@ def value(n, env):
         a, b = value(n.left, env), value(n.right, env)
         if isinstance(n.op, ast.Add) and isinstance(a, list) and isinstance(b, list):
             return a + b
+        if isinstance(b, Duration) and isinstance(n.op, (ast.Add, ast.Sub)):      # a time moved (7.1)
+            if not isinstance(a, datetime.datetime):
+                raise Fail(f"{ast.unparse(n)}: {show(a)} is no time")
+            try:
+                return checker.shift(a, b[0], b[1] if isinstance(n.op, ast.Add) else -b[1], ZONE[0])
+            except OverflowError as e:
+                raise Fail(f"{ast.unparse(n)}: {e}")
         word = checker.OP_WORD[type(n.op)]
         a, b = number(a, word), number(b, word)
         try:
@@ -269,6 +305,11 @@ def value(n, env):
             return {"any": any, "all": all}[f](found)
         if f == "TIME" and len(args) == 1:
             return time_of(args[0].value)
+        if f in checker.DURATIONS and len(args) == 1:
+            k = value(args[0], env)
+            if type(k) is not int:
+                raise Fail(f"{ast.unparse(n)}: {show(k)} is no whole number")
+            return Duration((f, k))
         if f == "OLD" and len(args) == 1 and "OLD" in env:
             return env["OLD"](args[0], env)
         if f in OPERATIONS:
@@ -289,12 +330,12 @@ def value(n, env):
 
 # --- the spec ----------------------------------------------------------------
 
-def load_project(folder, guard=None):
+def load_project(folder, guard=None, clock=None):
     """the project (the checker's view of it), its operations as written and
     its stories as (id, story, source, path) in file-name, then file order;
     fills PHRASES; guard, the root every file must resolve inside, or None
-    (settings.Settings.guard)"""
-    P = checker.project_of(folder, guard)
+    (settings.Settings.guard); clock as for check.project_of"""
+    P = checker.project_of(folder, guard, clock)
     refused = []
     for path in sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc")):
         src, shape, meaning, history, _ = checker.check(path, P)
@@ -332,154 +373,49 @@ def load_project(folder, guard=None):
     return P, operations, stories
 
 
-def fact_text(f):
-    """a fact as an expression: a quoted fact, or the fact of {fact, means}"""
-    return f["fact"] if isinstance(f, dict) else f
+fact_text = checker.fact_text
+entity_kinds = checker.entity_kinds
+kinds_reached = checker.kinds_reached
 
 
-def uses_clock(text):
-    """the clock names text reads directly"""
-    return [n.id for n in ast.walk(ast.parse(text, mode="eval")) if isinstance(n, ast.Name) and n.id in CLOCK]
+def operations_run(P, text, reads, calls):
+    """every operation evaluating text makes run, each once: those it
+    calls by name (a step's call among them), in the text's order, then
+    those the reads it calls and the computed properties it reads make
+    run (check.call_paths); reads and calls as walk_reads gives them"""
+    try:
+        tree = ast.parse(text, mode="eval")
+    except (SyntaxError, TypeError, ValueError):
+        return []
+    named = [n.func.id for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in P.operations]
+    reach = P.call_reach()
+    nested = set().union(*(reach.get(x, set()) for x in calls | reads))
+    return list(dict.fromkeys(named + sorted(nested)))
 
 
-def walk(P, text, scope, own=None):
-    """what text reads, typed as the checker types it: its (entity,
-    property) pairs, ("CLOCK", name) for NOW or TODAY, and the operations
-    with a text returns it calls; own is the entity whose bare property
-    names text reads (an always-rule's)"""
-    E = checker.Expr(P, scope, silent=True)
-    E.own, E.reads, E.calls = own, set(), set()
-    E.run(text)
-    return E.reads, E.calls
-
-
-def on_clock(reads, timed):
-    return any(e == "CLOCK" for e, _ in reads) or bool(reads & timed)
-
-
-def clock_paths(P):
-    """the operations and the computed properties that read the clock. An
-    operation's summary is the checker's (operation_reads: its returns,
-    refuse conditions and ordered_by, and those of every operation it
-    calls, nested calls included); a computed property reads its own
-    expression and the summaries of the operations it calls. Either reads
-    the clock directly or through a computed property that does; that
-    grows to a fixed point (the checker refuses loops of computed
-    properties)"""
-    summary = P.operation_reads()
-    reads = {}
-    for e, ent in P.entities.items():
-        for p, expr in ent["computed"].items():
-            if isinstance(expr, str):
-                E = checker.Expr(P, dict(ent["props"]), silent=True)
-                E.own, E.reads, E.calls = e, set(), set()
-                E.run(expr)
-                reads[(e, p)] = E.reads.union(*(summary[o] for o in E.calls))
-    timed = set()
-    while True:
-        more = {x for x, r in reads.items() if on_clock(r, timed)} - timed
-        if not more:
-            return {o for o, r in summary.items() if on_clock(r, timed)}, timed
-        timed |= more
-
-
-def needs(story, operations, P):
-    """why a story cannot run yet, or None: a missing binding first, then
-    the clock; read in the call, the then facts, and the who-line and
-    refuse conditions of the called operation, all the runner evaluates or
-    the code decides, in the computed properties they read and in the
-    operations they call (clock_paths)"""
+def needs(story, P):
+    """why a story cannot run yet, or None: no examples, or a missing
+    binding: an entity a given makes, or an operation anything the
+    runner evaluates makes run (check.evaluated: each step's at:, call
+    and then facts, every expression of the called operation, the
+    always facts every call is held to; and through them the computed
+    properties they read and the reads they call, operations_run).
+    The clock is no reason: the checker refuses an example that uses
+    time and has no start (no_clock_start)"""
     examples = story.get("examples") or {}
     if not examples:
         return "no examples"
-    unbound, clock = [], []
-    timed_ops, timed = clock_paths(P)
-
-    def scan(text, scope, own=None):
-        for name in uses_clock(text):
-            clock.append(f"{name} needs the clock, not built yet")
-        reads, calls = walk(P, text, scope, own)
-        called.update(calls)
-        for e, p in sorted(reads & timed):
-            clock.append(f"{e}.{p} needs the clock, not built yet")
-        for o in sorted(calls & timed_ops):
-            clock.append(f"{o} needs the clock, not built yet")
-        for n in ast.walk(ast.parse(text, mode="eval")):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in operations \
-                    and n.func.id not in binding.OPERATIONS:
-                unbound.append(f"no binding for {n.func.id}")
-
     for ex in examples.values():
-        scope, called, kinds = {}, set(), set()
         for g in ex.get("given") or []:
             entity = next(k for k in g if k != "with")
-            if entity == "actor":
-                scope[g[entity]] = ("actor", ("all", frozenset((g.get("with") or {}).get("roles") or [])))
-            else:
-                scope[g[entity]] = ("entity", entity)
-                kinds.add(entity)
-                if entity not in binding.ENTITIES:
-                    unbound.append(f"no binding for entity {entity}")
-        for step in ex.get("steps") or []:
-            when = step.get("when") or {}
-            then = step.get("then") or []
-            if "at" in when:
-                clock.append("at: needs the clock, not built yet")
-            if "call" in when:
-                scope["ACTOR"] = scope.get(when.get("actor"))
-                scope.pop("RESULT", None)
-                scan(when["call"], scope)
-                name = ast.parse(when["call"], mode="eval").body.func.id
-                rt = checker.Expr(P, scope, silent=True).run(when["call"], call_slot=True)
-                scope["RESULT"] = "NONE" if then and isinstance(then[0], dict) else rt
-                op = P.operations.get(name) or {}
-                inputs = {n: t for n, t, _ in op.get("inputs") or []}
-                inputs["ACTOR"] = ("actor", ("one", frozenset(r for r in op.get("who") or [] if isinstance(r, str))))
-                for w in operations.get(name, {}).get("who") or []:
-                    if "when" in w:
-                        scan(w["when"], inputs)
-                for x in op.get("refuse_when") or []:
-                    if isinstance(x, str):
-                        scan(x, inputs)
-                for f in operations.get(name, {}).get("ensure") or []:
-                    scan(fact_text(f), inputs)
-                called.add(name)
-            for text in then:
-                if isinstance(text, str) and text != "DONE":
-                    scan(text, scope)
-        if called:      # the always-rules every call is held to (section 6)
-            for o in called:
-                for _, t, _ in P.operations[o]["inputs"]:
-                    kinds.update(entity_kinds(t))
-                kinds.update(entity_kinds(P.operations[o]["returns_type"]))
-            for e in sorted(kinds_reached(P, kinds)):
-                for text, _ in RULES["always"].get(e) or []:
-                    scan(text, dict(P.entities[e]["props"]), e)
-    return (unbound + clock or [None])[0]
-
-
-def entity_kinds(t):
-    """the entities a value of type t may be or hold"""
-    if checker.is_entity(t):
-        return {t[1]}
-    if checker.is_list(t):
-        return entity_kinds(t[1])
-    if checker.is_either(t):
-        return set().union(*(entity_kinds(a) for a in t[1]))
-    return set()
-
-
-def kinds_reached(P, kinds):
-    """kinds and every entity their properties reach, as declared"""
-    seen, stack = set(), list(kinds)
-    while stack:
-        e = stack.pop()
-        if e in seen or e not in P.entities:
-            continue
-        seen.add(e)
-        for t in P.entities[e]["props"].values():
-            stack.extend(entity_kinds(t))
-    return seen
+            if entity != "actor" and entity not in binding.ENTITIES:
+                return f"no binding for entity {entity}"
+        for _, text, reads, calls in checker.evaluated(P, ex):
+            for o in operations_run(P, text, reads, calls):
+                if o not in binding.OPERATIONS:
+                    return f"no binding for {o}"
+    return None
 
 
 # --- one example ---------------------------------------------------------------
@@ -526,6 +462,8 @@ def run_operation(name, actor, args, kwargs):
     cases run, a condition before it that cannot be judged also allows
     its own reason, and with none that holds, no refusal; a rule that
     cannot be judged goes in unjudged, raised when nothing failed"""
+    if name not in binding.OPERATIONS:     # needs() should have found it first: the story is not run
+        raise binding.NotBound(name)
     if actor is not None and not permitted(name, actor, args, kwargs):
         raise binding.Refused(f"{name} is not allowed for {', '.join(actor.roles)}")
     rules = RULES["operations"][name]
@@ -594,6 +532,17 @@ def run_operation(name, actor, args, kwargs):
     if unjudged:
         raise unjudged[0][2]    # nothing failed, something could not be judged: what the binding cannot give
     return result
+
+
+def set_clock(t):
+    """the one way the clock is set or moved: NOW becomes t, and the
+    binding's clock(now), when it has one, hears it before anything is
+    read at that time: t a datetime with no zone, the business zone's
+    wall clock, or None when there is no clock (section 9)"""
+    NOW[0] = t
+    hook = getattr(binding, "clock", None)
+    if hook is not None:
+        hook(t)
 
 
 def cannot_judge():
@@ -697,15 +646,15 @@ def frozen(v):
 
 def same(a, b):
     """is the value b the frozen value a: an entity or an unset value by
-    identity, a list element by element, any other value by type and value;
-    nothing unset is read"""
+    identity, a list element by element, a time by its moment (moment),
+    any other value by type and value; nothing unset is read"""
     if a is b:
         return True
     if type(a) is list and type(b) is list:
         return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
     if type(a) is not type(b) or a is MISSING or type(a) is binding.Unset or isinstance(a, binding.Thing):
         return False
-    return a == b
+    return moment(a) == moment(b)
 
 
 def snapshot(roots):
@@ -1160,6 +1109,10 @@ def run_example(ex, where, source, path, workdir):
         return f"{os.path.relpath(path)}:{source.line(at)}"
     failures = []
     try:
+        start_clock(ex)
+    except OverflowError as e:
+        return [(line(where), None, f"the clock cannot start: {e}")], None
+    try:
         try:
             env = make_givens(ex.get("given") or [], workdir)
         except Fail as e:
@@ -1173,8 +1126,36 @@ def run_example(ex, where, source, path, workdir):
     return failures, None
 
 
+def start_clock(ex):
+    """the clock of an example (section 8): stopped at its start, its
+    starts_at: or the project's clock_start:, when it uses time; none
+    otherwise. Nothing reads the machine's clock"""
+    P = PROJECT[0]
+    t = None
+    if checker.time_uses(P, ex):
+        text = checker.clock_start(P, ex)
+        if text is None:
+            raise EddaError("an example that uses time has no start; the checker refuses it (no_clock_start)")
+        t = checker.resolved(checker.parse_time(text), ZONE[0])
+    set_clock(t)
+
+
+def move_clock(text, env):
+    """the clock after a step's at: (section 8): a time, or NOW, the time
+    before the step, moved by durations; raises Fail when it would go back"""
+    t = checker.parse_time(text)
+    try:
+        t = checker.resolved(t, ZONE[0]) if t is not None else value(ast.parse(text, mode="eval").body, env)
+    except OverflowError as e:
+        raise Fail(f"at {text}: {e}")
+    if moment(t) < moment(NOW[0]):
+        raise Fail(checker.backwards(text, t, NOW[0]))
+    set_clock(t)
+
+
 def run_step(step, i, env, where, line, failures):
-    """judge one step into failures; False when a wrong verdict ends the example"""
+    """judge one step into failures; False when a wrong verdict, or an at:
+    that would move the clock back, ends the example"""
     then = step.get("then") or []
     at = where + ("steps", i, "then")
     first = 0
@@ -1182,6 +1163,15 @@ def run_step(step, i, env, where, line, failures):
         when, first = step["when"], 1
         env["ACTOR"] = env[when["actor"]]
         env.pop("RESULT", None)
+        if "at" in when:    # failures as the call's own: a Fail is found here, a broken rule its own
+            try:
+                move_clock(when["at"], env)
+            except Fail as e:
+                failures.append((line(where + ("steps", i, "when", "at")), None, str(e)))
+                return False
+            except RuleBroken as e:     # a read inside the at: broke a rule: the example ends here
+                failures.extend(e.failures)
+                return False
         call = ast.parse(when["call"], mode="eval").body
         try:
             args = [value(a, env) for a in call.args]
@@ -1219,13 +1209,15 @@ def run_step(step, i, env, where, line, failures):
 
 # --- the run -----------------------------------------------------------------
 
-def run(folder, wanted=(), guard=None):
+def run(folder, wanted=(), guard=None, clock=None):
     """the result of each story: (id, status, detail, [(title, failures)]);
     status is "examples passed", failing or not run; failures are
     (file:line, then text, found). A story with a failure is failing even
-    when something after it had no binding; guard as for load_project"""
-    P, operations, stories = load_project(folder, guard)
+    when something after it had no binding; guard and clock as for
+    load_project"""
+    P, operations, stories = load_project(folder, guard, clock)
     PROJECT[0] = P
+    ZONE[0] = P.zone
     OPERATIONS.clear()
     OPERATIONS.update(operations)
     STORIES.clear()
@@ -1240,7 +1232,7 @@ def run(folder, wanted=(), guard=None):
     for sid, st, source, path in stories:
         if wanted and sid not in wanted:
             continue
-        why = needs(st, operations, P)
+        why = needs(st, P)
         if why:
             out.append((sid, "not run", why, []))
             continue
@@ -1295,7 +1287,7 @@ def main(argv, result=None):
                  if x != "--seed" and not x.startswith("--seed=") and (i == 0 or argv[i - 1] != "--seed")]
         replay = shlex.join(["python3", os.path.relpath(os.path.abspath(__file__)), *again, "--seed", str(seed)])
     try:
-        out = run(project.folder, a.stories, project.guard)
+        out = run(project.folder, a.stories, project.guard, project.clock)
     except UnknownStory as e:
         print(f"edda failed: {e}")
         return 2
