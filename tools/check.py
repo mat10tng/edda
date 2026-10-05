@@ -2709,17 +2709,17 @@ class Outside(Exception):
 def open_inside(root, path, flags=os.O_RDONLY, mode=0o666):
     """a file descriptor for path, opened only when path, symlinks followed,
     resolves inside root (settings.py, outside_root); raises Outside
-    otherwise. The resolved path is then opened from the root down, one
-    folder at a time, none of them followed if it is a symlink, so a
-    symlink put in place after the check makes the open fail (OSError);
-    it is never followed out"""
+    otherwise. Then opened from the resolved root down, one folder at a
+    time, the root included, none followed if it is a symlink, so a
+    symlink put in place after the check makes the open fail (OSError),
+    never followed out. Folders above the root are the host's, unguarded"""
     real, top = os.path.realpath(path), os.path.realpath(root)
     if real != top and not real.startswith(top.rstrip(os.sep) + os.sep):
         raise Outside(real)
     if real == top:
-        return os.open(top, flags, mode)
+        return os.open(top, flags | os.O_NOFOLLOW, mode)
     *folders, name = os.path.relpath(real, top).split(os.sep)
-    at = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
+    at = os.open(top, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for f in folders:
             down = os.open(f, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=at)

@@ -560,6 +560,29 @@ class FilesInsideTheRootTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 check.open_inside(top, code)
 
+    def test_open_inside_never_follows_the_root_swapped_for_a_link(self):
+        top = os.path.realpath(self.host.root)
+        code = os.path.join(top, "shop", "code.py")
+        os.close(check.open_inside(top, code))
+        os.close(check.open_inside(top, top))
+        os.close(check.open_inside(top, top, os.O_RDONLY | os.O_DIRECTORY))
+        moved = os.path.join(self.host.away("moved"), "host")
+        # the root resolved, then swapped for a link out before the open:
+        # the open of a file under it, and of the root itself, fails
+        with mock.patch.object(check.os.path, "realpath", lambda p: p):
+            shutil.move(top, moved)
+            os.symlink(moved, top)
+            try:
+                with self.assertRaises(OSError):
+                    check.open_inside(top, code)
+                for flags in (os.O_RDONLY, os.O_RDONLY | os.O_DIRECTORY):
+                    with self.assertRaises(OSError):
+                        check.open_inside(top, top, flags)
+            finally:
+                os.remove(top)
+                shutil.move(moved, top)
+        os.close(check.open_inside(top, code))
+
 
 class OneRootTest(unittest.TestCase):
     """--root and a spec folder named by an option name one root, or the
