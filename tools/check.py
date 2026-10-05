@@ -3053,7 +3053,7 @@ def status_text(g):
 
 def report(folder):
     """print each file of folder with its problems, flags and status, as the
-    checker's own run does for specs/; whether nothing was refused"""
+    checker's own run does for specs/; (nothing refused, found, links)"""
     ok = True
     P = project_of(folder)
     paths = sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc"))
@@ -3080,7 +3080,7 @@ def report(folder):
             print(f"    {line}: {rule}: {msg}")
         for rule, line, msg in flags:
             print(f"    {line}: flagged: {rule}: {msg}")
-    return ok
+    return ok, found, L
 
 
 def refused(folder):
@@ -3128,7 +3128,7 @@ if __name__ == "__main__":
     if args:
         print(USAGE)
         sys.exit(2)
-    ok = report(f"{ROOT}/specs")
+    ok, own, own_links = report(f"{ROOT}/specs")
 
     print()
     print("fixtures: which layer catches each file")
@@ -3158,4 +3158,13 @@ if __name__ == "__main__":
                 print(f"      {line}: {rule}: {msg}")
             for rule, line, msg in flags:
                 print(f"      {line}: flagged: {rule}: {msg}")
+    import watch    # the count line and the log, for specs/ only (section 11)
+    seen = [(path, r) for path, layers in own.items() for kind in layers for r in kind]
+    seen += [(os.path.join(ROOT, shown), r) for shown, refusals, flags in (own_links[0] if own_links else [])
+             for r in refusals + flags]
+    problems = [watch.problem(rule, path, line, watch.found_by(rule), ROOT, load) for path, (rule, line, _) in seen]
+    counts = watch.count_line(problems)
+    if counts:
+        print(counts)
+    watch.log(problems, ROOT)
     sys.exit(0 if ok else 1)

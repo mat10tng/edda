@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 66
+language/   reference.md    the language reference, revision 67
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -117,6 +117,15 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             fixture, each rule and the reach rule
             test_analyse.py the analyser: each flag raised, a near miss
                             not, a condition too complex skipped
+            watch.py        the six dimensions of each problem, the
+                            count line and the log, for check.py and
+                            run.py
+            trend.py        the logged problems per day, grouped by one
+                            dimension or two, and the rules most seen
+            test_dimensions.py  every rule's dimensions, where in the
+                            spec, the count line, the log and the trend
+.edda/      checks.log      one JSON line per problem of each run of
+                            check.py and run.py; local, not in git
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic
@@ -151,3 +160,9 @@ and a bound operation that breaks a rule of its spec.
 (reference sections 9 and 11).
 `python3 tools/approve.py NAME --by OPERATOR [--because TEXT] [--dry-run]`
 records an approval (reference section 10).
+`python3 tools/check.py` and `python3 tools/run.py` end with one count
+line per category of problem, such as `3 contradiction, 1 weak check`,
+and append each problem to `.edda/checks.log`; `EDDA_LOG=off` turns
+that off, `EDDA_LOG=FILE` writes elsewhere.
+`python3 tools/trend.py [--log FILE] [--by DIM[,DIM]] [--top N]` shows
+the logged problems over time (reference section 11).

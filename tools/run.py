@@ -35,6 +35,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check as checker          # noqa: E402
 import edda_binding as binding   # noqa: E402
+import watch                     # noqa: E402
 
 CLOCK = {"NOW", "TODAY"}
 
@@ -509,6 +510,7 @@ def kinds_reached(P, kinds):
 OPERATIONS = {}     # the project's operations as written, set by run()
 PROJECT = [None]    # the checker's view of the project, set by run()
 STORIES = {}        # the project's stories as written, by id, set by run()
+STORY_FILES = {}    # the .edda file of each story, by id, set by run()
 PHRASES = {"entities": {}, "roles": {}}     # property type phrases as written, set by load_project()
 RULES = {"operations": {}, "always": {}}    # each operation's rules and each entity's always-rules, with their lines, set by load_project()
 GIVENS = []         # the things the example's givens made, set by run_example()
@@ -1251,6 +1253,8 @@ def run(folder, wanted=()):
     OPERATIONS.update(operations)
     STORIES.clear()
     STORIES.update((sid, st) for sid, st, _, _ in stories)
+    STORY_FILES.clear()
+    STORY_FILES.update((sid, path) for sid, _, _, path in stories)
     known = {sid for sid, *_ in stories}
     unknown = [s for s in wanted if s not in known]
     if unknown:
@@ -1316,12 +1320,14 @@ def main(argv):
             print(f"    {line}")
         return 1
     bad = False
+    at = []         # (rule, file, line, found by) of each failure, for the count line and the log
     for sid, status, detail, failed in out:
         print(f"{sid}: {status}: {detail}")
         for title, failures in failed:
             print(f"    example {show(title)} failed")
             for line, text, found in failures:
                 print(f"        {line}: " + (f"then {text}: found {found}" if text else found))
+                at.append(("failing_example", *place_of(line), "example run"))
         if generated["on"]:
             try:
                 lines, broke = generate.cases(sys.modules[__name__], sid, STORIES[sid], generated["runs"],
@@ -1331,7 +1337,27 @@ def main(argv):
                 return 3
             print("\n".join(lines))
             bad = bad or broke
+            if broke:
+                rules = [place_of(m.group(1)) for m in map(BROKEN_RULE.match, lines[1:])
+                         if m and ": not judged: " not in m.string]
+                at += [("failing_case", *p, "generated case") for p in rules or [(STORY_FILES[sid], None)]]
+    folder = os.path.dirname(os.path.abspath(a.project))     # the project: the folder holding the specs
+    problems = [watch.problem(rule, path, line, how, folder, checker.load) for rule, path, line, how in at]
+    counts = watch.count_line(problems)
+    if counts:
+        print(counts)
+    watch.log(problems, folder)
     return 1 if bad or any(status == "failing" for _, status, _, _ in out) else 0
+
+
+BROKEN_RULE = re.compile(r"    (\S[^:]*:\d+): ")     # a broken rule's line in a generated failure
+
+
+def place_of(at):
+    """(path, line) of a runner's file:line, the path from the working folder;
+    no line when it names none"""
+    path, _, n = at.rpartition(":")
+    return (os.path.abspath(path), int(n)) if path and n.isdigit() else (os.path.abspath(at), None)
 
 
 if __name__ == "__main__":

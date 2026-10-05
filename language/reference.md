@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 66, 5 Oct 2026. Replaces revision 65. Decisions behind it:
+Revision 67, 5 Oct 2026. Replaces revision 66. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
@@ -9,7 +9,9 @@ as data: decision N, kb:9379218; the read view: the build Plan's
 phase 2622; links per operation: decision N, Q6, and the build Plan's
 phase 2623; generated cases: decision T, kb:9379252, and the build
 Plan's phase 2636; the analyser: decision U, kb:9379257, and the build
-Plan's phase 2648), and Astra's review rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
+Plan's phase 2648; problem dimensions and watching: decision U,
+questions 4 to 6, and the build Plan's phase 2649), and Astra's review
+rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
 `language/keywords.yaml` (the registry: every key, expression form,
@@ -1342,6 +1344,148 @@ operation resolved by the rule, the marker's line for a marker, and the
 | `maybe_replaced` | a marker on a def that a later binding of its name may replace on some imports: one nested in a branch of any compound statement not proven to run (`with`, `if`, `try`, `for`, `while`, `match`), or in an operand that may not be evaluated (section 9) | `<function> at line <n> may be replaced by a def, a class or a binding at line <m>, which not every import runs: <text>` |
 | `no_story` | a top-level function or class of a covered file that no linked function reaches (section 9) | `no linked function reaches <name>` |
 
+**Failures** (found by the runner, section 9; not the checker's):
+
+| rule | when | message |
+|---|---|---|
+| `failing_example` | an example of a story whose operations are bound fails: a wrong verdict, a `then` fact that does not hold, a given that cannot be made, or a call or a read inside a fact that breaks a rule of its operation; one per failure line, at that line | the runner's line under `example "<title>" failed`: `<file>:<line>: then <text>: found <found>`, or `<file>:<line>: <found>` |
+| `failing_case` | a generated case breaks a rule (section 9); one per broken rule the failure names, at the rule's line, or one at no line when it names none | `<id>: generated cases: failed (seed <n>)`, then `<file>:<line>: <what>` for each broken rule |
+
+**Dimensions.** Every problem, a refusal, a flag or a failure, carries
+six dimensions (decision U, kb:9379257), so problems can be counted and
+crossed by kind. Four are fixed per rule, in the table below and so in
+the registry; `where` comes from the problem's line and `found by` from
+the tool that reports it.
+
+| dimension | values | set by |
+|---|---|---|
+| what went wrong | `unreadable`, `unknown word`, `wrong kind`, `misplaced`, `contradiction`, `weak check`, `out of date`, `code differs` | the rule, with a sub-kind |
+| fix | `missing`, `wrong`, `extra` | the rule: add, change or delete |
+| acts | `agent`, `person`, `language` | the rule; a person may re-tag one problem as `language` |
+| level | `blocks`, `warns`, `note` | the rule: a refusal or a failure blocks, a flag warns, a status only is a note |
+| where | `role`, `entity property`, `status rules`, `always`, `permissions`, `story`, `story rules`, `operation who`, `refuse`, `ensure`, `returns`, `example given`, `example step`, `history`, `code`, `unknown` | the problem's line |
+| found by | `reading`, `history`, `analyser`, `example run`, `generated case`, `person review` | the tool |
+
+`what went wrong`: `unreadable`, the file is not valid Edda text;
+`unknown word`, a name or value not declared or declared twice; `wrong
+kind`, an expression of the wrong type or form; `misplaced`, the right
+thing in the wrong place or scope; `contradiction`, rules that cannot
+all hold; `weak check`, the spec tests too little; `out of date`,
+approval and history; `code differs`, the code does not do what the
+spec says (level 2). `acts`: `agent`, the agent fixes it alone;
+`person`, it needs meaning or approval; `language`, the language cannot
+say it, which is a bug in the language. A contradiction defaults to
+`person`: a clash between two rules is usually a question of what the
+customer meant. No rule is a `note` yet: `pins stale` is a status, not
+a problem, and is neither counted nor logged.
+
+| rule | went wrong | sub | fix | acts | level |
+|---|---|---|---|---|---|
+| `not_yaml` | unreadable | syntax | wrong | agent | blocks |
+| `yaml_feature` | unreadable | banned YAML | extra | agent | blocks |
+| `unquoted_text` | unreadable | quoting | wrong | agent | blocks |
+| `not_a_list` | unreadable | shape | wrong | agent | blocks |
+| `wrong_type` | unreadable | shape | wrong | agent | blocks |
+| `missing_key` | unreadable | shape | missing | agent | blocks |
+| `unknown_key` | unreadable | shape | extra | agent | blocks |
+| `bad_name` | unknown word | spelling | wrong | agent | blocks |
+| `declared_twice` | unknown word | twice | extra | agent | blocks |
+| `unknown_name` | unknown word | undeclared | missing | agent | blocks |
+| `unknown_choice` | unknown word | not in list | missing | agent | blocks |
+| `unknown_link` | unknown word | link name | wrong | agent | blocks |
+| `bad_type_phrase` | wrong kind | type phrase | wrong | agent | blocks |
+| `not_an_expression` | wrong kind | outside whitelist | wrong | agent | blocks |
+| `type_mismatch` | wrong kind | types | wrong | agent | blocks |
+| `not_ordered` | wrong kind | order assumed | missing | agent | blocks |
+| `derived_in_given` | wrong kind | given a computed | extra | agent | blocks |
+| `returns_and_ensure` | misplaced | read and change | wrong | agent | blocks |
+| `wrong_file` | misplaced | file | wrong | agent | blocks |
+| `wider_than_entity` | misplaced | permission scope | extra | person | blocks |
+| `computed_cycle` | misplaced | computed loop | wrong | person | blocks |
+| `no_rule` | misplaced | example ungrouped | missing | agent | blocks |
+| `bad_version` | out of date | history broken | wrong | person | blocks |
+| `bad_pin` | out of date | history broken | wrong | person | blocks |
+| `bad_snapshot` | out of date | history broken | wrong | person | blocks |
+| `no_function` | code differs | no function | missing | agent | blocks |
+| `bad_marker` | code differs | marker | wrong | agent | blocks |
+| `unreachable_choice` | contradiction | status rules | missing | person | warns |
+| `no_example` | weak check | no example | missing | agent | warns |
+| `dead_refusal` | contradiction | refusals | extra | person | warns |
+| `conflicting_ensure` | contradiction | ensures | wrong | person | warns |
+| `empty_ensure` | weak check | says nothing | wrong | agent | warns |
+| `forbidden_change` | contradiction | status rules | missing | person | warns |
+| `question_on_approved` | out of date | open question | missing | person | warns |
+| `wording_drift` | out of date | meaning drift | wrong | person | warns |
+| `stale_link` | code differs | stale link | wrong | agent | warns |
+| `unapproved_link` | out of date | not approved | missing | person | warns |
+| `maybe_replaced` | code differs | marker | wrong | agent | warns |
+| `no_story` | code differs | unlinked code | missing | agent | warns |
+| `failing_example` | code differs | behaviour | wrong | agent | blocks |
+| `failing_case` | code differs | behaviour | wrong | agent | blocks |
+
+`where` is read from the problem's file and line: any line of a
+`.edda.vc` is `history`, of a `.links` or a code file `code`; in a
+`.edda`, a problem names a line, not a key, so the place is named only
+when every key and item that starts on the line maps to the same one
+place, and a line that also holds a key of another place or of none (a
+block written in flow form, `box: {is: ..., may_read: [...]}`) is
+`unknown`. The places: a role's block, `role`; an entity's `properties`, `entity property`;
+`may_change`, `status rules`; `always`, `always`; `may_create`,
+`may_read`, `may_update` and `may_delete`, `permissions`; a story's key
+or its own keys (its own `notes` among them), `story`, but `rules`,
+`story rules`; an operation's `who`, `operation who`; `refuse`,
+`refuse`; `ensure` and `also_changes`, `ensure`; `returns` and
+`ordered_by`, `returns`; an example's `given`, `example given`;
+`steps`, `example step`. Anything else (`epics`, an entity's or an
+operation's key line, `is`, `part_of`, `inputs`, an operation's or an
+example's `notes`, an example's title, a file that does not parse, a
+problem with no line) is `unknown`; it is never guessed.
+`found by`: `history` for `bad_version`, `bad_pin`, `bad_snapshot`,
+`wording_drift`, `question_on_approved`, `stale_link` and
+`unapproved_link`; `analyser` for the analyser's four flags; `reading`
+for every other rule of the checker; `example run` for
+`failing_example`; `generated case` for `failing_case`. `person review`
+is for a problem a person finds; no tool sets it yet.
+
+**Re-tagging as `language`.** A person who finds that a problem is the
+language's fault, not the spec's, writes the comment `# edda: language`
+at the end of the problem's line. That problem's `acts` is then
+`language`; nothing else changes: a comment is never part of the body
+(section 1), so the text, its version and every check stay as they
+were, and the grammar needs no change.
+
+**Counting and the log.** The checker's plain run ends with one line
+counting the problems of `specs/` by `what went wrong`, in the order of
+the table above, for example `3 contradiction, 1 weak check`; nothing
+when there are none. The fixtures are never counted or logged: their
+problems are there on purpose. The runner ends the same way, counting
+its failures. Each run of either appends one line per problem to
+`.edda/checks.log` in the project folder, the folder that holds the
+specs folder (for Edda itself, the repository's root); keep `.edda/`
+out of git, as Edda's own `.gitignore` does. A line is one JSON object: `date` (local time with its
+offset, to the second), `rule`, `file` (from the project folder),
+`line` (`null` when there is none), `category`, `sub`, `fix`, `acts`,
+`level`, `where`, `found_by` and `commit` (the project's short SHA, or
+`none` outside git). A run with no problems appends nothing. Writing
+the log never changes the output or an exit code: a folder that cannot
+be written is left alone. `EDDA_LOG=off` turns the log off;
+`EDDA_LOG=<file>` writes to that file instead; the tests set one of
+them, so they never write into the repository. The runner logs only
+its own failures: when the spec does not check it logs nothing, as the
+checker's own run logs those. `--model` and `--graph` neither count nor
+log. `python3 tools/trend.py [--log FILE] [--by DIM[,DIM]] [--top N]`
+reads the log: the problems per day, then the counts grouped by one
+dimension or a pair (`--by where,fix`; `category` when none is named),
+then the rules that come up most. Every line is checked before it is
+counted: a line that is not JSON, or a record with a field missing or
+of the wrong type, a date not in the log's format or a dimension value
+the registry does not allow, is skipped, and the report starts with one
+line counting the skipped lines. `tools/watch.py` holds the
+dimensions, the count line and the log for both tools. When one
+category keeps coming back, the agent records a lesson and the fix goes
+where it belongs, the agent's instructions or the language (decision
+U); that is practice, not code.
+
 **The analyser** (`tools/analyse.py`) finds `dead_refusal`,
 `conflicting_ensure`, `empty_ensure` and `forbidden_change` by reading
 the spec alone, before any code runs; no solver. A condition is read
@@ -1750,7 +1894,41 @@ the running of examples and the rule wrapping round every call are
 begun (sections 6 and 9: Edda's own `check`); the rest of the done
 computation gets its own stories.
 
-## 14. Changes from revision 65
+## 14. Changes from revision 66
+
+Build Plan kb:9379223, phase 2649, and decision U (kb:9379257,
+questions 4 to 6): every problem carries six dimensions, and problems
+are counted and logged.
+
+- Every rule of the registry, the link layer's and the analyser's
+  included, has four fixed dimensions: what went wrong (a category and
+  a sub-kind), fix shape, who acts and level, in a table of section 11
+  that `tools/gen_keywords.py` copies into each rule of
+  `keywords.yaml`; it refuses to write the registry when a rule has
+  none or a value is not allowed. `keywords.yaml` gains `failures:`
+  and `dimensions:` (11).
+- The runner's failures are rules too: `failing_example` and
+  `failing_case`, `code differs`, blocking (11).
+- Each problem also gets where in the spec, read from its line, or
+  `unknown`, never guessed, and found by, set by the tool (11).
+- A person re-tags one problem as `language` with the comment
+  `# edda: language` on its line; no grammar change (11).
+- The checker's plain run and the runner end with one count line per
+  category with problems, `3 contradiction, 1 weak check`; nothing when
+  there are none. That line is the only change to their output; exit
+  codes are unchanged. The fixtures are not counted (11).
+- Each run appends one JSON line per problem, all six dimensions with
+  the rule, file, line, date and commit, to `.edda/checks.log` in the
+  project folder, ignored by git; `EDDA_LOG=off` or `EDDA_LOG=<file>`
+  turns it off or sends it elsewhere, and every test does. A log that
+  cannot be written changes nothing (11).
+- `tools/trend.py` prints the problems per day, counts grouped by one
+  dimension or a pair, and the rules that come up most (11).
+- `tools/watch.py` holds the dimensions, the count line and the log;
+  `tools/test_dimensions.py` tests them. The model's `revision` stays
+  63, and no block's text changes.
+
+## 15. Changes from revision 65
 
 Build Plan kb:9379223, phase 2648, and decision U (kb:9379257,
 questions 1 to 3): the analyser, four flags found from the spec alone.
@@ -1783,7 +1961,7 @@ questions 1 to 3): the analyser, four flags found from the spec alone.
   and the model are unchanged, the model's `revision` stays 63, and
   no block's text changes.
 
-## 15. Changes from revision 64
+## 16. Changes from revision 64
 
 Build Plan kb:9379223, phase 2636, and decision T (kb:9379252):
 generated cases, off by default.
@@ -1861,7 +2039,7 @@ generated cases, off by default.
   run, the checker's run and the model are unchanged; the model's
   `revision` stays 63. No block's text changes.
 
-## 16. Changes from revision 63
+## 17. Changes from revision 63
 
 Build Plan kb:9379223, phase 2623, and decision N (kb:9379218, Q6):
 every operation is linked to the code that does it.
@@ -1934,7 +2112,7 @@ every operation is linked to the code that does it.
   the model's `revision` stays 63, as nothing in it changed (9). No
   block's text changes, so nothing needs re-approval.
 
-## 17. Changes from revision 62
+## 18. Changes from revision 62
 
 Build Plan kb:9379223, phase 2622: the read view, built.
 
@@ -2037,7 +2215,7 @@ Build Plan kb:9379223, phase 2622: the read view, built.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 18. Changes from revision 61
+## 19. Changes from revision 61
 
 Build Plan kb:9379223, phase 2621, and decision N (kb:9379218, Q7): one
 versioned JSON model of the whole spec, the graphs in it as data.
@@ -2074,7 +2252,7 @@ versioned JSON model of the whole spec, the graphs in it as data.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 19. Changes from revision 60
+## 20. Changes from revision 60
 
 Build Plan kb:9379223, phase 2625: every bound operation is held to its
 contract, on every call the runner makes.
@@ -2111,7 +2289,7 @@ contract, on every call the runner makes.
   wrapping as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 20. Changes from revision 59
+## 21. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -2152,7 +2330,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 21. Changes from revision 58
+## 22. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -2170,7 +2348,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 22. Changes from revision 57
+## 23. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -2257,7 +2435,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 23. Changes from revision 56
+## 24. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -2276,7 +2454,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 24. Changes from revision 55
+## 25. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -2300,7 +2478,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 25. Changes from revision 54
+## 26. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -2315,7 +2493,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 26. Changes from revision 53
+## 27. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -2350,7 +2528,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 27. Changes from revision 52
+## 28. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -2366,7 +2544,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 28. Changes from revision 51
+## 29. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -2388,7 +2566,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 29. Changes from revision 50
+## 30. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -2398,7 +2576,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 30. Changes from revision 49
+## 31. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -2407,14 +2585,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 31. Changes from revision 48
+## 32. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 32. Changes from revision 47
+## 33. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -2424,7 +2602,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 33. Changes from revision 46
+## 34. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -2433,7 +2611,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 34. Changes from revision 45
+## 35. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -2443,7 +2621,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 35. Changes from revision 44
+## 36. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -2452,7 +2630,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 36. Changes from revision 43
+## 37. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -2461,7 +2639,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 37. Changes from revision 42
+## 38. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -2472,7 +2650,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 38. Changes from revision 41
+## 39. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -2481,21 +2659,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 39. Changes from revision 40
+## 40. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 40. Changes from revision 39
+## 41. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 41. Changes from revision 38
+## 42. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -2503,7 +2681,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 42. Changes from revision 37
+## 43. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -2512,7 +2690,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 43. Changes from revision 36
+## 44. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -2523,7 +2701,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 44. Changes from revision 35
+## 45. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -2536,7 +2714,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 45. Changes from revision 34
+## 46. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -2549,7 +2727,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 46. Changes from revision 33
+## 47. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -2565,7 +2743,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 47. Changes from revision 32
+## 48. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -2583,7 +2761,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 48. Changes from revision 31
+## 49. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -2602,7 +2780,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 49. Changes from revision 30
+## 50. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -2623,7 +2801,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 50. Changes from revision 29
+## 51. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -2644,7 +2822,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 51. Changes from revision 28
+## 52. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -2661,7 +2839,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 52. Changes from revision 27
+## 53. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -2683,7 +2861,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 53. Changes from revision 26
+## 54. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

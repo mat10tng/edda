@@ -43,6 +43,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.environ["EDDA_LOG"] = "off"     # the tools and their children never write the log (section 11)
 import edda_binding as binding   # noqa: E402
 import run                       # noqa: E402
 
@@ -190,7 +191,8 @@ class GeneratedTest(unittest.TestCase):
             "            with: {count: 0, kind: small}",
             "        steps:",
             '          - when: {actor: clerk_1, call: "put(box_1, 10)"}',
-            "            then: [DONE]"])
+            "            then: [DONE]",
+            "1 code differs"])
 
     def test_the_seed_replays_the_same_run(self):
         binding.OPERATIONS["put"] = put_off_by_one
@@ -213,11 +215,12 @@ class GeneratedTest(unittest.TestCase):
         code, out = self.main("--seed", "3")
         lines = out.splitlines()
         self.assertEqual(code, 1)
-        self.assertEqual(lines[-2:], [
+        self.assertEqual(lines[-3:], [
             '    and under the shown_by: of the rule "a put adds the parts it is given":',
-            '          - "generated: put breaks a rule"'])
-        example = lines[lines.index("    as an example:") + 1:-2]
-        pasted = BOX.replace("    operations:\n", RULES + lines[-1] + "\n" + "    operations:\n", 1)
+            '          - "generated: put breaks a rule"',
+            "1 code differs"])
+        example = lines[lines.index("    as an example:") + 1:-3]
+        pasted = BOX.replace("    operations:\n", RULES + lines[-2] + "\n" + "    operations:\n", 1)
         pasted = pasted.replace("    examples:\n", "    examples:\n" + "\n".join(example) + "\n", 1)
         self.write("box.edda", pasted)
         self.write("edda.yaml", "generated_cases: {on: false}\n")
@@ -226,13 +229,14 @@ class GeneratedTest(unittest.TestCase):
         self.assertEqual((code, again.splitlines()), (1, [
             "BOX-001: failing: 1 of 2 examples failed",
             '    example "generated: put breaks a rule" failed',
-            "        " + lines[3].strip().replace(f"box.edda:{put_line - 1}:", f"box.edda:{put_line}:")]))
+            "        " + lines[3].strip().replace(f"box.edda:{put_line - 1}:", f"box.edda:{put_line}:"),
+            "1 code differs"]))
 
     def test_skips_are_listed_when_no_world_keeps_the_always_rules(self):
         self.write("box.edda", BOX.replace('"count >= 0"', '"count > count"'))
-        self.assertEqual(self.main("--seed", "3")[1].splitlines()[-1],
-                         "BOX-001: generated cases: not run: no starting world keeps every always-rule; "
-                         "skipped stamp: no binding for stamp")
+        self.assertEqual(self.main("--seed", "3")[1].splitlines()[-2:],
+                         ["BOX-001: generated cases: not run: no starting world keeps every always-rule; "
+                          "skipped stamp: no binding for stamp", "1 code differs"])
 
     def test_malformed_settings_are_refused(self):
         self.write("edda.yaml", "generated_cases:\n  on: yes\n  runs: 0\n  wobble: 1\n")
@@ -264,9 +268,9 @@ class GeneratedTest(unittest.TestCase):
         try:
             self.write("box.edda", BOX.replace("label: TEXT, OPTIONAL", "label: TEXT")
                        .replace('"count >= 0"', '"label != \\"\\""'))
-            self.assertEqual(self.main("--seed", "3")[1].splitlines()[-1],
-                             "BOX-001: generated cases: not run: box_1.label is unset; "
-                             "skipped stamp: no binding for stamp")
+            self.assertEqual(self.main("--seed", "3")[1].splitlines()[-2:],
+                             ["BOX-001: generated cases: not run: box_1.label is unset; "
+                              "skipped stamp: no binding for stamp", "1 code differs"])
         finally:
             del binding.VALUES["box"]
 
@@ -419,7 +423,8 @@ class GeneratedTest(unittest.TestCase):
         self.assertEqual(self.main(), (1, "BOX-001: failing: 1 of 1 examples failed\n"
                                        '    example "parts are put in a box" failed\n'
                                        f"        {os.path.relpath(self.dir.name)}/box.edda:{put_line}: "
-                                       "put changed b.tax, which the spec does not name\n"))
+                                       "put changed b.tax, which the spec does not name\n"
+                                       "1 code differs\n"))
 
     def test_optional_and_many_inputs_with_nothing_to_point_at_do_not_block(self):
         self.write("box.edda", BOX.replace("stories:\n", NOTE + "stories:\n", 1)
@@ -660,9 +665,9 @@ class WorldTest(unittest.TestCase):
         self.bind(binding.ENTITIES, shelf=shelf_with(0))
         self.bind(binding.VALUES, shelf={"code": ["s1"]})
         self.bind(binding.OPERATIONS, weigh=lambda actor, part: part.weight)
-        self.assertEqual(self.project("shelf.edda", SHELF)[1][-1],
-                         "SHELF-001: generated cases: not run: no call ran in 30 runs; "
-                         "weigh never had a record for each input")
+        self.assertEqual(self.project("shelf.edda", SHELF)[1][-2:],
+                         ["SHELF-001: generated cases: not run: no call ran in 30 runs; "
+                          "weigh never had a record for each input", "1 code differs"])
 
     def test_a_reference_with_nothing_to_point_at(self):
         self.bind(binding.ENTITIES, node=lambda name, values, workdir: binding.Thing("node", values),

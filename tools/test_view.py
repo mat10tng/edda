@@ -39,6 +39,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.environ["EDDA_LOG"] = "off"     # the tools and their children never write the log (section 11)
 import check                     # noqa: E402
 import edda_binding as binding   # noqa: E402
 import run                       # noqa: E402
