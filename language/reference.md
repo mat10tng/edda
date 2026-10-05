@@ -1,13 +1,14 @@
 # Edda: language reference
 
-Revision 64, 4 Oct 2026. Replaces revision 63. Decisions behind it:
+Revision 65, 5 Oct 2026. Replaces revision 64. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
 kb:9378618, and the build Plan kb:9379223; the JSON model and graphs
 as data: decision N, kb:9379218; the read view: the build Plan's
 phase 2622; links per operation: decision N, Q6, and the build Plan's
-phase 2623), and Astra's review rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
+phase 2623; generated cases: decision T, kb:9379252, and the build
+Plan's phase 2636), and Astra's review rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
 `language/keywords.yaml` (the registry: every key, expression form,
@@ -601,6 +602,10 @@ examples:
 After `refused`, `RESULT` has no value; a changing operation returns
 nothing. Facts after `refused` check that nothing changed.
 
+A failure of the generated cases (section 9) is printed in this form,
+ready to paste under a story's `examples:`; pasted, it is an example
+like any other.
+
 **Keys inside keys**, for the registry, each with the section that
 defines it:
 
@@ -760,6 +765,7 @@ the spec's, and the runner checks them. A binding provides:
 | an entity's maker | the given's name, its values and a fresh work folder | the thing: an object whose attributes are the entity's properties |
 | the actor maker | the actor's name, its `roles:` and its other values | the actor: `name`, `roles` and the properties of its roles |
 | an operation | the asking actor (none for a read inside a fact), the required inputs by position, every optional one by keyword, `None` when the call leaves it out | the operation's return, or a refusal with its reason |
+| a value space, optional | an entity and a `with:` key the types cannot generate | the values generated cases pick there (section 9, generated cases): Edda's own `spec_file` takes the fixture folders holding one `.edda` |
 
 The runner fills in the values a maker gets, so the binding holds no
 rule of section 8. They hold every `with:` value: a value names a
@@ -801,7 +807,7 @@ computes it), `version` (`number`, `sentences`), `sentence` (`kind`,
 section 12, `tools/view.py`, over that model; `view_at` gives "no such
 version" itself, and the runner holds it to the spec's refusal).
 
-**The runner.** `python3 tools/run.py [--project DIR] [STORY ...]`,
+**The runner.** `python3 tools/run.py [--project DIR] [--seed N] [STORY ...]`,
 the project `specs/` unless named. The spec must check first. For each
 story, or each one named, and each example: make the givens through
 the binding, in a fresh work folder; for each step with `when`, check
@@ -850,6 +856,136 @@ checker broken on purpose and sees EDDA-001 fail on the example and
 the `then` line that catch the break, and holds bound operations of a
 small project of its own to each rule of section 6.
 
+**Generated cases.** Off by default. A project turns them on in
+`edda.yaml`, beside its `.edda` files (`specs/edda.yaml`), in the YAML
+subset of section 2:
+
+```yaml
+generated_cases: {on: true, runs: 100, steps: 20}
+```
+
+The file's keys, for the registry:
+
+| key | section | means | why |
+|---|---|---|---|
+| `generated_cases:` | Settings | at the root of `edda.yaml`, the file's one key; a mapping; left out, or no file, generated cases are off | one switch per project, off unless asked for |
+| `on:` | Settings | inside `generated_cases:`, required; a yes/no; no default | turning them on is a choice written down, never implied |
+| `runs:` | Settings | inside `generated_cases:`; a whole number of at least 1; 100 when left out | how many random runs a story gets |
+| `steps:` | Settings | inside `generated_cases:`; a whole number of at least 1; 20 when left out | how many calls a run may make at most |
+
+The root is a mapping; `on` is required; `runs` and `steps` are whole
+numbers of at least 1 (`1.0`, `0`, `-1` and `true` are refused). With no file, or `on: false`, the runner does
+only what is said above and never imports Hypothesis, the one library
+generated cases need (`tools/requirements.txt` pins
+`hypothesis==6.141.1`); with them on and Hypothesis missing, it exits
+3 with one line saying how to install it. With them on, each story's
+line is followed by one more, its generated cases
+(`tools/generate.py`):
+
+1. A starting world: an actor for each role the who-lines of the
+   story's operations name, `<role>_1`, with a value for each property
+   of its role, as below; one to three records of every entity the binding can make,
+   `<entity>_<n>`, each stored property given a value of its type. A
+   choice takes one of its values; `INTEGER` and `NUMBER` favour the
+   numbers the spec's own expressions name, each read with its sign
+   and given its neighbours and its negation (`n > 10` gives 9, 10, 11
+   and -10; `count >= -10` gives -11, -10, -9 and 10), and 0, 1 and
+   -1; `TEXT` the texts they name, the empty text and short texts;
+   `TIME` the times they name, a day (`YYYY-MM-DD`) or a moment, read
+   as section 7.2 reads a time in `with:`, or a time in 2026; a
+   reference takes an earlier record; an `OPTIONAL` or `MANY` property
+   may be left out (section 8), and an `OPTIONAL` reference with no
+   record to point at is. An entity whose binding gives a value space
+   is made from it alone, as an example gives it, and its maker fills
+   in the rest; an entity holding a required reference waits until a
+   record it can point at is made, and one that never can be (it needs
+   itself, or a kind that waits on it) is not made and is listed:
+   `skipped entity <name>: nothing to fill its required <property>`.
+   A world in which an `always` fact does not hold is thrown away.
+2. Up to `steps` steps: one of the story's operations, an actor its
+   who-lines name (a who-line's condition may still refuse it), and
+   inputs: an entity from the records that exist, the givens and,
+   for an entity the binding cannot make, what their properties reach
+   at any depth, through records of other kinds too, each record once
+   so a loop ends (`spec_file_1.stories[0]`,
+   `shelf_1.bin.parts[0]`); any other value as above; an optional
+   input given or left out, and left out when no record fits it; a
+   `MANY` input may be empty, an ordered list for `IN ORDER`. Only a
+   required single-record input with no record to point at keeps an
+   operation from a step. The call is held to the rule wrapping of
+   section 6 as a step's call is, the only oracle: permission, the
+   refusal the spec gives, `ensure` with `OLD`, `always` and the frame
+   rule. A call that raises, and a spec condition that cannot be
+   judged, fail as they fail an example's verdict. Nothing else is
+   expected.
+3. Up to `runs` runs, under one seed: `--seed N`, or a random one. A
+   failure is shrunk (steps and records dropped, values made simpler,
+   while it still fails) and printed: what broke, at the rule's file
+   and line as section 6 words it, the seed, and the run as an example
+   ready to paste, titled `"generated: <operation> breaks a rule"`,
+   each step's `then` the verdict the spec gives that call. In a story
+   with `rules:`, the line its title needs under a rule's `shown_by:`
+   follows (`and under the shown_by: of the rule "<rule>":` when the
+   story has one rule, `of the rule it shows:` when it has more), so
+   the pasted example checks; it then fails at the same rule. The
+   failure prints the full command that replays it, `--seed` included.
+   Replay holds only with the same command, settings, spec, code,
+   Python and Hypothesis versions, and a binding whose state is the
+   same each run; not across entry points (`tools/run.py` from the
+   shell, a test calling its `main`). The pasted example is the lasting
+   reproduction.
+
+An operation with no binding, with a required single-record input of
+an entity no binding makes or reaches, calling an operation with no
+binding in a condition or fact, or reading the clock (`needs the
+clock, not built yet`), as the runner counts it for examples, is
+skipped and listed. What the binding cannot give never fails a run by
+itself and never stops the runner: a property or operation with no
+binding (`no binding for <entity>.<property>`), or a value nothing gave
+(`<record>.<property> is unset`). A rule it meets cannot be judged,
+and every other rule there still is: each `always` fact of the
+starting world, and in a step each refuse condition, each `ensure`,
+each `always` fact and the frame rule, path by path. An `OLD` value
+it meets leaves only the facts that use it unjudged, and the call
+still runs; a path or computed property the frame rule cannot read
+leaves only that part unjudged (`not judged: <operation>: frame rule,
+<path>`). What its unread rest could name is bounded from the spec
+alone: every property its path and expression mention, and in turn
+those of each computed property and read they mention (every stored
+property of a `DERIVED` one), on any record of the matching entity. A
+change the spec does not name fails only outside that bound; inside
+it, it is not judged. Where no such bound can be built, a value of
+unknown type on the way, no change to a record of an entity the path
+could reach is judged, and the line says so (`<path> (no bound on what
+it names: no change to <entity>, ... is judged)`). The refusal is judged condition by condition, in order: a
+condition that holds still makes the refusal due, and code that does
+not refuse fails; a refusal must give the reason of the first
+condition that holds or of one before it that cannot be judged, and
+any other reason fails, one no refusal declares included. With no
+condition that holds, a refusal with the reason of one that cannot be
+judged is judged only as changing nothing, and a call not refused has
+every other rule judged. A rule that fails wins: the run
+fails with every failure, each rule that could not be judged listed
+beside them, `<file>:<line>: not judged: <rule>: <why>`. With nothing
+failed, met in the starting world or its makers, the story is `not
+run: <why>`; met in a step, the run ends, keeps what came before, and
+the operation is skipped with that why. Runs pass only by
+calling something: `<id>: generated cases: <n> runs passed; calls:
+<operation> <count>, ...`, `<n>` the runs that ran to the end, each
+count the calls of that operation those runs made (refused ones
+included); an operation none of them called is skipped too (`never had
+a record for each input`, or `not called in <n> runs`). When no run
+called any operation the story is `<id>: generated cases: not run: no
+call ran in <n> runs`, with the operations that never had a record for
+each input, and never passed; `<id>: generated cases: not run: <why>`
+when nothing is left to run (`no operations` for a story with none),
+or `no starting world keeps every always-rule`. A failure is `<id>:
+generated cases: failed (seed <n>)`, then `    replay: <command>`,
+and makes the exit 1; the story's own line is unchanged.
+On every one of these lines, passed, failed or not run, what was
+skipped follows as `; skipped <operation>: <why>` or `; skipped entity
+<name>: <why>`, each once, with the first why found. Edda's own specs keep generated cases off.
+
 Linked now means the marker resolves; it changes nothing the runner
 does: the runner still holds the bound operations to their rules.
 Not built yet: bindings in other stacks, the clock.
@@ -870,7 +1006,7 @@ A value left out is `null`, a list left out `[]`.
 | field | holds |
 |---|---|
 | `edda_model` | the model's own version, 1; a reader refuses a version it does not know |
-| `revision` | the language revision the model follows, 63; revision 64 changed nothing in the model |
+| `revision` | the language revision the model follows, 63; revisions 64 and 65 changed nothing in the model |
 | `files` | each `.edda` file: `name`, `history` (its `.edda.vc` or `null`), `blocks`: each role, entity and story in the order of the status lines (section 11) with `kind`, `name`, `line`, `status` (`approved` or `draft`), `version` and `pins_stale` |
 | `epics` | `id`, `text`, `file`, `line` |
 | `roles` | `name`, `is`, `properties`, `file`, `line` |
@@ -1283,9 +1419,21 @@ frame rule hold on every call the examples make; it reports that as
 give the approved version, stale pins and links (section 9); the rules
 on the host's whole test suite are not built.
 
+**Settings.** The runner reads a project's `edda.yaml` (section 9)
+through the source layer above, then its shape: `unknown_key`,
+`missing_key` (`generated_cases needs on:`), `wrong_type` (`file must
+be a mapping` for a root that is none, an empty file included; `on
+must be a yes/no`; `runs must be a whole number of at least 1` for
+`1.0`, `0`, `-1`, `true` or any value that is not one, `steps` alike)
+and `declared_twice`, each at
+its line, as `<file>:<line>: <rule>: <message>` under `the settings do
+not check:`; it then runs nothing and exits 1. The checker does not
+read `edda.yaml`.
+
 **Runs, test only.** Examples through the binding, every call of a
 bound operation wrapped in its refusals, ensures, always and the frame
-rule (built, sections 6 and 9); the same wrapping round the linked
+rule (built, sections 6 and 9); generated cases, the same wrapping
+round random runs, when a project turns them on (built, section 9); the same wrapping round the linked
 operation for every test in the host's suite (not built yet: links now
 name the operation's function, but nothing wraps it in the host's
 tests). Never in production.
@@ -1540,14 +1688,92 @@ added and removed lines; drifted pairs side by side.
 
 Qualities and infrastructure (#2487), time-triggered operations
 (#2486), screens (#2488), timing and concurrency
-(#2489), generated cases (#2490), the analyser (#2491), drafting from
+(#2489), the analyser (#2491), drafting from
 existing code (#2492), story to Plan tasks (#2493), richer calculations
 and durations (#2494), tooling (#2495), the KDL skeleton trial (#2512);
 the running of examples and the rule wrapping round every call are
 begun (sections 6 and 9: Edda's own `check`); the rest of the done
 computation gets its own stories.
 
-## 14. Changes from revision 63
+## 14. Changes from revision 64
+
+Build Plan kb:9379223, phase 2636, and decision T (kb:9379252):
+generated cases, off by default.
+
+- A project's `edda.yaml` turns them on: `generated_cases: {on: true,
+  runs: 100, steps: 20}`; no file or `on: false` is off. Its keys have
+  a table, with scope, type and default, and are in the registry. A
+  file that breaks its shape, its root no mapping or a count no whole
+  number of at least 1, is refused in the checker's words and the
+  runner exits 1 (9, 11).
+- On, each story gets one more line: random starting worlds from the
+  glossary, edge values from the spec's own expressions, worlds that
+  break an `always` thrown away; steps of the story's bound operations
+  by actors its who-lines name, on records that exist; every call held
+  to the rule wrapping of section 6, the only oracle. A failure is
+  shrunk and printed as an example ready to paste, with the broken
+  rule, the seed and the full command that replays it; replay holds
+  with the same command, settings, spec, code, Python and Hypothesis
+  versions and binding state, not across entry points, and the pasted
+  example is the lasting reproduction; it makes the exit 1. In a
+  story with `rules:`, it also gives the `shown_by:` line, so pasted
+  it checks and fails at the same rule. Operations with no binding,
+  on the clock or never called, and entities no record can be made
+  of, are skipped and listed on every outcome (8, 9). What the binding
+  cannot give, no binding or an unset value, is never a failure by
+  itself or a crash. Every rule that can be judged is: a failure wins,
+  listed with each rule that could not be judged beside it; with
+  nothing failed, in the starting world the story is not run, with
+  why; in a step the run ends and the operation is skipped, with why
+  (9). This holds for every check in a step, not only the top-level
+  ones: an `OLD` value that cannot be read leaves only the facts that
+  use it unjudged; a path or computed property the frame rule cannot
+  read, only that part, and a change only what it could still name,
+  bounded from the spec, is not judged, never failed; a refuse condition that cannot be judged does
+  not stop the later ones, so a later condition that holds still makes
+  the refusal due, and a refusal's reason must be one the spec order
+  allows, never one no refusal declares (9). A record may hold an unset
+  value, and showing a run never reads it (9).
+- Runs reach records through other records at any depth, loop-safe;
+  the passed line counts the calls of each operation, and a story
+  whose runs called nothing is not run, never passed. An `OPTIONAL`
+  reference with nothing to point at is left out; a required one
+  waits for a record. Only a required single-record input blocks an
+  operation: an `OPTIONAL` one is left out, a `MANY` one may be
+  empty. Edge values read a literal with its sign (`-10` gives -11,
+  -10, -9) (9). A day (`YYYY-MM-DD`) is a time, read as a
+  `with:` value is (9).
+- Hypothesis is the one new dependency, pinned in
+  `tools/requirements.txt`, imported only when generated cases are on;
+  on without it, the runner exits 3 with one line (9).
+- A binding may give a maker a value space for a key the types cannot
+  generate; Edda's own gives `spec_file` the fixture folders holding
+  one `.edda` (9).
+- `tools/generate.py` builds them; `tools/test_generate.py` shows code
+  that breaks a refusal only at an edge value found and shrunk to one
+  step, code that keeps the spec passing, the seed replaying the same
+  failure, an unbound property and an unset value in the starting
+  world not run, an unset value read in a step skipping the operation,
+  a failed `ensure` reported with an unjudged one beside it, a step
+  whose only unkept rule cannot be judged skipping the operation, a
+  failed `ensure` kept beside an unbound `OLD` value and beside a
+  computed property the frame rule cannot read, a change that computed
+  property could name, directly or through another, not judged while
+  one outside it still fails, and examples judging it as before, a refusal still due
+  after a condition that cannot be judged, a refusal no rule gives
+  failing, and one only an unjudged condition gives not failed,
+  optional and `MANY` inputs with nothing to point at not blocking,
+  signed edge values, a world that breaks an `always` thrown away, a pasted
+  failure in a story with `rules:` checking and failing at the same
+  rule, a record two references away called, runs that call nothing
+  not run, a reference with nothing to point at, a day as a time,
+  malformed settings refused, and the runner without Hypothesis, off
+  and on.
+- Edda's own specs keep them off (no `specs/edda.yaml`), so the plain
+  run, the checker's run and the model are unchanged; the model's
+  `revision` stays 63. No block's text changes.
+
+## 15. Changes from revision 63
 
 Build Plan kb:9379223, phase 2623, and decision N (kb:9379218, Q6):
 every operation is linked to the code that does it.
@@ -1620,7 +1846,7 @@ every operation is linked to the code that does it.
   the model's `revision` stays 63, as nothing in it changed (9). No
   block's text changes, so nothing needs re-approval.
 
-## 15. Changes from revision 62
+## 16. Changes from revision 62
 
 Build Plan kb:9379223, phase 2622: the read view, built.
 
@@ -1723,7 +1949,7 @@ Build Plan kb:9379223, phase 2622: the read view, built.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 16. Changes from revision 61
+## 17. Changes from revision 61
 
 Build Plan kb:9379223, phase 2621, and decision N (kb:9379218, Q7): one
 versioned JSON model of the whole spec, the graphs in it as data.
@@ -1760,7 +1986,7 @@ versioned JSON model of the whole spec, the graphs in it as data.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 17. Changes from revision 60
+## 18. Changes from revision 60
 
 Build Plan kb:9379223, phase 2625: every bound operation is held to its
 contract, on every call the runner makes.
@@ -1797,7 +2023,7 @@ contract, on every call the runner makes.
   wrapping as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 18. Changes from revision 59
+## 19. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -1838,7 +2064,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 19. Changes from revision 58
+## 20. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -1856,7 +2082,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 20. Changes from revision 57
+## 21. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -1943,7 +2169,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 21. Changes from revision 56
+## 22. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -1962,7 +2188,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 22. Changes from revision 55
+## 23. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -1986,7 +2212,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 23. Changes from revision 54
+## 24. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -2001,7 +2227,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 24. Changes from revision 53
+## 25. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -2036,7 +2262,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 25. Changes from revision 52
+## 26. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -2052,7 +2278,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 26. Changes from revision 51
+## 27. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -2074,7 +2300,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 27. Changes from revision 50
+## 28. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -2084,7 +2310,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 28. Changes from revision 49
+## 29. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -2093,14 +2319,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 29. Changes from revision 48
+## 30. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 30. Changes from revision 47
+## 31. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -2110,7 +2336,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 31. Changes from revision 46
+## 32. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -2119,7 +2345,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 32. Changes from revision 45
+## 33. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -2129,7 +2355,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 33. Changes from revision 44
+## 34. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -2138,7 +2364,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 34. Changes from revision 43
+## 35. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -2147,7 +2373,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 35. Changes from revision 42
+## 36. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -2158,7 +2384,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 36. Changes from revision 41
+## 37. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -2167,21 +2393,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 37. Changes from revision 40
+## 38. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 38. Changes from revision 39
+## 39. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 39. Changes from revision 38
+## 40. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -2189,7 +2415,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 40. Changes from revision 37
+## 41. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -2198,7 +2424,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 41. Changes from revision 36
+## 42. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -2209,7 +2435,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 42. Changes from revision 35
+## 43. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -2222,7 +2448,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 43. Changes from revision 34
+## 44. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -2235,7 +2461,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 44. Changes from revision 33
+## 45. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -2251,7 +2477,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 45. Changes from revision 32
+## 46. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -2269,7 +2495,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 46. Changes from revision 31
+## 47. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -2288,7 +2514,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 47. Changes from revision 30
+## 48. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -2309,7 +2535,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 48. Changes from revision 29
+## 49. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -2330,7 +2556,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 49. Changes from revision 28
+## 50. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -2347,7 +2573,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 50. Changes from revision 27
+## 51. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -2369,7 +2595,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 51. Changes from revision 26
+## 52. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

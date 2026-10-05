@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 64).
+# Edda keyword registry, generated from language/reference.md (revision 65).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, fixed name, checker rule and read-view
 # sentence kind, with what it means, why it exists and where it comes
@@ -255,6 +255,22 @@ keys:
     section: 'Level 2: links and binding'
     means: 'in an <entity>.links: operation name to "path::function", a top-level function in a covered file, or to NOT_BUILT'
     why: 'the operations that do not follow the rule'
+  - key: 'generated_cases:'
+    section: 'Settings'
+    means: 'at the root of edda.yaml, the file''s one key; a mapping; left out, or no file, generated cases are off'
+    why: 'one switch per project, off unless asked for'
+  - key: 'on:'
+    section: 'Settings'
+    means: 'inside generated_cases:, required; a yes/no; no default'
+    why: 'turning them on is a choice written down, never implied'
+  - key: 'runs:'
+    section: 'Settings'
+    means: 'inside generated_cases:; a whole number of at least 1; 100 when left out'
+    why: 'how many random runs a story gets'
+  - key: 'steps:'
+    section: 'Settings'
+    means: 'inside generated_cases:; a whole number of at least 1; 20 when left out'
+    why: 'how many calls a run may make at most'
   - key: 'story:'
     section: 'Versions and approval'
     means: 'which story this is a version of; exactly one of story:, entity: and role:'

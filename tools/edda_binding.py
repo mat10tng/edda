@@ -287,4 +287,11 @@ def view_at(actor, story, number):
 
 
 ENTITIES = {"spec_file": make_spec_file}
+# VALUES, optional, for generated cases (tools/generate.py): entity name ->
+# {key: [values]}, the values a maker takes where the types cannot say. An
+# entity named here is generated from these keys alone, as an example gives
+# it, and its maker fills in the rest: a spec_file from a fixture folder
+# holding one .edda, as make_spec_file needs.
+VALUES = {"spec_file": {"fixture": sorted(f for f in os.listdir(FIXTURES)
+                                          if len(glob.glob(os.path.join(FIXTURES, f, "*.edda"))) == 1)}}
 OPERATIONS = {"check": check, "view": view, "view_at": view_at, "notes": notes}

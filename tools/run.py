@@ -2,7 +2,7 @@
 """Run the examples of Edda's stories against real code, through the
 binding (reference sections 8, 9 and 11).
 
-    python3 tools/run.py [--project DIR] [STORY ...]
+    python3 tools/run.py [--project DIR] [--seed N] [STORY ...]
 
 For each story (or each one named), each example: make the given things
 through the binding, run each step's call as its actor, then judge each
@@ -13,8 +13,12 @@ operation's rules (reference section 6): the refusal the spec gives,
 every ensure with OLD, every always-rule and the frame rule. The spec must
 check first (tools/check.py). A story whose examples all pass is reported
 "examples passed", never "done": done (reference section 11) needs more
-than the runner computes. Exit 0 when no story failed, 1 when one failed
-or the spec does not check, 3 when Edda itself failed.
+than the runner computes. When the project's edda.yaml turns generated
+cases on, each story gets one more line: its generated cases
+(tools/generate.py, which needs Hypothesis), under the seed --seed names
+or a random one. Exit 0 when no story failed, 1 when one failed, its
+generated cases included, or the spec or the settings do not check, 3
+when Edda itself failed.
 """
 import argparse
 import ast
@@ -22,7 +26,9 @@ import datetime
 import glob
 import json
 import os
+import random
 import re
+import shlex
 import sys
 import tempfile
 
@@ -37,6 +43,11 @@ class Fail(Exception):
     """the example fails here; the message says what was found"""
 
 
+class UnsetFail(Fail):
+    """a Fail because an unset value was read; while generated cases run
+    (UNSET_ENDS) judge passes it on: generation gave no value there"""
+
+
 class EddaError(Exception):
     """Edda itself failed: a spec the checker should have refused"""
 
@@ -44,15 +55,51 @@ class EddaError(Exception):
 class RuleBroken(Exception):
     """a bound operation broke a rule of the spec; failures are (file:line,
     None, what was found), the line the rule's own. Not a Fail: it ends
-    the step, it is never what a fact found"""
+    the step, it is never what a fact found. unjudged, while generated
+    cases run, the rules of the call that could not be judged (judged)"""
 
-    def __init__(self, failures):
+    def __init__(self, failures, unjudged=()):
         super().__init__(failures)
-        self.failures = failures
+        self.failures, self.unjudged = failures, list(unjudged)
 
 
 class SpecRefused(Exception):
     """the spec does not check; args[0] is what the checker says"""
+
+
+# --- the settings: edda.yaml --------------------------------------------------------
+
+SETTINGS_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {"generated_cases": {
+        "type": "object", "additionalProperties": False, "required": ["on"],
+        "properties": {"on": {"type": "boolean"}, "runs": {}, "steps": {}}}}}
+SETTINGS = checker.Draft202012Validator(SETTINGS_SCHEMA)
+GENERATED_OFF = {"on": False, "runs": 100, "steps": 20}
+
+
+def read_settings(folder):
+    """the generated_cases setting of the project's edda.yaml: on, runs and
+    steps; off when there is no file. A file that breaks the source rules,
+    the shape of SETTINGS_SCHEMA (its root a mapping) or a count that is no
+    whole number of at least 1 raises SpecRefused with each problem as the
+    checker gives it (reference section 11)"""
+    path = os.path.join(folder, "edda.yaml")
+    if not os.path.exists(path):
+        return dict(GENERATED_OFF)
+    source, data = checker.load(path)
+    found = source.src
+    if not found:
+        found = list(source.style) + [("declared_twice", ln, f"declared twice: {k}") for k, ln in source.duplicates]
+        found += checker.schema_problems(SETTINGS, SETTINGS_SCHEMA, data, source)
+    if not found:
+        g = data.get("generated_cases") or {}
+        found = [("wrong_type", source.line(("generated_cases", k), False), f"{k} must be a whole number of at least 1")
+                 for k in ("runs", "steps") if k in g and (type(g[k]) is not int or g[k] < 1)]
+    if found:
+        raise SpecRefused([f"{os.path.relpath(path)}:{line}: {rule}: {msg}"
+                           for rule, line, msg in sorted(set(found), key=lambda p: (p[1], p[0], p[2]))])
+    return dict(GENERATED_OFF, **(data.get("generated_cases") or {}))
 
 
 # --- expressions: section 7.1 over the parsed ast ------------------------------
@@ -111,12 +158,12 @@ def read(obj, attr, text):
         raise
     except binding.UnsetRead as u:
         if type(dict.get(object.__getattribute__(obj, "__dict__"), attr)) is binding.Unset:
-            raise Fail(f"{text} is unset")    # this read itself
-        raise Fail(str(u))          # the binding's property used an unset value
+            raise UnsetFail(f"{text} is unset")    # this read itself
+        raise UnsetFail(str(u))          # the binding's property used an unset value
     except Exception as e:      # the binding's property crashed
         raise Fail(f"{text} raised {type(e).__name__}: {e}")
     if isinstance(v, binding.Unset):
-        raise Fail(f"{text} is unset")
+        raise UnsetFail(f"{text} is unset")
     return v
 
 
@@ -244,7 +291,7 @@ def value(n, env):
                 return total
             return {"any": any, "all": all}[f](found)
         if f == "TIME" and len(args) == 1:
-            return datetime.datetime.fromisoformat(args[0].value)
+            return time_of(args[0].value)
         if f == "OLD" and len(args) == 1 and "OLD" in env:
             return env["OLD"](args[0], env)
         if f in OPERATIONS:
@@ -255,7 +302,7 @@ def value(n, env):
             except (Fail, RuleBroken, EddaError, binding.NotBound):
                 raise
             except binding.UnsetRead as u:
-                raise Fail(str(u))
+                raise UnsetFail(str(u))
             except binding.Refused as r:
                 raise Fail(f"{ast.unparse(n)} was refused: {show(r.reason)}")
             except Exception as e:      # the code under test crashed
@@ -461,6 +508,7 @@ def kinds_reached(P, kinds):
 
 OPERATIONS = {}     # the project's operations as written, set by run()
 PROJECT = [None]    # the checker's view of the project, set by run()
+STORIES = {}        # the project's stories as written, by id, set by run()
 PHRASES = {"entities": {}, "roles": {}}     # property type phrases as written, set by load_project()
 RULES = {"operations": {}, "always": {}}    # each operation's rules and each entity's always-rules, with their lines, set by load_project()
 GIVENS = []         # the things the example's givens made, set by run_example()
@@ -495,7 +543,10 @@ def run_operation(name, actor, args, kwargs):
     condition that holds, which the code must give, reason for reason,
     or none; a refused call changes nothing; a call not refused makes
     every ensure and always-rule hold and changes no stored location the
-    spec does not name. A broken rule raises RuleBroken"""
+    spec does not name. A broken rule raises RuleBroken. While generated
+    cases run, a condition before it that cannot be judged also allows
+    its own reason, and with none that holds, no refusal; a rule that
+    cannot be judged goes in unjudged, raised when nothing failed"""
     if actor is not None and not permitted(name, actor, args, kwargs):
         raise binding.Refused(f"{name} is not allowed for {', '.join(actor.roles)}")
     rules = RULES["operations"][name]
@@ -503,7 +554,8 @@ def run_operation(name, actor, args, kwargs):
     scope = dict(required, **optionals)
     if actor is not None:
         scope["ACTOR"] = actor
-    expected = next((r for r in rules["refuse"] if evaluate(r[0], scope)), None)
+    unjudged = []
+    expected, unknown = refusal(name, rules, scope, unjudged)
     if RECORD[0] is not None and "returns" in OPERATIONS[name]:
         found = []  # what a read gives back derives from what its returns reads,
         try:        # and its order from what ordered_by reads on each item
@@ -520,23 +572,28 @@ def run_operation(name, actor, args, kwargs):
     before = snapshot(roots)
     if expected is None:
         scope["OLD"] = old_values(rules["ensure"], scope)
-        places = named(rules, scope)    # before the call too: what it derived from then
+        places, possible = named(name, rules, scope, unjudged)    # before the call too: what it derived from then
     try:
         result = binding.OPERATIONS[name](actor, *args, **optionals)
     except binding.Refused as r:
-        if expected is None:
-            raise RuleBroken([(rules["line"], None, f"{name} refused: {show(r.reason)}, but the spec does not refuse")])
-        if r.reason != expected[1]:
-            raise RuleBroken([(expected[2], None, f"{name} should refuse: {show(expected[1])}, but it refused: {show(r.reason)}")])
+        due = list(dict.fromkeys([u[1] for u in unknown] + ([expected[1]] if expected else [])))
+        if r.reason not in due:
+            if not unknown and expected is None:
+                raise RuleBroken([(rules["line"], None, f"{name} refused: {show(r.reason)}, but the spec does not refuse")], unjudged)
+            should = " or ".join(show(x) for x in due) + ("" if expected else ", or not at all")
+            raise RuleBroken([(expected[2] if expected else rules["line"], None,
+                               f"{name} should refuse: {should}, but it refused: {show(r.reason)}")], unjudged)
         broken = changed(name, before, set())
         if broken:
-            raise RuleBroken([(rules["line"], None, m) for m in broken])
+            raise RuleBroken([(rules["line"], None, m) for m in broken], unjudged)
+        if unjudged:    # which refusal is due is not known; that it changed nothing is
+            raise unjudged[0][2]
         raise
     if expected is not None:
-        raise RuleBroken([(expected[2], None, f"{name} should refuse: {show(expected[1])}, but it did not refuse")])
+        raise RuleBroken([(expected[2], None, f"{name} should refuse: {show(expected[1])}, but it did not refuse")], unjudged)
     broken = []
     for text, at in rules["ensure"]:
-        found = judge(text, scope)
+        found = judged(text, scope, at, f"{name}: ensure {text}", unjudged)
         if found is not None:
             broken.append((at, None, f"{name}: ensure {text}: found {found}"))
     if not ALWAYS[0]:     # a read inside an always fact keeps its other checks, not these
@@ -544,16 +601,57 @@ def run_operation(name, actor, args, kwargs):
         try:
             for thing in reachable(roots):
                 for text, at in RULES["always"].get(kind_of(thing)) or []:
-                    found = judge(text, own_scope(thing, kind_of(thing)))
+                    on = f"{name}: always {text}, on {show(thing, False)}"
+                    found = judged(text, own_scope(thing, kind_of(thing)), at, on, unjudged)
                     if found is not None:
-                        broken.append((at, None, f"{name}: always {text}, on {show(thing, False)}: found {found}"))
+                        broken.append((at, None, f"{on}: found {found}"))
         finally:
             ALWAYS[0], RECORD[0] = False, saved
-    places |= named(rules, scope)
-    broken += [(rules["line"], None, m) for m in changed(name, before, places)]
+    more, could = named(name, rules, scope, unjudged)
+    places, possible = places | more, possible | could
+    broken += [(rules["line"], None, m) for m in changed(name, before, places, possible)]
     if broken:
-        raise RuleBroken(broken)
+        raise RuleBroken(broken, unjudged)
+    if unjudged:
+        raise unjudged[0][2]    # nothing failed, something could not be judged: what the binding cannot give
     return result
+
+
+def cannot_judge():
+    """what the binding cannot give: no binding, an unset value read"""
+    return binding.NotBound, binding.UnsetRead, UnsetFail
+
+
+def refusal(name, rules, scope, unjudged):
+    """(the first refuse rule whose condition holds, or None; the refuse
+    rules before it whose condition could not be judged). Those are judged
+    only while generated cases run, each put in unjudged; otherwise what
+    the binding cannot give is raised. Conditions after the first that
+    holds are not read: they cannot change the verdict"""
+    unknown = []
+    for r in rules["refuse"]:
+        try:
+            if evaluate(r[0], scope):
+                return r, unknown
+        except cannot_judge() as e:
+            if not UNSET_ENDS[0]:
+                raise
+            unknown.append(r)
+            unjudged.append((r[2], f"{name}: refuse when {r[0]}", e))
+    return None, unknown
+
+
+def judged(text, env, at, what, unjudged):
+    """judge; while generated cases run, a fact that meets what the binding
+    cannot give is not judged: (at, what, the exception) goes in unjudged,
+    and None is given, so the call's other rules are still judged"""
+    try:
+        return judge(text, env)
+    except cannot_judge() as e:
+        if not UNSET_ENDS[0]:
+            raise
+        unjudged.append((at, what, e))
+        return None
 
 
 # --- the frame rule and OLD (section 6) -------------------------------------------
@@ -561,6 +659,7 @@ def run_operation(name, actor, args, kwargs):
 MISSING = object()      # a stored property the thing does not hold
 RECORD = [None]         # the (id of the thing, property) locations read, while derives records
 ALWAYS = [False]        # True while the always facts after a call are judged
+UNSET_ENDS = [False]    # True while generated cases run: judge passes an unset read on (tools/generate.py)
 
 
 def fields(thing):
@@ -641,12 +740,14 @@ def label(thing):
     return d.get("_given") or d.get("_entity")
 
 
-def changed(name, before, places):
+def changed(name, before, places, possible=()):
     """a message for each location in before that changed and is not one of
-    places, (id of the thing, property)"""
+    places, (id of the thing, property), nor one possible may name, (kind
+    of the thing, property or "*" for any): that change is not judged"""
     return [f"{name} changed {label(t)}.{p}, which the spec does not name"
             for t, p, v in before
-            if not same(v, dict.get(fields(t), p, MISSING)) and (id(t), p) not in places]
+            if not same(v, dict.get(fields(t), p, MISSING)) and (id(t), p) not in places
+            and (kind_of(t), p) not in possible and (kind_of(t), "*") not in possible]
 
 
 def old_values(ensure, scope):
@@ -663,7 +764,7 @@ def old_values(ensure, scope):
         text, names = ast.unparse(x), uses(x, env, scope)
         for t, bound, v in table:
             if t == text and keyed(bound, names):
-                if isinstance(v, Fail):     # x could not be read before the call
+                if isinstance(v, (Fail, binding.NotBound)):     # x could not be read before the call
                     raise v
                 return v
         raise Fail(f"OLD({text}) has no value for " + ", ".join(f"{n} = {show(env[n])}" for n, _ in names)
@@ -693,7 +794,7 @@ def keyed(before, now):
 
 def gather(n, env, scope, table):
     """into table, (text of x, the names x uses with their keys, its frozen
-    value or a Fail) for each OLD(x) in n, inside a comprehension once for
+    value, or a Fail or no binding met reading it) for each OLD(x) in n, inside a comprehension once for
     each value its variables take now; a filter is not applied, so a value
     the call lets in still has its OLD"""
     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "OLD":
@@ -706,7 +807,11 @@ def gather(n, env, scope, table):
         except Fail as e:
             v = e
         except binding.UnsetRead as u:
-            v = Fail(str(u))
+            v = UnsetFail(str(u))
+        except binding.NotBound as e:   # while generated cases run, only the facts that use it are not judged
+            if not UNSET_ENDS[0]:
+                raise
+            v = e
         table.append((text, bound, v))
         return
     if isinstance(n, (ast.ListComp, ast.GeneratorExp)):
@@ -726,6 +831,10 @@ def gather_loop(gens, elt, env, scope, table):
         source = value(g.iter, env)
     except (Fail, binding.UnsetRead):
         return
+    except binding.NotBound:    # gather(g.iter) above kept it for an OLD there
+        if not UNSET_ENDS[0]:
+            raise
+        return
     for x in source if isinstance(source, list) else []:
         inner = dict(env, **{g.target.id: x})
         for c in g.ifs:
@@ -733,12 +842,16 @@ def gather_loop(gens, elt, env, scope, table):
         gather_loop(gens[1:], elt, inner, scope, table)
 
 
-def named(rules, scope):
+def named(name, rules, scope, unjudged):
     """the locations the spec names, as (id of the thing, property): the
     left operand of an ensure comparison, len of it, and each also_changes
     path; a computed or derived property named also names the stored
-    locations it derives from, on that thing (derives)"""
-    places = set()
+    locations it derives from, on that thing (derives). A path or a
+    computed property that meets what the binding cannot give names what
+    was read before it; while generated cases run, its part of the frame
+    rule goes in unjudged and what its unread rest could name in possible
+    (unread). Gives (places, possible)"""
+    places, possible = set(), set()
     paths = []
     for text, _ in rules["ensure"]:
         n = ast.parse(text, mode="eval").body
@@ -753,8 +866,11 @@ def named(rules, scope):
             continue
         try:
             thing = value(n.value, scope)
-        except (Fail, binding.UnsetRead):
-            continue        # the fact itself fails, or names nothing reachable
+        except cannot_judge() as e:
+            unread(e, unjudged, rules["line"], name, n, possible)
+            continue
+        except Fail:
+            continue        # the fact itself fails
         if not isinstance(thing, binding.Thing):
             continue
         places.add((id(thing), n.attr))
@@ -762,12 +878,134 @@ def named(rules, scope):
         try:
             try:
                 derives(thing, n.attr)
-            except (Fail, binding.UnsetRead):
+            except cannot_judge() as e:
+                unread(e, unjudged, rules["line"], name, n, possible)
+            except Fail:
                 pass        # what was read before it failed is named
             places |= RECORD[0]
         finally:
             RECORD[0] = saved
-    return places
+    return places, possible
+
+
+def unread(e, unjudged, at, name, path, possible):
+    """a frame rule path of operation name that met what the binding cannot
+    give: while generated cases run it goes in unjudged, once, and what
+    its unread rest could name goes in possible (could_name); with no
+    such bound, any property of a kind it could reach, and the report
+    says so. Otherwise no binding is raised, and an unset value names
+    nothing more"""
+    if not UNSET_ENDS[0]:
+        if isinstance(e, binding.NotBound):
+            raise e
+        return
+    what = f"{name}: frame rule, {ast.unparse(path)}"
+    bound = could_name(name, path)
+    if bound is None:
+        kinds = could_reach(name, path)
+        bound = {(k, "*") for k in kinds}
+        what += f" (no bound on what it names: no change to {', '.join(sorted(kinds))} is judged)"
+    possible |= bound
+    if all((a, w) != (at, what) for a, w, _ in unjudged):
+        unjudged.append((at, what, e))
+
+
+class Reads(checker.Expr):
+    """the checker's typing of an expression, silent, keeping the
+    (entity, property) pairs it reads (as computed_cycle does), each
+    actor property it reads as ("actor", property), and whether some
+    property is read on a value of unknown type (open)"""
+
+    def __init__(self, scope, own=None):
+        super().__init__(PROJECT[0], scope, silent=True)
+        self.own, self.reads, self.calls, self.open, self.types = own, set(), set(), False, {}
+
+    def visit(self, n, scope):
+        t = super().visit(n, scope)
+        self.types[id(n)] = t
+        return t
+
+    def of(self, text):
+        self.src, body = text, ast.parse(text, mode="eval").body
+        self.visit(body, self.scope)
+        for n in ast.walk(body):
+            if isinstance(n, ast.Attribute):
+                t = self.types.get(id(n.value))
+                kinds = [None] if t is None else checker.alts(t)
+                self.open |= None in kinds
+                self.reads |= {("actor", n.attr) for a in kinds if checker.is_actor(a)}
+        return self
+
+
+def operation_scope(o):
+    """the types an operation's own expressions see: each input and ACTOR,
+    as the checker gives them to a read's summary"""
+    op = PROJECT[0].operations[o]
+    scope = {("var", n): True for n, _, _ in op["inputs"]}
+    scope.update({n: t for n, t, _ in op["inputs"]})
+    scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op["who"] if isinstance(r, str))))
+    return scope
+
+
+def could_name(name, path):
+    """a static over-approximation of what path, in operation name, could
+    name: every (entity, property) its text reads, and transitively what
+    each computed property it reads reads, every stored property of a
+    derived one ((entity, "*")), and what a read it calls reads (its
+    refuse conditions, returns and ordered_by); actor properties as
+    ("actor", property). None when some property is read on a value of
+    unknown type"""
+    P = PROJECT[0]
+    out, seen = set(), set()
+    work = [Reads(operation_scope(name)).of(ast.unparse(path))]
+    while work:
+        r = work.pop()
+        if r.open:
+            return None
+        for k, p in r.reads - out:
+            out.add((k, p))
+            ent = P.entities.get(k)
+            if ent and p in ent["derived"]:
+                out.add((k, "*"))
+            elif ent and isinstance(ent["computed"].get(p), str):
+                work.append(Reads(dict(ent["props"]), k).of(ent["computed"][p]))
+        for o in r.calls - seen:
+            seen.add(o)
+            op, scope = P.operations[o], operation_scope(o)
+            work += [Reads(scope).of(x) for x in op["refuse_when"] + [op["returns"]] if isinstance(x, str)]
+            item = {"ACTOR": scope["ACTOR"]}
+            rl = checker.as_list(op["returns_type"])
+            if rl and checker.is_entity(rl[1]):
+                item.update({("var", rl[1][1]): True, rl[1][1]: rl[1]})
+            work += [Reads(item).of(x) for x in op["order_exprs"] if isinstance(x, str)]
+    return out
+
+
+def could_reach(name, path):
+    """the kinds of thing path, in operation name, could reach: from the
+    types of the names it uses and of every read's result, through stored
+    properties, "actor" among them; every kind when one of those types is
+    unknown"""
+    P, scope = PROJECT[0], operation_scope(name)
+    roots = [scope.get(n.id) for n in ast.walk(path) if isinstance(n, ast.Name)]
+    roots += [op["returns_type"] for op in P.operations.values() if isinstance(op["returns"], str)]
+    every = set(P.entities) | {"actor"}
+    if any(t is None or None in checker.alts(t) for t in roots):
+        return every
+    kinds = kinds_reached(P, set().union(*(entity_kinds(t) for t in roots)))
+    types = roots + [t for k in kinds for t in P.entities[k]["props"].values()]
+    if any(t is None for t in types):
+        return every
+    return kinds | ({"actor"} if any(holds_actor(t) for t in types) else set())
+
+
+def holds_actor(t):
+    """may a value of type t be an actor, alone or in a list"""
+    if checker.is_actor(t):
+        return True
+    if checker.is_list(t):
+        return holds_actor(t[1])
+    return checker.is_either(t) and any(holds_actor(a) for a in t[1])
 
 
 def derives(thing, prop):
@@ -852,8 +1090,14 @@ def as_time(v, t):
     """a quoted time written for a TIME property is a time (section 7.2)"""
     kinds = checker.alts(t)
     if isinstance(v, str) and "TIME" in kinds and "TEXT" not in kinds:
-        return datetime.datetime.fromisoformat(v)
+        return time_of(v)
     return v
+
+
+def time_of(text):
+    """the time a text written as section 7.2 says stands for: YYYY-MM-DD
+    HH:MM, or YYYY-MM-DD for 00:00 that day"""
+    return datetime.datetime.fromisoformat(text)
 
 
 def make_givens(given, workdir):
@@ -897,7 +1141,7 @@ def make_givens(given, workdir):
             except (binding.NotBound, EddaError):
                 raise
             except binding.UnsetRead as u:  # the maker used an unset value
-                raise Fail(f"given {g[kind]} could not be made: {u}")
+                raise UnsetFail(f"given {g[kind]} could not be made: {u}")
             except Exception as e:  # the binding's maker crashed
                 raise Fail(f"given {g[kind]} could not be made: {type(e).__name__}: {e}")
             if isinstance(made[g[kind]], binding.Thing):
@@ -917,8 +1161,12 @@ def judge(text, env):
             return f"{ast.unparse(n.left)} is {show(left)}"
         return None if value(n, env) else "it is false"
     except Fail as e:
+        if UNSET_ENDS[0] and isinstance(e, UnsetFail):
+            raise
         return str(e)
     except binding.UnsetRead as u:    # an unset value the runner was handed back, used
+        if UNSET_ENDS[0]:
+            raise
         return str(u)
 
 
@@ -1001,6 +1249,8 @@ def run(folder, wanted=()):
     PROJECT[0] = P
     OPERATIONS.clear()
     OPERATIONS.update(operations)
+    STORIES.clear()
+    STORIES.update((sid, st) for sid, st, _, _ in stories)
     known = {sid for sid, *_ in stories}
     unknown = [s for s in wanted if s not in known]
     if unknown:
@@ -1034,8 +1284,27 @@ def run(folder, wanted=()):
 def main(argv):
     ap = argparse.ArgumentParser(description="run the examples of Edda's stories through the binding")
     ap.add_argument("--project", default=os.path.join(checker.ROOT, "specs"), help="the folder of .edda files (default specs/)")
+    ap.add_argument("--seed", type=int, help="the seed of the generated cases, to replay a run")
     ap.add_argument("stories", nargs="*", metavar="STORY")
     a = ap.parse_args(argv)
+    try:
+        generated = read_settings(a.project)
+    except SpecRefused as e:
+        print("the settings do not check:")
+        for line in e.args[0]:
+            print(f"    {line}")
+        return 1
+    if generated["on"]:
+        try:
+            import generate     # Hypothesis only now
+        except ImportError as e:
+            print(f"edda failed: generated cases need Hypothesis ({e}); "
+                  "install it with python3 -m pip install -r tools/requirements.txt")
+            return 3
+        seed = a.seed if a.seed is not None else random.SystemRandom().randrange(1, 2 ** 31)
+        again = [x for i, x in enumerate(argv)     # this command, its --seed this seed
+                 if x != "--seed" and not x.startswith("--seed=") and (i == 0 or argv[i - 1] != "--seed")]
+        replay = shlex.join(["python3", os.path.relpath(os.path.abspath(__file__)), *again, "--seed", str(seed)])
     try:
         out = run(a.project, a.stories)
     except EddaError as e:
@@ -1046,13 +1315,23 @@ def main(argv):
         for line in e.args[0]:
             print(f"    {line}")
         return 1
+    bad = False
     for sid, status, detail, failed in out:
         print(f"{sid}: {status}: {detail}")
         for title, failures in failed:
             print(f"    example {show(title)} failed")
             for line, text, found in failures:
                 print(f"        {line}: " + (f"then {text}: found {found}" if text else found))
-    return 1 if any(status == "failing" for _, status, _, _ in out) else 0
+        if generated["on"]:
+            try:
+                lines, broke = generate.cases(sys.modules[__name__], sid, STORIES[sid], generated["runs"],
+                                              generated["steps"], seed, replay)
+            except EddaError as e:
+                print(f"edda failed: {e}")
+                return 3
+            print("\n".join(lines))
+            bad = bad or broke
+    return 1 if bad or any(status == "failing" for _, status, _, _ in out) else 0
 
 
 if __name__ == "__main__":

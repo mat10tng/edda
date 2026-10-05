@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 64
+language/   reference.md    the language reference, revision 65
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -37,6 +37,8 @@ specs/      *.edda          Edda's own stories, YAML, one file per entity
                             so far, the stories still drafts
             glossary.links  the code target, the naming rule and the
                             tools the link check reads
+            edda.yaml       optional settings: generated_cases, off
+                            when absent; Edda's own specs have none
             *.links         per entity, the operations whose function
                             does not follow the rule
 fixtures/   <name>/*.edda   one folder per fixture: a whole spec, checked
@@ -86,10 +88,20 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             operation's rules (refusals, ensure with
                             OLD, always, the frame rule), reported per
                             example and per story (examples passed,
-                            failing, not run and why)
+                            failing, not run and why); generated
+                            cases when edda.yaml turns them on
+            generate.py     generated cases: random worlds and steps
+                            from the glossary, every call held to its
+                            rules, a failure shrunk and printed as an
+                            example; needs Hypothesis
+            requirements.txt  Hypothesis, needed only for generated
+                            cases
             test_run.py     a checker broken on purpose must fail
                             EDDA-001; the real one passes it; each
                             broken rule fails its example
+            test_generate.py  generated cases: an edge-value break
+                            found and shrunk, a seed replayed, the
+                            runner without Hypothesis
             test_model.py   the JSON model and the status life graph:
                             deterministic, every story and operation,
                             each expression's ast read back
@@ -114,9 +126,13 @@ the read view, and the links from every operation to the code that
 does it; the other bindings are not
 there yet. `python3 tools/check.py` needs
 PyYAML and jsonschema.
-`python3 tools/run.py [--project DIR] [STORY ...]` runs the examples
-(reference section 9): exit 0 when no story failed, 1 when one failed,
-3 when Edda itself failed.
+`python3 tools/run.py [--project DIR] [--seed N] [STORY ...]` runs
+the examples (reference section 9): exit 0 when no story failed, 1
+when one failed, 3 when Edda itself failed. A project whose
+`edda.yaml` holds `generated_cases: {on: true, runs: 100, steps: 20}`
+also gets generated cases, which need
+`python3 -m pip install -r tools/requirements.txt`; `--seed N`
+replays a failure.
 `python3 tools/check.py --model [DIR]` prints the JSON model of a
 project that checks, and `python3 tools/check.py --graph
 ENTITY.PROPERTY [DIR]` its status life graph (reference section 9).
