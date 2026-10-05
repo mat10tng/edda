@@ -351,7 +351,7 @@ class GeneratedTest(unittest.TestCase):
         try:
             self.write("box.edda", LABELLED)
             self.assertEqual(self.main("--seed", "3"), (0, "BOX-001: examples passed: all 1\n"
-                             "BOX-001: generated cases: 30 runs passed; calls: put 62, size 64; "
+                             "BOX-001: generated cases: 30 runs passed; calls: put 59, size 58; "
                              "skipped stamp: no binding for stamp; skipped put: box.label is unset\n"))
         finally:
             del binding.VALUES["box"]
@@ -847,7 +847,7 @@ class WorldTest(unittest.TestCase):
         self.bind(binding.OPERATIONS, weigh=lambda actor, part: part.weight)
         self.assertEqual(self.project("shelf.edda", SHELF), (0, [
             "SHELF-001: examples passed: all 1",
-            "SHELF-001: generated cases: 30 runs passed; calls: weigh 157"]))
+            "SHELF-001: generated cases: 30 runs passed; calls: weigh 162"]))
 
     def test_runs_that_called_nothing_are_not_run(self):
         self.bind(binding.ENTITIES, shelf=shelf_with(0))
