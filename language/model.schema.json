@@ -1,0 +1,573 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edda.local/schema/model/v2",
+  "title": "Edda model (edda_model 2, revision 71)",
+  "description": "The JSON model edda check --model prints, and the model field of edda check --model --json (reference sections 9 and 13). Every key the reference names is required; no other key is allowed. An expression's ast is the running Python's tree, walked by node and field name, so only its node is pinned here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["edda_model", "revision", "files", "epics", "roles", "entities", "functions", "stories", "operations", "graphs"],
+  "properties": {
+    "edda_model": {"const": 2},
+    "revision": {"type": "integer"},
+    "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+    "epics": {"type": "array", "items": {"$ref": "#/$defs/epic"}},
+    "roles": {"type": "array", "items": {"$ref": "#/$defs/role"}},
+    "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
+    "functions": {"type": "array", "items": {"$ref": "#/$defs/function"}},
+    "stories": {"type": "array", "items": {"$ref": "#/$defs/story", "required": ["versions", "file"]}},
+    "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+    "graphs": {"$ref": "#/$defs/graphs"}
+  },
+  "$defs": {
+    "line": {"type": "integer"},
+    "lineOrNull": {"type": ["integer", "null"]},
+    "text": {"type": "string"},
+    "textOrNull": {"type": ["string", "null"]},
+    "texts": {"type": "array", "items": {"type": "string"}},
+    "lines": {"type": "array", "items": {"type": "integer"}},
+    "ast": {
+      "type": "object",
+      "required": ["node"],
+      "properties": {"node": {"type": "string"}}
+    },
+    "expression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "line", "ast"],
+      "properties": {
+        "text": {"type": "string"},
+        "line": {"$ref": "#/$defs/line"},
+        "ast": {"$ref": "#/$defs/ast"}
+      }
+    },
+    "expressionOrNull": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/expression"}]},
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "history", "blocks"],
+      "properties": {
+        "name": {"type": "string"},
+        "history": {"$ref": "#/$defs/textOrNull"},
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "name", "line", "status", "version", "pins_stale"],
+            "properties": {
+              "kind": {"enum": ["role", "entity", "function", "story"]},
+              "name": {"type": "string"},
+              "line": {"$ref": "#/$defs/line"},
+              "status": {"enum": ["approved", "draft"]},
+              "version": {"type": "integer"},
+              "pins_stale": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "epic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "file", "line"],
+      "properties": {
+        "id": {"type": "string"},
+        "text": {"type": "string"},
+        "file": {"type": "string"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "typed": {
+      "description": "a property, input or function result without its name",
+      "type": "object",
+      "required": ["phrase", "type", "values", "entity", "many", "in_order", "default", "optional", "derived", "computed", "line"],
+      "properties": {
+        "phrase": {"$ref": "#/$defs/textOrNull"},
+        "type": {"enum": ["TEXT", "NUMBER", "INTEGER", "TIME", "YES_NO", "choice", "entity", null]},
+        "values": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/texts"}]},
+        "entity": {"$ref": "#/$defs/textOrNull"},
+        "many": {"type": "boolean"},
+        "in_order": {"type": "boolean"},
+        "default": {"type": ["string", "number", "boolean", "null"]},
+        "optional": {"type": "boolean"},
+        "derived": {"type": "boolean"},
+        "computed": {"$ref": "#/$defs/expressionOrNull"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "property": {
+      "allOf": [{"$ref": "#/$defs/typed"}],
+      "required": ["name"],
+      "properties": {"name": {"type": "string"}},
+      "unevaluatedProperties": false
+    },
+    "properties": {"type": "array", "items": {"$ref": "#/$defs/property"}},
+    "who": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "when", "line"],
+        "properties": {
+          "role": {"type": "string"},
+          "when": {"$ref": "#/$defs/expressionOrNull"},
+          "line": {"$ref": "#/$defs/line"}
+        }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fact", "means", "drift", "line"],
+      "properties": {
+        "fact": {"$ref": "#/$defs/expression"},
+        "means": {"$ref": "#/$defs/textOrNull"},
+        "drift": {"type": "boolean"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "withValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"enum": ["given", "choice", "text", "time", "integer", "number", "yes_no", "role", "fixture", "list", null]},
+        "value": true
+      },
+      "if": {"properties": {"kind": {"const": "list"}}},
+      "then": {"properties": {"value": {"type": "array", "items": {"$ref": "#/$defs/withValue"}}}}
+    },
+    "withValues": {"type": "object", "additionalProperties": {"$ref": "#/$defs/withValue"}},
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "is", "properties", "file", "line"],
+      "properties": {
+        "name": {"type": "string"},
+        "is": {"type": "string"},
+        "properties": {"$ref": "#/$defs/properties"},
+        "file": {"type": "string"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "is", "part_of", "part_of_line", "properties", "may_change", "always",
+                   "may_create", "may_read", "may_update", "may_delete", "file", "line"],
+      "properties": {
+        "name": {"type": "string"},
+        "is": {"type": "string"},
+        "part_of": {"$ref": "#/$defs/textOrNull"},
+        "part_of_line": {"$ref": "#/$defs/lineOrNull"},
+        "properties": {"$ref": "#/$defs/properties"},
+        "may_change": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["property", "line", "arrows"],
+            "properties": {
+              "property": {"type": "string"},
+              "line": {"$ref": "#/$defs/line"},
+              "arrows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["from", "to", "line"],
+                  "properties": {
+                    "from": {"type": "string"},
+                    "to": {"$ref": "#/$defs/texts"},
+                    "line": {"$ref": "#/$defs/line"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "always": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+        "may_create": {"$ref": "#/$defs/who"},
+        "may_read": {"$ref": "#/$defs/who"},
+        "may_update": {"$ref": "#/$defs/who"},
+        "may_delete": {"$ref": "#/$defs/who"},
+        "file": {"type": "string"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "is", "inputs", "returns", "examples", "file", "line"],
+      "properties": {
+        "name": {"type": "string"},
+        "is": {"type": "string"},
+        "inputs": {"$ref": "#/$defs/properties"},
+        "returns": {"allOf": [{"$ref": "#/$defs/typed"}], "unevaluatedProperties": false},
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["given", "gives", "line"],
+            "properties": {
+              "given": {"$ref": "#/$defs/withValues"},
+              "gives": {"$ref": "#/$defs/withValue"},
+              "line": {"$ref": "#/$defs/line"}
+            }
+          }
+        },
+        "file": {"$ref": "#/$defs/textOrNull"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "pins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "version"],
+        "properties": {
+          "kind": {"enum": ["entity", "role", "function"]},
+          "name": {"type": "string"},
+          "version": {"type": "integer"}
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "verdict", "then", "then_line", "line"],
+      "properties": {
+        "when": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["actor", "call", "at", "line", "time"],
+              "properties": {
+                "actor": {"type": "string"},
+                "call": {"$ref": "#/$defs/expression"},
+                "at": {"$ref": "#/$defs/textOrNull"},
+                "line": {"$ref": "#/$defs/line"},
+                "time": {
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["at", "since"],
+                      "properties": {
+                        "at": {"$ref": "#/$defs/textOrNull"},
+                        "since": {"$ref": "#/$defs/textOrNull"}
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "verdict": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "reason", "line"],
+              "properties": {
+                "kind": {"enum": ["DONE", "refused"]},
+                "reason": {"$ref": "#/$defs/textOrNull"},
+                "line": {"$ref": "#/$defs/line"}
+              }
+            }
+          ]
+        },
+        "then": {"type": "array", "items": {"$ref": "#/$defs/expression"}},
+        "then_line": {"$ref": "#/$defs/lineOrNull"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "example": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "starts_at", "clock", "given", "given_line", "steps", "notes", "note_lines", "line"],
+      "properties": {
+        "title": {"type": "string"},
+        "starts_at": {"$ref": "#/$defs/textOrNull"},
+        "clock": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["start", "zone"],
+              "properties": {
+                "start": {"$ref": "#/$defs/textOrNull"},
+                "zone": {"type": "string"}
+              }
+            }
+          ]
+        },
+        "given": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "name", "with", "line"],
+            "properties": {
+              "kind": {"type": "string"},
+              "name": {"type": "string"},
+              "with": {"$ref": "#/$defs/withValues"},
+              "line": {"$ref": "#/$defs/line"}
+            }
+          }
+        },
+        "given_line": {"$ref": "#/$defs/lineOrNull"},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "notes": {"$ref": "#/$defs/texts"},
+        "note_lines": {"$ref": "#/$defs/lines"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "story": {
+      "description": "a story; in the model's stories with its versions, in a version without them",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sentence", "about", "as_a", "i_want", "so_that", "epic", "tags", "notes", "note_lines",
+                   "questions", "question_lines", "rules", "operations", "examples", "pins", "file", "line"],
+      "properties": {
+        "id": {"type": "string"},
+        "sentence": {"type": "string"},
+        "about": {"type": "string"},
+        "as_a": {"type": "string"},
+        "i_want": {"type": "string"},
+        "so_that": {"type": "string"},
+        "epic": {"$ref": "#/$defs/textOrNull"},
+        "tags": {"$ref": "#/$defs/texts"},
+        "notes": {"$ref": "#/$defs/texts"},
+        "note_lines": {"$ref": "#/$defs/lines"},
+        "questions": {"$ref": "#/$defs/texts"},
+        "question_lines": {"$ref": "#/$defs/lines"},
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rule", "shown_by", "line"],
+            "properties": {
+              "rule": {"type": "string"},
+              "shown_by": {"$ref": "#/$defs/texts"},
+              "line": {"$ref": "#/$defs/line"}
+            }
+          }
+        },
+        "operations": {"$ref": "#/$defs/texts"},
+        "examples": {"type": "array", "items": {"$ref": "#/$defs/example"}},
+        "pins": {"$ref": "#/$defs/pins"},
+        "versions": {"type": "array", "items": {"$ref": "#/$defs/version"}},
+        "file": {"type": "string"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "approved_at", "approved_by", "because", "pins", "story", "operations",
+                   "entities", "roles", "functions", "line"],
+      "properties": {
+        "number": {"type": "integer"},
+        "approved_at": {"type": "string"},
+        "approved_by": {"type": "string"},
+        "because": {"$ref": "#/$defs/textOrNull"},
+        "pins": {"$ref": "#/$defs/pins"},
+        "story": {"$ref": "#/$defs/story", "not": {"required": ["versions"]}},
+        "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+        "entities": {"type": "array", "items": {"$ref": "#/$defs/pinnedBlock"}},
+        "roles": {"type": "array", "items": {"$ref": "#/$defs/pinnedBlock"}},
+        "functions": {"type": "array", "items": {"$ref": "#/$defs/function"}},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "pinnedBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "properties"],
+      "properties": {
+        "name": {"type": "string"},
+        "properties": {"$ref": "#/$defs/properties"}
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "story", "is", "inputs", "who", "refuse", "ensure", "returns", "ordered_by",
+                   "also_changes", "notes", "note_lines", "file", "line"],
+      "properties": {
+        "name": {"type": "string"},
+        "story": {"type": "string"},
+        "is": {"type": "string"},
+        "inputs": {"$ref": "#/$defs/properties"},
+        "who": {"$ref": "#/$defs/who"},
+        "refuse": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["when", "reason", "drift", "line"],
+            "properties": {
+              "when": {"$ref": "#/$defs/expression"},
+              "reason": {"type": "string"},
+              "drift": {"type": "boolean"},
+              "line": {"$ref": "#/$defs/line"}
+            }
+          }
+        },
+        "ensure": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+        "returns": {"$ref": "#/$defs/expressionOrNull"},
+        "ordered_by": {"type": "array", "items": {"$ref": "#/$defs/expression"}},
+        "also_changes": {"type": "array", "items": {"$ref": "#/$defs/expression"}},
+        "notes": {"$ref": "#/$defs/texts"},
+        "note_lines": {"$ref": "#/$defs/lines"},
+        "file": {"type": "string"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "placed": {
+      "description": "the file and line every node and edge of a graph carries",
+      "type": "object",
+      "required": ["file", "line"],
+      "properties": {
+        "file": {"type": "string"},
+        "line": {"$ref": "#/$defs/line"}
+      }
+    },
+    "graphs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status_life", "entity_map", "role_inclusion", "who_may"],
+      "properties": {
+        "status_life": {
+          "type": "array",
+          "items": {
+            "allOf": [{"$ref": "#/$defs/placed"}],
+            "required": ["entity", "property", "nodes", "edges"],
+            "properties": {
+              "entity": {"type": "string"},
+              "property": {"type": "string"},
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "allOf": [{"$ref": "#/$defs/placed"}],
+                  "required": ["value", "default", "unreached"],
+                  "properties": {
+                    "value": {"type": "string"},
+                    "default": {"type": "boolean"},
+                    "unreached": {"type": "boolean"}
+                  },
+                  "unevaluatedProperties": false
+                }
+              },
+              "edges": {
+                "type": "array",
+                "items": {
+                  "allOf": [{"$ref": "#/$defs/placed"}],
+                  "required": ["from", "to"],
+                  "properties": {"from": {"type": "string"}, "to": {"type": "string"}},
+                  "unevaluatedProperties": false
+                }
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        },
+        "entity_map": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["nodes", "edges"],
+          "properties": {
+            "nodes": {
+              "type": "array",
+              "items": {
+                "allOf": [{"$ref": "#/$defs/placed"}],
+                "required": ["entity"],
+                "properties": {"entity": {"type": "string"}},
+                "unevaluatedProperties": false
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "allOf": [{"$ref": "#/$defs/placed"}],
+                "required": ["from", "to", "kind", "property", "in_order"],
+                "properties": {
+                  "from": {"type": "string"},
+                  "to": {"type": "string"},
+                  "kind": {"enum": ["reference", "many", "part_of"]},
+                  "property": {"$ref": "#/$defs/textOrNull"},
+                  "in_order": {"type": "boolean"}
+                },
+                "unevaluatedProperties": false
+              }
+            }
+          }
+        },
+        "role_inclusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["nodes", "edges"],
+          "properties": {
+            "nodes": {
+              "type": "array",
+              "items": {
+                "allOf": [{"$ref": "#/$defs/placed"}],
+                "required": ["role"],
+                "properties": {"role": {"type": "string"}},
+                "unevaluatedProperties": false
+              }
+            },
+            "edges": {"type": "array", "maxItems": 0}
+          }
+        },
+        "who_may": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["nodes", "edges"],
+          "properties": {
+            "nodes": {
+              "type": "array",
+              "items": {
+                "allOf": [{"$ref": "#/$defs/placed"}],
+                "required": ["kind", "name"],
+                "properties": {
+                  "kind": {"enum": ["role", "operation", "entity"]},
+                  "name": {"type": "string"},
+                  "story": {"type": "string"}
+                },
+                "if": {"properties": {"kind": {"const": "operation"}}},
+                "then": {"required": ["story"]},
+                "else": {"not": {"required": ["story"]}},
+                "unevaluatedProperties": false
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "allOf": [{"$ref": "#/$defs/placed"}],
+                "required": ["from", "to", "kind", "when"],
+                "properties": {
+                  "from": {"type": "string"},
+                  "to": {"type": "string"},
+                  "kind": {"enum": ["asks", "about"]},
+                  "when": {"$ref": "#/$defs/textOrNull"}
+                },
+                "unevaluatedProperties": false
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

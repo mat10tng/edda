@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The edda command and the opt-in problem log (reference sections 9, 11
-and 13, revision 69).
+and 13, revision 74).
 
     python3 tools/test_command.py
 
@@ -10,8 +10,12 @@ on; no .edda/ made unless it is on; edda trend over a log written with
 local, plain and --json. The command: each subcommand's exit codes 0, 1,
 2 and 3 where they can be reached (guide has nothing to refuse, so no
 1), the same plain output as the old script, and its --json document:
-the envelope, the command's fields and messages.
+the envelope, the command's fields and messages, each document valid
+against language/command.schema.json and each model against
+language/model.schema.json. A host session writes nothing in the host
+but the approved .edda.vc and, with the log on, .edda/checks.log.
 """
+import hashlib
 import io
 import json
 import os
@@ -22,6 +26,9 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
+
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["EDDA_LOG"] = "off"     # the tools and their children never write the log (section 11)
@@ -35,6 +42,29 @@ REV = settings.REVISION
 READY = os.path.join(ROOT, "fixtures", "blocks_approved")     # checks; FIX-001 ready to approve
 BROKEN = os.path.join(ROOT, "fixtures", "yaml_feature")       # refused by the source layer
 ENVELOPE = ["format", "edda", "command", "exit"]
+
+
+def schema(name):
+    with open(os.path.join(ROOT, "language", name)) as f:
+        return json.load(f)
+
+
+MODEL_SCHEMA = schema("model.schema.json")
+COMMAND_SCHEMA = schema("command.schema.json")
+MODEL = Draft202012Validator(MODEL_SCHEMA)
+COMMAND = Draft202012Validator(COMMAND_SCHEMA, registry=Registry().with_resource(
+    MODEL_SCHEMA["$id"], Resource.from_contents(MODEL_SCHEMA)))
+
+
+def valid(doc):
+    """doc, once it is valid against command.schema.json and its model, if
+    any, against model.schema.json; every document this file reads goes
+    through here"""
+    errors = [f"{list(e.absolute_path)}: {e.message[:300]}" for e in COMMAND.iter_errors(doc)]
+    if isinstance(doc.get("model"), dict):
+        errors += [f"model {list(e.absolute_path)}: {e.message[:300]}" for e in MODEL.iter_errors(doc["model"])]
+    self_test.assertEqual(errors, [], doc.get("command"))
+    return doc
 
 
 class Host:
@@ -65,7 +95,7 @@ class Host:
 
     def json(self, *args, log="off"):
         code, out, _ = self.edda(*args, "--json", log=log)
-        doc = json.loads(out)
+        doc = valid(json.loads(out))
         self_test.assertEqual(doc["exit"], code)
         return doc
 
@@ -250,7 +280,7 @@ class ExitCodeTest(unittest.TestCase):
     def test_no_command_is_usage(self):
         self.assertEqual(self.ok.edda()[0], 2)
         self.assertEqual(self.ok.edda("lint")[:2], (2, edda.USAGE + "\n"))
-        self.assertEqual(json.loads(self.ok.edda("lint", "--json")[1])["exit"], 2)
+        self.assertEqual(valid(json.loads(self.ok.edda("lint", "--json")[1]))["exit"], 2)
 
 
 class MissingPathTest(unittest.TestCase):
@@ -365,10 +395,41 @@ class JsonTest(unittest.TestCase):
             host.cleanup()
 
     def test_check_model_and_graph(self):
+        checked = self.host.json("check", "--root", ".")
+        for args in (("--model",), ("--graph", "order.status")):
+            doc = self.host.json("check", "--root", ".", *args)
+            self.shape(doc, "check")
+            self.assertEqual([doc[k] for k in ("exit", "files", "problems", "counts", "messages")],
+                             [checked[k] for k in ("exit", "files", "problems", "counts", "messages")], args)
         doc = self.host.json("check", "--root", ".", "--model")
-        self.assertEqual(doc["model"]["revision"], 71)
+        self.assertEqual((doc["model"]["revision"], doc["graph"]), (71, None))
         doc = self.host.json("check", "--root", ".", "--graph", "order.status")
-        self.assertTrue(doc["graph"] and all(isinstance(s, str) for s in doc["graph"]))
+        self.assertTrue(doc["model"] is None and doc["graph"] and all(isinstance(s, str) for s in doc["graph"]))
+
+    def test_check_model_refused_names_each_problem(self):
+        host = Host(f"edda: {REV}\n", BROKEN)
+        try:
+            checked = host.json("check", "--root", ".")
+            doc = host.json("check", "--root", ".", "--model")
+            self.assertEqual((doc["exit"], doc["model"], doc["messages"]), (1, None, []))
+            self.assertEqual((doc["files"], doc["problems"], doc["counts"]),
+                             (checked["files"], checked["problems"], checked["counts"]))
+            self.assertEqual(doc["problems"][0]["level"], "blocks")
+        finally:
+            host.cleanup()
+
+    def test_edda_check_model_has_every_problem(self):
+        """Edda's own repository: one call gives the model and the problems
+        check --json gives"""
+        def own(*args):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                edda.main(["check", *args, "--json"])
+            return valid(json.loads(out.getvalue()))
+        checked, doc = own(), own("--model")
+        self.assertEqual([doc[k] for k in ("exit", "files", "problems", "counts")],
+                         [checked[k] for k in ("exit", "files", "problems", "counts")])
+        self.assertTrue(doc["problems"] and doc["model"]["stories"])
 
     def test_run(self):
         doc = self.host.json("run", "--root", ".")
@@ -436,21 +497,23 @@ class JsonTest(unittest.TestCase):
                          (2, ["usage: check.py [--root DIR] [--model [DIR] | --graph ENTITY.PROPERTY [DIR]]"]))
 
 
-def plain_of(command, doc, root):
+def plain_of(command, doc, root, modelled=False):
     """the lines the plain output prints for what doc's fields hold, as the
-    tool prints them; root, the host's root (approve's history)"""
+    tool prints them; root, the host's root (approve's history); modelled,
+    check with --model or --graph, whose plain output prints the files
+    only when the spec is refused, and never the counts"""
     import run
     import trend
     import view
     out = []
     count = lambda counts: [", ".join(f"{n} {c}" for c, n in counts.items())] if counts else []     # noqa: E731
     if command == "check":
-        for f in doc["files"]:
+        for f in doc["files"] if not modelled or doc["exit"] == 1 else []:
             out.append(f["file"] + " " + ("OK" if f["ok"] else ""))
             out += [f"    {p['line']}: {p['rule']}: {p['message']}" for p in f["problems"]]
             out += [f"    {p['line']}: flagged: {p['rule']}: {p['message']}" for p in f["flags"]]
             out += [f"    {s}" for s in f["status"]]
-        out += count(doc["counts"])
+        out += count(doc["counts"]) if not modelled else []
         out += json.dumps(doc["model"], indent=2).splitlines() if doc["model"] is not None else []
         out += doc["graph"] or []
     elif command == "run":
@@ -494,7 +557,8 @@ class NothingDroppedTest(unittest.TestCase):
         code, out, err = host.edda(*args, log=log)
         doc = host.json(*args, log=log)
         plain = [line for line in (out + err).splitlines() if line]
-        said = [line for line in plain_of(args[0], doc, host.root) + doc["messages"] if line]
+        modelled = "--model" in args or "--graph" in args
+        said = [line for line in plain_of(args[0], doc, host.root, modelled) + doc["messages"] if line]
         self.assertEqual((doc["exit"], sorted(said)), (code, sorted(plain)), args)
         return code
 
@@ -506,6 +570,7 @@ class NothingDroppedTest(unittest.TestCase):
             for host, args in (
                     (ok, ("check", "--root", ".")), (ok, ("check", "--root", ".", "--model")),
                     (ok, ("check", "--root", ".", "--graph", "order.status")), (broken, ("check", "--root", ".")),
+                    (broken, ("check", "--root", ".", "--model")), (ok, ("check", "--root", ".", "--graph", "order.nope")),
                     (ok, ("check", "--root", ".", "--bogus")), (newer, ("check", "--root", ".")),
                     (ok, ("run", "--root", ".")), (broken, ("run", "--root", ".")),
                     (ok, ("run", "--root", ".", "--seed", "x")), (newer, ("run", "--root", ".")),
@@ -546,6 +611,63 @@ class NothingDroppedTest(unittest.TestCase):
                 self.assertEqual(self.same(host, "trend", "--root", ".", "--by", by, log=None), 0)
         finally:
             host.cleanup()
+
+
+def tree(root):
+    """every file under root, relative, with the sha256 of its bytes"""
+    out = {}
+    for folder, _, names in os.walk(root):
+        for n in names:
+            path = os.path.join(folder, n)
+            with open(path, "rb") as f:
+                out[os.path.relpath(path, root)] = hashlib.sha256(f.read()).hexdigest()
+    return out
+
+
+class HostSessionTest(unittest.TestCase):
+    """a whole host session (section 13): Edda writes nothing in the host
+    but the approved .edda.vc and, with the log on, .edda/checks.log, so
+    leaving Edda is deleting edda.yaml and the pointer line"""
+
+    def session(self, host, log, logged):
+        """every call exits 0; when logged (the log on), the log is read right
+        before and after each call: check, plain and --json, appends to it,
+        and --model and --graph, plain and --json, leave it as it was (13)"""
+        path = os.path.join(host.root, ".edda", "checks.log")
+
+        def text():
+            return open(path, "rb").read() if os.path.exists(path) else None
+
+        def call(args, as_json):
+            before = text()
+            code = host.json(*args, log=log)["exit"] if as_json else host.edda(*args, log=log)[0]
+            self.assertEqual(code, 0, args)
+            if logged and args[0] == "check":
+                modelled = "--model" in args or "--graph" in args
+                self.assertEqual(text() == before, modelled, (args, as_json))
+
+        dry = ("FIX-001", "--by", "tuan", "--at", "2026-10-05 09:00", "--root", ".")
+        for args in (("check", "--root", "."), ("check", "--root", ".", "--model"),
+                     ("check", "--root", ".", "--graph", "order.status"), ("view", "--root", "."),
+                     ("view", "--root", ".", "--lines", "FIX-001"), ("guide", "--pointer", "--root", "."),
+                     ("approve", *dry, "--dry-run"), ("run", "--root", ".")):
+            call(args, False)
+            call(args, True)
+        self.assertTrue(host.json("approve", *dry, log=log)["written"])
+        call(("check", "--root", ".", "--model"), True)
+
+    def test_nothing_but_the_history_and_the_log(self):
+        for log, setting, made in ((None, "problem_log: local\n", {".edda/checks.log"}), ("off", "problem_log: local\n", set()),
+                                   (None, "", set())):
+            host = Host(FLAGGED + setting)      # flagged, so the log has a problem to write
+            try:
+                before = tree(host.root)
+                self.session(host, log, bool(made))
+                after = tree(host.root)
+                changed = {p for p in before if after.get(p) != before[p]}
+                self.assertEqual((changed, set(after) - set(before)), ({"specs/order.edda.vc"}, made), (log, setting))
+            finally:
+                host.cleanup()
 
 
 if __name__ == "__main__":

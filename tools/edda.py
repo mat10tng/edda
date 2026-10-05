@@ -38,8 +38,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-FORMAT = 2          # the shape of the --json document; a change to it is a new number: 2 since revision 71
-                    # (run's functions)
+FORMAT = 3          # the shape of the --json document; a change to it is a new number: 3 since revision 74
+                    # (check --model and --graph with files, problems and counts; language/command.schema.json)
 COMMANDS = ("check", "run", "view", "approve", "guide", "trend")
 USAGE = "usage: edda check|run|view|approve|guide|trend [--root DIR] [--json] ..."
 FIELDS = {          # each command's own fields, as they are when it stopped before its result
@@ -80,12 +80,28 @@ def check(argv, result=None):
     if not os.path.isdir(project.folder):
         print(f"no such folder: {os.path.relpath(project.folder)}")
         return 1
-    files = [] if result is not None else None
-    if result is not None:
-        result["files"] = files     # filled as the files are read, so a failure keeps what was read
-    ok, own, own_links = checker.report(project.folder, project.root, project.root, project.guard, files)
+    ok, problems = findings(project, result)
     if project.root == checker.ROOT and result is None:
         fixtures(checker)
+    counts = watch.count_line(problems)
+    if result is None and counts:
+        print(counts)
+    watch.log(problems, project.root, project.problem_log == "local")
+    return 0 if ok else 1
+
+
+def findings(project, result=None):
+    """the checker's run over the project's spec folder, (ok, problems):
+    each file printed as the plain run prints it or, with result, put in
+    its files, and its problems and counts in result too (edda check
+    --json, with or without --model or --graph); a flag of the settings
+    is a problem"""
+    import check as checker
+    import watch
+    files = None
+    if result is not None:
+        files = result["files"] = []    # filled as the files are read, so a failure keeps what was read
+    ok, own, own_links = checker.report(project.folder, project.root, project.root, project.guard, files)
     seen = [(path, r) for path, layers in own.items() for kind in layers for r in kind]
     seen += [(os.path.join(project.root, shown), r) for shown, refusals, flags in (own_links[0] if own_links else [])
              for r in refusals + flags]
@@ -93,13 +109,9 @@ def check(argv, result=None):
                      message=msg) for path, (rule, line, msg) in seen]
     problems += [dict(watch.problem(rule, path, line, "reading", project.root, checker.load, project.guard),
                       message=msg) for rule, path, line, msg in project.flags]
-    counts = watch.count_line(problems)
     if result is not None:
         result.update(problems=problems, counts=watch.counts(problems))
-    elif counts:
-        print(counts)
-    watch.log(problems, project.root, project.problem_log == "local")
-    return 0 if ok else 1
+    return ok, problems
 
 
 def fixtures(checker):
