@@ -14,6 +14,7 @@ A partial checker: the running of examples is not here. Each folder
 import ast, copy, datetime, glob, io, json, os, re, sys, tokenize
 import yaml
 from jsonschema import Draft202012Validator
+import analyse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA = json.load(open(f"{ROOT}/language/schema.json"))
@@ -768,7 +769,11 @@ class Project:
                         for key in ("may_create", "may_read", "may_update", "may_delete"):
                             may[key] = [w.get("role") for w in listing(mapping(ent).get(key)) if isinstance(w, dict)]
                         self.entities[ename] = {"props": props, "derived": derived, "computed": computed, "may": may,
-                                                "file": stem, "part_of": mapping(ent).get("part_of")}
+                                                "file": stem, "part_of": mapping(ent).get("part_of"),
+                                                "always": listing(mapping(ent).get("always")),
+                                                "may_change": mapping(mapping(ent).get("may_change")),
+                                                "defaults": {p: v[len("DEFAULT "):].split(" | ")[0] for p, v in mapping(mapping(ent).get("properties")).items()
+                                                             if isinstance(v, str) and v.startswith("DEFAULT ") and is_choice(type_of_phrase(v))}}
                         self.block_order.append(("entity", ename))
                 elif section == "epics":
                     self.epics.update(mapping(block).keys())
@@ -1884,6 +1889,9 @@ def flag_problems(data, stem, P, source):
         if not mapping(st).get("examples"):
             out.append(("no_example", source.line(("stories", sid)),
                 f"story {sid} has no example"))
+
+    # dead_refusal, conflicting_ensure, empty_ensure, forbidden_change: the analyser
+    out += analyse.flags(data, P, lambda p: source.line(p, key=False))
 
     # flags that need history: approved when body_text equals the newest version's
     for sid, st in mapping(data.get("stories", {})).items():

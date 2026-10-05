@@ -25,7 +25,7 @@ Edda's own stories.
 ## Layout
 
 ```
-language/   reference.md    the language reference, revision 65
+language/   reference.md    the language reference, revision 66
             schema.json     the keys of .edda, JSON Schema 2020-12
             vc-schema.json  the keys of .edda.vc
             keywords.yaml   the registry: every key, expression form,
@@ -71,6 +71,11 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             function that does it, every marker to its
                             story's version, covered code no story
                             reaches flagged
+            analyse.py      the analyser, called by check.py: four
+                            flags read from the spec alone (a refusal
+                            that can never be given, ensures that
+                            cannot both hold, an ensure that cannot
+                            fail, a change may_change does not allow)
             approve.py      the operator's approval of one story or
                             block, appended to its .edda.vc
             view.py         the read view: each story as plain
@@ -110,6 +115,8 @@ tools/      gen_fixtures.py the fixtures, generated from one clean spec;
                             EDDA-007 through the runner
             test_links.py   the link layer: Edda's own links, each link
                             fixture, each rule and the reach rule
+            test_analyse.py the analyser: each flag raised, a near miss
+                            not, a condition too complex skipped
 ```
 
 A `.edda` file is YAML 1.2 in a strict subset: structure in keys, logic

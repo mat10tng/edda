@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 65).
+# Edda keyword registry, generated from language/reference.md (revision 66).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, fixed name, checker rule and read-view
 # sentence kind, with what it means, why it exists and where it comes
@@ -507,6 +507,18 @@ flags:
   - rule: 'no_example'
     when: 'a story with no example'
     message: 'story <id> has no example'
+  - rule: 'dead_refusal'
+    when: 'a refusal that can never be the one given: every case it covers, an earlier refusal of the operation already covers (the analyser, below)'
+    message: '<operation>: refusal <n> can never be given; refusal <m> covers it; with more, refusals <m> and <k> cover it, only the earlier refusals needed'
+  - rule: 'conflicting_ensure'
+    when: 'two ensure facts of one operation on the same property with no case in common, or an ensure fact with no case in common with an always fact of an entity it reaches (the analyser, below)'
+    message: '<operation>: ensure <i> and ensure <j> cannot both hold; <operation>: ensure <i> cannot hold with always <k> of <entity>: <fact>'
+  - rule: 'empty_ensure'
+    when: 'an ensure fact that cannot fail: one comparison ==, >= or <= whose two sides are the same expression, or a fact that calls its own operation'
+    message: '<operation>: ensure <i> cannot fail; both sides are the same: <fact>; for a call of its own operation, <operation>: ensure <i> cannot fail; it calls <operation> itself: <fact>'
+  - rule: 'forbidden_change'
+    when: 'an ensure fact that sets a choice property with may_change of an input of the operation to one value, from a start value that may_change gives no arrow to that value and that one start state has while passing every refusal, meeting a who-line and holding every always fact of the things read; checked only when the property is neither computed nor DERIVED, every refusal, who-line and always fact involved can be read and no always fact of another entity reaches the input''s entity, else skipped; the start values of a DEFAULT choice are its default and the values an arrow reaches (the analyser, below)'
+    message: '<operation> sets <property> to <value> from <start> or <start>, which may_change does not allow'
   - rule: 'question_on_approved'
     when: 'a question on an approved story'
     message: 'story <id> is approved and still has a question'
