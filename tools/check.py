@@ -732,9 +732,11 @@ def words(t):
 # --- the project: declarations across the files of one folder ---------------
 
 class Project:
-    def __init__(self, files, histories=()):
+    def __init__(self, files, histories=(), root=None):
         """files: list of (stem, data) for every .edda that passed the shape layer;
-        histories: (stem, versions) of every .edda.vc that did"""
+        histories: (stem, versions) of every .edda.vc that did; root, the
+        host root its files must resolve inside, or None (load)"""
+        self.root = root
         self.entities, self.roles, self.operations, self.epics, self.stories = {}, {}, {}, set(), {}
         self.files = {stem for stem, _ in files}
         self.dups = {}            # stem -> [(path, name)]: a name declared twice across the project
@@ -2011,9 +2013,49 @@ def status_lines(data, P, source, linked=None):
     return out
 
 
-def load(path):
-    """(source, data or None); data only when the file is YAML"""
-    text = open(path).read()
+class Outside(Exception):
+    """a file of the host resolves outside the project root; args[0] is
+    where it resolves"""
+
+
+def open_inside(root, path, flags=os.O_RDONLY, mode=0o666):
+    """a file descriptor for path, opened only when path, symlinks followed,
+    resolves inside root (settings.py, outside_root); raises Outside
+    otherwise. The resolved path is then opened from the root down, one
+    folder at a time, none of them followed if it is a symlink, so a
+    symlink put in place after the check makes the open fail (OSError);
+    it is never followed out"""
+    real, top = os.path.realpath(path), os.path.realpath(root)
+    if real != top and not real.startswith(top.rstrip(os.sep) + os.sep):
+        raise Outside(real)
+    if real == top:
+        return os.open(top, flags, mode)
+    *folders, name = os.path.relpath(real, top).split(os.sep)
+    at = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for f in folders:
+            down = os.open(f, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=at)
+            os.close(at)
+            at = down
+        return os.open(name, flags | os.O_NOFOLLOW, mode, dir_fd=at)
+    finally:
+        os.close(at)
+
+
+def load(path, root=None):
+    """(source, data or None); data only when the file is YAML; root, when
+    given, the host root the file must resolve inside, else it is refused
+    at the source layer (outside_root)"""
+    if root is None:
+        text = open(path).read()
+    else:
+        try:
+            with os.fdopen(open_inside(root, path)) as f:
+                text = f.read()
+        except Outside as o:
+            source = Source("", path.endswith(".vc"))
+            source.src = [("outside_root", 1, f"{os.path.basename(path)} resolves outside the project root: {o.args[0]}")]
+            return source, None
     source = Source(text, path.endswith(".vc"))
     if source.src:
         return source, None
@@ -2033,7 +2075,7 @@ def check(path, P):
     line, message); history and flags are the fourth layer of section 11,
     history for a .edda.vc and flags for a .edda"""
     stem = os.path.basename(path).split(".")[0]
-    source, data = load(path)
+    source, data = load(path, P.root)
     if source.src:
         return sorted(set(source.src), key=lambda p: (p[1], p[0])), [], [], [], []
     is_vc = path.endswith(".vc")
@@ -2063,17 +2105,19 @@ def history_refused(path, P):
     return os.path.exists(vc) and any(check(vc, P)[:4])
 
 
-def project_of(folder):
+def project_of(folder, root=None):
+    """the project of folder; root, when given, the host root its files
+    must resolve inside (load)"""
     files, histories = [], []
     for path in sorted(glob.glob(f"{folder}/*.edda")):
-        source, data = load(path)
+        source, data = load(path, root)
         if isinstance(data, dict) and not schema_problems(V, SCHEMA, data, source) and not shape_extra(data):
             files.append((os.path.basename(path)[:-5], data))
     for path in sorted(glob.glob(f"{folder}/*.edda.vc")):
-        source, data = load(path)
+        source, data = load(path, root)
         if isinstance(data, list) and not schema_problems(VC, VC_SCHEMA, data, source):
             histories.append((os.path.basename(path)[:-8], data))
-    return Project(files, histories)
+    return Project(files, histories, root)
 
 
 # --- links (sections 9 and 11) ---------------------------------------------------
@@ -2101,11 +2145,11 @@ MARKER = re.compile(r"# ([A-Z][A-Z0-9]*-[0-9]+)@([0-9]+)")
 LINK = re.compile(r"([^:]+)::([A-Za-z_][A-Za-z0-9_]*)")
 
 
-def read_links(path, validator, schema):
+def read_links(path, validator, schema, root=None):
     """(source, data, refusals) of a .links file: the source layer, the
     quoting rule (a path quoted, a name and NOT_BUILT plain) and the shape
     layer"""
-    source, data = load(path)
+    source, data = load(path, root)
     if source.src:
         return source, None, sorted(set(source.src), key=lambda p: (p[1], p[0]))
     out = list(source.style) + [("declared_twice", ln, f"declared twice: {k}") for k, ln in source.duplicates]
@@ -2185,9 +2229,10 @@ class CodeFile:
     units), its markers, the statements an import runs, and what it
     imports of the other covered files"""
 
-    def __init__(self, shown, path):
+    def __init__(self, shown, path, root):
         self.shown = shown
-        text = open(path).read()
+        with os.fdopen(open_inside(root, path)) as f:     # checked again as it is opened
+            text = f.read()
         self.tree = ast.parse(text, filename=shown)
         self.units = {}             # name -> (line of the def, node), the def in force
         self.first = {}             # first line of a top-level function (a decorator's or the def's) -> its node
@@ -2509,15 +2554,18 @@ def units_reached(roots, codes):
     return seen
 
 
-def links_of(folder, P):
+def links_of(folder, P, base=None):
     """the link layer of a project whose four layers refused nothing: None
     without a glossary.links; otherwise (files, linked): files, every .links
     file, then every covered code file, each (shown name, refusals, flags);
-    linked, story id -> its link line, None when anything was refused"""
+    linked, story id -> its link line, None when anything was refused. Code
+    paths are relative to base, the project's root (section 9), the folder
+    above folder when None, and must resolve inside it"""
     gpath = os.path.join(folder, "glossary.links")
     if not os.path.exists(gpath):
         return None
-    base = os.path.dirname(folder)
+    base = os.path.dirname(folder) if base is None else base
+    real_base = os.path.realpath(base)
     shown_folder = os.path.relpath(folder, base)
     paths = [gpath] + sorted(p for p in glob.glob(f"{folder}/*.links") if p != gpath)
     found = {os.path.join(shown_folder, os.path.basename(p)): [] for p in paths}    # shown name -> refusals
@@ -2529,7 +2577,7 @@ def links_of(folder, P):
         return [(n, sorted(set(found.get(n, [])), key=lambda p: (p[1], p[0])),
                  sorted(set(flags.get(n, [])), key=lambda p: (p[1], p[0]))) for n in list(found)]
 
-    gsource, glossary, found[gshown] = read_links(gpath, GLOSSARY_LINKS, GLOSSARY_LINKS_SCHEMA)
+    gsource, glossary, found[gshown] = read_links(gpath, GLOSSARY_LINKS, GLOSSARY_LINKS_SCHEMA, P.root)
     if found[gshown]:
         return files_out(), None
     for key, known, what in (("target", LINK_TARGETS, "target"), ("rule", LINK_RULES, "naming rule")):
@@ -2543,9 +2591,14 @@ def links_of(folder, P):
             found[gshown].append(("declared_twice", line, f"declared twice: {p}"))
         elif os.path.isabs(p) or shown.split(os.sep)[0] == ".." or not shown.endswith(".py") or not os.path.isfile(full):
             found[gshown].append(("unknown_link", line, f"no such Python file: {p}"))
+        elif not os.path.realpath(full).startswith(real_base.rstrip(os.sep) + os.sep):
+            found[gshown].append(("outside_root", line, f"{p} resolves outside the project root: "
+                                                        f"{os.path.realpath(full)}"))
         else:
             try:
-                codes[shown] = CodeFile(shown, full)
+                codes[shown] = CodeFile(shown, full, base)
+            except Outside as o:
+                found[gshown].append(("outside_root", line, f"{p} resolves outside the project root: {o.args[0]}"))
             except (SyntaxError, ValueError, tokenize.TokenError) as e:
                 found[gshown].append(("unknown_link", line, f"not Python ({str(e).splitlines()[0]}): {p}"))
     if found[gshown]:
@@ -2558,7 +2611,7 @@ def links_of(folder, P):
     explicit = set()                  # every operation a .links line names, refused or not: no rule for it
     for p in paths[1:]:
         shown_l = os.path.join(shown_folder, os.path.basename(p))
-        source, data, found[shown_l] = read_links(p, ENTITY_LINKS, ENTITY_LINKS_SCHEMA)
+        source, data, found[shown_l] = read_links(p, ENTITY_LINKS, ENTITY_LINKS_SCHEMA, P.root)
         stem = os.path.basename(p)[:-len(".links")]
         if found[shown_l]:
             links = data.get("links") if isinstance(data, dict) else None
@@ -2938,14 +2991,15 @@ def versions_json(sid, fname, entries, snapshots):
     return out
 
 
-def model_of(folder):
+def model_of(folder, root=None):
     """the model of a project that checks (section 9): every declaration with
-    its file and line, every expression with its ast, and the graphs"""
-    P = project_of(folder)
+    its file and line, every expression with its ast, and the graphs; root
+    as for project_of"""
+    P = project_of(folder, root)
     files, epics, roles, entities, stories, operations = [], [], [], [], [], []
     story_versions, snapshots = {}, {}    # (sid) -> [(version, line)]; (kind, name, number) -> (source, block)
     for path in sorted(glob.glob(f"{folder}/*.edda.vc")):
-        source, data = load(path)
+        source, data = load(path, root)
         stem = os.path.basename(path)[:-8]
         for i, e in enumerate(listing(data)):
             kind = "story" if "story" in e else "entity" if "entity" in e else "role"
@@ -2957,7 +3011,7 @@ def model_of(folder):
                 source, block = snapshot_data(e["text"], kind)
                 snapshots[(kind, e[kind], e["number"])] = (source, block[SECTION[kind]][e[kind]])
     for path in sorted(glob.glob(f"{folder}/*.edda")):
-        source, data = load(path)
+        source, data = load(path, root)
         fname = os.path.basename(path)
         stem = fname[:-5]
         drift = [line for rule, line, _ in flag_problems(data, stem, P, source) if rule == "wording_drift"]
@@ -3051,26 +3105,29 @@ def status_text(g):
     return out
 
 
-def report(folder):
-    """print each file of folder with its problems, flags and status, as the
-    checker's own run does for specs/; (nothing refused, found, links)"""
+def report(folder, base=ROOT, root=None, guard=None):
+    """print each file of folder, its path from base, with its problems,
+    flags and status, as the checker's own run does; root is the project's
+    root, which code paths are relative to (links_of); guard, when given,
+    the root every file must resolve inside (settings.Settings.guard);
+    (ok, found, links)"""
     ok = True
-    P = project_of(folder)
+    P = project_of(folder, guard)
     paths = sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc"))
     found = {path: check(path, P) for path in paths}
-    L = None if any(any(r[:4]) for r in found.values()) else links_of(folder, P)
+    L = None if any(any(r[:4]) for r in found.values()) else links_of(folder, P, root)
     linked = L[1] if L else None
     for path in paths:
         src, shape, meaning, history, flags = found[path]
         problems = src + shape + meaning + history
-        print(os.path.relpath(path, ROOT), "OK" if not problems else "")
+        print(os.path.relpath(path, base), "OK" if not problems else "")
         for rule, line, msg in problems:
             ok = False
             print(f"    {line}: {rule}: {msg}")
         for rule, line, msg in flags:
             print(f"    {line}: flagged: {rule}: {msg}")
         if not problems and not path.endswith(".vc") and not history_refused(path, P):
-            source, data = load(path)
+            source, data = load(path, guard)
             for s in status_lines(data, P, source, linked):
                 print(f"    {s}")
     for shown, problems, flags in (L[0] if L else []):
@@ -3083,22 +3140,32 @@ def report(folder):
     return ok, found, L
 
 
-def refused(folder):
-    """whether any file of folder has a refusal"""
-    P = project_of(folder)
+def refused(folder, root=None):
+    """whether any file of folder has a refusal; root as for project_of"""
+    P = project_of(folder, root)
     return any(any(check(path, P)[:4]) for path in sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc")))
 
 
-def model_main(args):
-    """--model [DIR] and --graph ENTITY.PROPERTY [DIR]; the exit code"""
-    folder = os.path.abspath(args[-1] if len(args) == (2 if args[0] == "--model" else 3) else f"{ROOT}/specs")
+def model_main(args, root=None):
+    """--model [DIR] and --graph ENTITY.PROPERTY [DIR]; the exit code. The
+    folder is DIR, else the one root's edda.yaml names (settings.py); a
+    flag of the settings goes to stderr, so the model stays JSON"""
+    import settings
+    named = args[-1] if len(args) == (2 if args[0] == "--model" else 3) else None
+    if named is not None and not os.path.isdir(named):
+        print(f"no such folder: {named}")
+        return 1
+    project, code = settings.open_project(root, named, sys.stderr)
+    if project is None:
+        return code
+    folder = project.folder
     if not os.path.isdir(folder):
-        print(f"no such folder: {args[-1]}")
+        print(f"no such folder: {os.path.relpath(folder)}")
         return 1
-    if refused(folder):
-        report(folder)
+    if refused(folder, project.guard):
+        report(folder, ROOT if root is None else project.root, project.root, project.guard)
         return 1
-    model = model_of(folder)
+    model = model_of(folder, project.guard)
     if args[0] == "--model":
         try:
             print(json.dumps(model, indent=2), flush=True)
@@ -3119,21 +3186,36 @@ def model_main(args):
     return 0
 
 
-USAGE = "usage: check.py [--model [DIR] | --graph ENTITY.PROPERTY [DIR]]"
+USAGE = "usage: check.py [--root DIR] [--model [DIR] | --graph ENTITY.PROPERTY [DIR]]"
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
+    # --root names the project, the folder holding edda.yaml and the spec
+    # folder; Edda's own when left out, and only then are the fixtures reported
+    import settings
+    args, root = sys.argv[1:], None
+    if args[:1] == ["--root"] and len(args) >= 2:
+        root, args = args[1], args[2:]
+        if not os.path.isdir(root):
+            print(f"no such folder: {root}")
+            sys.exit(1)
     if args[:1] == ["--model"] and len(args) <= 2 or args[:1] == ["--graph"] and 2 <= len(args) <= 3:
-        sys.exit(model_main(args))
+        sys.exit(model_main(args, root))
     if args:
         print(USAGE)
         sys.exit(2)
-    ok, own, own_links = report(f"{ROOT}/specs")
+    project, code = settings.open_project(root)
+    if project is None:
+        sys.exit(code)
+    if not os.path.isdir(project.folder):
+        print(f"no such folder: {os.path.relpath(project.folder)}")
+        sys.exit(1)
+    ok, own, own_links = report(project.folder, project.root, project.root, project.guard)
 
-    print()
-    print("fixtures: which layer catches each file")
+    if project.root == ROOT:
+        print()
+        print("fixtures: which layer catches each file")
     LAYERS = ("source", "shape", "meaning", "history")      # the fourth layer's refusals; its flags are "flagged"
-    for folder in sorted(os.listdir(f"{ROOT}/fixtures")):
+    for folder in sorted(os.listdir(f"{ROOT}/fixtures")) if project.root == ROOT else []:
         FP = project_of(f"{ROOT}/fixtures/{folder}")
         paths = sorted(glob.glob(f"{ROOT}/fixtures/{folder}/*.edda") + glob.glob(f"{ROOT}/fixtures/{folder}/*.edda.vc"))
         found = {path: check(path, FP) for path in paths}
@@ -3158,13 +3240,16 @@ if __name__ == "__main__":
                 print(f"      {line}: {rule}: {msg}")
             for rule, line, msg in flags:
                 print(f"      {line}: flagged: {rule}: {msg}")
-    import watch    # the count line and the log, for specs/ only (section 11)
+    import watch    # the count line and the log, for the project only (section 11)
     seen = [(path, r) for path, layers in own.items() for kind in layers for r in kind]
-    seen += [(os.path.join(ROOT, shown), r) for shown, refusals, flags in (own_links[0] if own_links else [])
+    seen += [(os.path.join(project.root, shown), r) for shown, refusals, flags in (own_links[0] if own_links else [])
              for r in refusals + flags]
-    problems = [watch.problem(rule, path, line, watch.found_by(rule), ROOT, load) for path, (rule, line, _) in seen]
+    problems = [watch.problem(rule, path, line, watch.found_by(rule), project.root, load, project.guard)
+                for path, (rule, line, _) in seen]
+    problems += [watch.problem(rule, path, line, "reading", project.root, load, project.guard)
+                 for rule, path, line, _ in project.flags]
     counts = watch.count_line(problems)
     if counts:
         print(counts)
-    watch.log(problems, ROOT)
+    watch.log(problems, project.root)
     sys.exit(0 if ok else 1)

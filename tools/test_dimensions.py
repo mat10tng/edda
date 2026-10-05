@@ -130,7 +130,7 @@ class RegistryTest(unittest.TestCase):
         cls.rules, cls.allowed = watch.registry()
 
     def test_every_rule_has_four_allowed_dimensions(self):
-        self.assertEqual(len(self.rules), 41)
+        self.assertEqual(len(self.rules), 46)     # revision 68 adds the five of the settings
         names = {"category": "category", "fix": "fix", "acts": "acts", "level": "level"}
         for rule, dims in self.rules.items():
             self.assertEqual(set(dims), set(watch.FIXED), rule)

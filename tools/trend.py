@@ -2,9 +2,11 @@
 """The problems logged by check.py and run.py over time (reference
 section 11).
 
-    python3 tools/trend.py [--log FILE] [--by DIM[,DIM]] [--top N]
+    python3 tools/trend.py [--root DIR] [--log FILE] [--by DIM[,DIM]] [--top N]
 
-Reads .edda/checks.log (EDDA_LOG when it names a file, or --log) and
+Reads .edda/checks.log in the project (--root, Edda's own when not
+named; EDDA_LOG when it names a file, or --log; --root with --log must
+name the same log, and .edda must resolve inside the root) and
 prints the problems per day, the counts grouped by one dimension or a
 pair (category when --by names none), and the rules that come up most.
 A dimension is one of category, sub, fix, acts, level, where, found_by.
@@ -60,11 +62,17 @@ def valid(p):
                     for d in watch.DIMENSIONS if d != "sub"))
 
 
-def read(path):
+def read(path, root=None):
     """the logged problems, and how many lines were skipped: not JSON, or
-    not a valid record"""
+    not a valid record; root, when given, the project the log must resolve
+    inside as it is opened (check.open_inside raises Outside)"""
     problems, bad = [], 0
-    with open(path) as f:
+    if root is None:
+        f = open(path)
+    else:
+        from check import open_inside
+        f = os.fdopen(open_inside(root, path))
+    with f:
         for line in f:
             if not line.strip():
                 continue
@@ -144,6 +152,8 @@ def main(argv):
         description="the logged problems over time")
     ap.add_argument("--log", help="the log (default .edda/checks.log, "
                                   "or EDDA_LOG)")
+    ap.add_argument("--root", help="the project whose log is read: the folder "
+                                   "holding edda.yaml (default Edda's own)")
     ap.add_argument("--by", default="category",
                     help="one dimension or two, by a comma: where,fix")
     ap.add_argument("--top", type=int, default=10,
@@ -155,14 +165,32 @@ def main(argv):
         say("--by takes one dimension or two of: ",
             ", ".join(watch.DIMENSIONS))
         return 2
-    path = a.log or watch.log_file(watch.ROOT)
+    root = os.path.abspath(a.root or watch.ROOT)
+    import settings     # the log folder stays inside the root (section 9)
+    outside = settings.log_outside(root)
+    if outside is not None:
+        print(outside)
+        return 1
+    if a.root is not None and a.log is not None and \
+            os.path.realpath(a.log) != os.path.realpath(os.path.join(root, ".edda", "checks.log")):
+        print(f"--root {a.root} and --log {a.log} name two logs; give one")
+        return 2
+    path = a.log or watch.log_file(root)
     if path is None:
         print("the log is off (EDDA_LOG=off); name one with --log")
         return 2
     if not os.path.exists(path):
         say("nothing logged yet: ", os.path.relpath(path))
         return 0
-    problems, bad = read(path)
+    if a.log is None and not os.environ.get("EDDA_LOG", "") or a.root is not None and a.log is not None:
+        from check import Outside       # the root's own log, not one the operator named alone
+        try:
+            problems, bad = read(path, root)
+        except Outside as o:
+            print(f"{os.path.relpath(path)}: outside_root: the log resolves outside the project root: {o.args[0]}")
+            return 1
+    else:
+        problems, bad = read(path)
     if bad:
         print(f"{bad} lines of the log skipped: not JSON or not a valid "
               "record")

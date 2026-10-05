@@ -2,7 +2,7 @@
 """Run the examples of Edda's stories against real code, through the
 binding (reference sections 8, 9 and 11).
 
-    python3 tools/run.py [--project DIR] [--seed N] [STORY ...]
+    python3 tools/run.py [--root DIR] [--project DIR] [--seed N] [STORY ...]
 
 For each story (or each one named), each example: make the given things
 through the binding, run each step's call as its actor, then judge each
@@ -13,7 +13,9 @@ operation's rules (reference section 6): the refusal the spec gives,
 every ensure with OLD, every always-rule and the frame rule. The spec must
 check first (tools/check.py). A story whose examples all pass is reported
 "examples passed", never "done": done (reference section 11) needs more
-than the runner computes. When the project's edda.yaml turns generated
+than the runner computes. The spec folder and the settings come from
+the project's edda.yaml (tools/settings.py); --root names the project,
+--project its spec folder; given both, they must name one root. When the edda.yaml turns generated
 cases on, each story gets one more line: its generated cases
 (tools/generate.py, which needs Hypothesis), under the seed --seed names
 or a random one. Exit 0 when no story failed, 1 when one failed, its
@@ -35,6 +37,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check as checker          # noqa: E402
 import edda_binding as binding   # noqa: E402
+import settings                  # noqa: E402
 import watch                     # noqa: E402
 
 CLOCK = {"NOW", "TODAY"}
@@ -66,41 +69,6 @@ class RuleBroken(Exception):
 
 class SpecRefused(Exception):
     """the spec does not check; args[0] is what the checker says"""
-
-
-# --- the settings: edda.yaml --------------------------------------------------------
-
-SETTINGS_SCHEMA = {
-    "type": "object", "additionalProperties": False,
-    "properties": {"generated_cases": {
-        "type": "object", "additionalProperties": False, "required": ["on"],
-        "properties": {"on": {"type": "boolean"}, "runs": {}, "steps": {}}}}}
-SETTINGS = checker.Draft202012Validator(SETTINGS_SCHEMA)
-GENERATED_OFF = {"on": False, "runs": 100, "steps": 20}
-
-
-def read_settings(folder):
-    """the generated_cases setting of the project's edda.yaml: on, runs and
-    steps; off when there is no file. A file that breaks the source rules,
-    the shape of SETTINGS_SCHEMA (its root a mapping) or a count that is no
-    whole number of at least 1 raises SpecRefused with each problem as the
-    checker gives it (reference section 11)"""
-    path = os.path.join(folder, "edda.yaml")
-    if not os.path.exists(path):
-        return dict(GENERATED_OFF)
-    source, data = checker.load(path)
-    found = source.src
-    if not found:
-        found = list(source.style) + [("declared_twice", ln, f"declared twice: {k}") for k, ln in source.duplicates]
-        found += checker.schema_problems(SETTINGS, SETTINGS_SCHEMA, data, source)
-    if not found:
-        g = data.get("generated_cases") or {}
-        found = [("wrong_type", source.line(("generated_cases", k), False), f"{k} must be a whole number of at least 1")
-                 for k in ("runs", "steps") if k in g and (type(g[k]) is not int or g[k] < 1)]
-    if found:
-        raise SpecRefused([f"{os.path.relpath(path)}:{line}: {rule}: {msg}"
-                           for rule, line, msg in sorted(set(found), key=lambda p: (p[1], p[0], p[2]))])
-    return dict(GENERATED_OFF, **(data.get("generated_cases") or {}))
 
 
 # --- expressions: section 7.1 over the parsed ast ------------------------------
@@ -313,11 +281,12 @@ def value(n, env):
 
 # --- the spec ----------------------------------------------------------------
 
-def load_project(folder):
+def load_project(folder, guard=None):
     """the project (the checker's view of it), its operations as written and
     its stories as (id, story, source, path) in file-name, then file order;
-    fills PHRASES"""
-    P = checker.project_of(folder)
+    fills PHRASES; guard, the root every file must resolve inside, or None
+    (settings.Settings.guard)"""
+    P = checker.project_of(folder, guard)
     refused = []
     for path in sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc")):
         src, shape, meaning, history, _ = checker.check(path, P)
@@ -330,7 +299,7 @@ def load_project(folder):
     RULES["operations"].clear()
     RULES["always"].clear()
     for path in sorted(glob.glob(f"{folder}/*.edda")):
-        source, data = checker.load(path)
+        source, data = checker.load(path, guard)
 
         def line(at):
             return f"{os.path.relpath(path)}:{source.line(at)}"
@@ -1242,12 +1211,12 @@ def run_step(step, i, env, where, line, failures):
 
 # --- the run -----------------------------------------------------------------
 
-def run(folder, wanted=()):
+def run(folder, wanted=(), guard=None):
     """the result of each story: (id, status, detail, [(title, failures)]);
     status is "examples passed", failing or not run; failures are
     (file:line, then text, found). A story with a failure is failing even
-    when something after it had no binding"""
-    P, operations, stories = load_project(folder)
+    when something after it had no binding; guard as for load_project"""
+    P, operations, stories = load_project(folder, guard)
     PROJECT[0] = P
     OPERATIONS.clear()
     OPERATIONS.update(operations)
@@ -1287,17 +1256,19 @@ def run(folder, wanted=()):
 
 def main(argv):
     ap = argparse.ArgumentParser(description="run the examples of Edda's stories through the binding")
-    ap.add_argument("--project", default=os.path.join(checker.ROOT, "specs"), help="the folder of .edda files (default specs/)")
+    ap.add_argument("--root", help="the project: the folder holding edda.yaml and the spec folder "
+                                   "(default Edda's own)")
+    ap.add_argument("--project", help="the folder of .edda files (default the spec folder edda.yaml names, specs/)")
     ap.add_argument("--seed", type=int, help="the seed of the generated cases, to replay a run")
     ap.add_argument("stories", nargs="*", metavar="STORY")
     a = ap.parse_args(argv)
-    try:
-        generated = read_settings(a.project)
-    except SpecRefused as e:
-        print("the settings do not check:")
-        for line in e.args[0]:
-            print(f"    {line}")
+    project, code = settings.open_project(a.root, a.project)
+    if project is None:
+        return code
+    if a.root is not None and not os.path.isdir(project.folder):
+        print(f"no such folder: {os.path.relpath(project.folder)}")
         return 1
+    generated = project.generated
     if generated["on"]:
         try:
             import generate     # Hypothesis only now
@@ -1310,7 +1281,7 @@ def main(argv):
                  if x != "--seed" and not x.startswith("--seed=") and (i == 0 or argv[i - 1] != "--seed")]
         replay = shlex.join(["python3", os.path.relpath(os.path.abspath(__file__)), *again, "--seed", str(seed)])
     try:
-        out = run(a.project, a.stories)
+        out = run(project.folder, a.stories, project.guard)
     except EddaError as e:
         print(f"edda failed: {e}")
         return 3
@@ -1341,12 +1312,12 @@ def main(argv):
                 rules = [place_of(m.group(1)) for m in map(BROKEN_RULE.match, lines[1:])
                          if m and ": not judged: " not in m.string]
                 at += [("failing_case", *p, "generated case") for p in rules or [(STORY_FILES[sid], None)]]
-    folder = os.path.dirname(os.path.abspath(a.project))     # the project: the folder holding the specs
-    problems = [watch.problem(rule, path, line, how, folder, checker.load) for rule, path, line, how in at]
+    problems = [watch.problem(rule, path, line, how, project.root, checker.load, project.guard)
+                for rule, path, line, how in at]
     counts = watch.count_line(problems)
     if counts:
         print(counts)
-    watch.log(problems, folder)
+    watch.log(problems, project.root)
     return 1 if bad or any(status == "failing" for _, status, _, _ in out) else 0
 
 

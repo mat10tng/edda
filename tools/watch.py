@@ -7,13 +7,16 @@ found by is set by the tool. check.py and run.py append one JSON line
 per problem to <project>/.edda/checks.log, the project being the folder
 that holds the specs folder; EDDA_LOG=off turns that off and EDDA_LOG=
 <file> writes there instead. Writing the log never changes output or an
-exit code. tools/trend.py reads the log.
+exit code; the default log is written only if it resolves inside the
+project (settings.py, outside_root), else one line on stderr says it was
+not written. tools/trend.py reads the log.
 """
 import datetime
 import json
 import os
 import re
 import subprocess
+import sys
 
 import yaml
 
@@ -75,10 +78,10 @@ def place(path):
     return None
 
 
-def where(path, line, load):
+def where(path, line, load, guard=None):
     """where in the spec a problem at line of the file path is; load is
-    check.py's load, for the key path of each line; unknown when it
-    cannot be told. A problem carries a line, not a key, so a place is
+    check.py's load, for the key path of each line, the file read inside
+    guard when given; unknown when it cannot be told. A problem carries a line, not a key, so a place is
     named only when every key and item that starts on the line maps to
     that one place; a line that also holds a key of another place or of
     none (a block in flow form) is unknown, never guessed"""
@@ -89,31 +92,37 @@ def where(path, line, load):
     if not path.endswith(".edda") or not line:
         return "unknown"
     try:
-        source, _ = load(path)
+        source, _ = load(path, guard)
     except Exception:
         return "unknown"
     places = {place(p) for p, (kline, _) in source.marks.items() if p and kline == line}
     return places.pop() if len(places) == 1 and None not in places else "unknown"
 
 
-def tagged_language(path, line):
-    """whether a person tagged the line # edda: language"""
+def tagged_language(path, line, guard=None):
+    """whether a person tagged the line # edda: language; the file read
+    only inside guard when given"""
     try:
-        with open(path) as f:
+        if guard is None:
+            f = open(path)
+        else:
+            from check import open_inside
+            f = os.fdopen(open_inside(guard, path))
+        with f:
             text = f.read().splitlines()
     except Exception:
         return False
     return bool(line) and 0 < line <= len(text) and bool(LANGUAGE_TAG.search(text[line - 1]))
 
 
-def problem(rule, path, line, how, folder, load):
+def problem(rule, path, line, how, folder, load, guard=None):
     """one problem with all six dimensions: path is the file's own path,
-    shown relative to folder (the project)"""
+    shown relative to folder (the project); guard as for where"""
     fixed = dict(registry()[0].get(rule) or {d: "unknown" for d in FIXED})
-    if tagged_language(path, line):
+    if tagged_language(path, line, guard):
         fixed["acts"] = "language"
     return dict(rule=rule, file=os.path.relpath(path, folder), line=line, **fixed,
-                where=where(path, line, load), found_by=how)
+                where=where(path, line, load, guard), found_by=how)
 
 
 def count_line(problems):
@@ -148,17 +157,32 @@ def commit(folder):
 
 def log(problems, folder):
     """append one JSON line per problem; nothing when there are none or the
-    log is off; a log that cannot be written is left alone, silently"""
+    log is off; a log that cannot be written is left alone, silently. The
+    default log must resolve inside folder as it is opened (check.open_inside):
+    a log that resolves outside is not written and one line on stderr says
+    so; one EDDA_LOG names is the operator's own choice, written as given"""
     try:
         to = log_file(folder)
         if not problems or to is None:
             return
         stamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
         sha = commit(folder)
-        lines = [json.dumps({k: (stamp if k == "date" else sha if k == "commit" else p[k]) for k in FIELDS})
-                 for p in problems]
-        os.makedirs(os.path.dirname(os.path.abspath(to)), exist_ok=True)
-        with open(to, "a") as f:
-            f.write("".join(x + "\n" for x in lines))
+        text = "".join(json.dumps({k: (stamp if k == "date" else sha if k == "commit" else p[k]) for k in FIELDS}) + "\n"
+                       for p in problems)
+        if os.environ.get("EDDA_LOG", ""):
+            os.makedirs(os.path.dirname(os.path.abspath(to)), exist_ok=True)
+            with open(to, "a") as f:
+                f.write(text)
+            return
+        from check import Outside, open_inside
+        os.makedirs(os.path.dirname(to), exist_ok=True)     # .edda, inside the root (settings.log_outside)
+        try:
+            fd = open_inside(folder, to, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        except Outside as o:
+            print(f"{os.path.relpath(to)}: outside_root: the log resolves outside the project root: {o.args[0]}; "
+                  "nothing logged", file=sys.stderr)
+            return
+        with os.fdopen(fd, "a") as f:
+            f.write(text)
     except Exception:
         pass

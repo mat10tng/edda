@@ -2,7 +2,7 @@
 next version in the .edda.vc beside its file (reference section 10).
 
     python3 tools/approve.py NAME --by OPERATOR [--because TEXT]
-        [--at "YYYY-MM-DD HH:MM"] [--dry-run] [--folder DIR]
+        [--at "YYYY-MM-DD HH:MM"] [--dry-run] [--root DIR] [--folder DIR]
 
 The history is append-only: the new file is the old bytes followed by one
 version (the version alone when the history has none), checked on a copy
@@ -10,7 +10,10 @@ of the folder before it is written, and written through a temporary file
 and a rename. One approval at a time per folder: a lock on the folder is
 held from the first read to the rename, everything is computed from one
 reading of the folder's files, and nothing is written if any of them
-changed meanwhile. Who runs the script is not checked here; a guard
+changed meanwhile. With edda.yaml or a root in play, every file read and
+the folder written resolve inside the root (outside_root); the temporary
+file and the rename are made in the folder the lock holds open, so a
+symlink swapped in after the check is never followed. Who runs the script is not checked here; a guard
 outside the language keeps the agent out of the history."""
 
 import argparse
@@ -19,7 +22,8 @@ import fcntl
 import glob
 import os
 import re
-import shutil
+import secrets
+import stat
 import sys
 import tempfile
 
@@ -36,11 +40,21 @@ class Refused(Exception):
     pass
 
 
-def read_folder(folder):
-    """{file name: bytes} of the folder's .edda and .edda.vc files"""
+def outside(path, real):
+    return Refused(f"{os.path.relpath(path)}: outside_root: {os.path.basename(path)} "
+                   f"resolves outside the project root: {real}")
+
+
+def read_folder(folder, guard=None):
+    """{file name: bytes} of the folder's .edda and .edda.vc files, each
+    read only inside guard when given"""
     out = {}
     for p in sorted(glob.glob(f"{folder}/*.edda") + glob.glob(f"{folder}/*.edda.vc")):
-        with open(p, "rb") as f:
+        try:
+            f = open(p, "rb") if guard is None else os.fdopen(E.open_inside(guard, p), "rb")
+        except E.Outside as o:
+            raise outside(p, o.args[0])
+        with f:
             out[os.path.basename(p)] = f.read()
     return out
 
@@ -226,41 +240,52 @@ def try_on_copy(reading, path, kind, name, number, at, by, because, new_bytes, o
             raise Refused(f"the {kind} would not be approved by the new version")
 
 
-def write_atomic(folder, reading, vc, new_bytes):
+def write_atomic(folder, reading, vc, new_bytes, held, guard=None):
     """replace vc by new_bytes through a temporary file in the same folder,
-    unless a file of the folder changed since the reading"""
-    if read_folder(folder) != reading:
+    unless a file of the folder changed since the reading; held, the folder
+    held open (the lock): the temporary file is created there, never
+    through a symlink, and renamed there, a rename replacing a symlink
+    named vc rather than writing where it points"""
+    if read_folder(folder, guard) != reading:
         raise Refused("the folder changed while approving; nothing written")
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(vc) or ".", prefix=".approve-", suffix=".tmp")
+    name, tmp = os.path.basename(vc), f".approve-{secrets.token_hex(6)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=held)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(new_bytes)
             f.flush()
             os.fsync(f.fileno())
-        if os.path.exists(vc):
-            shutil.copymode(vc, tmp)
-        else:
-            umask = os.umask(0)
-            os.umask(umask)
-            os.chmod(tmp, 0o666 & ~umask)
-        os.replace(tmp, vc)
+            try:
+                mode = stat.S_IMODE(os.stat(name, dir_fd=held).st_mode)
+            except FileNotFoundError:
+                umask = os.umask(0)
+                os.umask(umask)
+                mode = 0o666 & ~umask
+            os.fchmod(f.fileno(), mode)
+        os.replace(tmp, name, src_dir_fd=held, dst_dir_fd=held)
     except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        try:
+            os.remove(tmp, dir_fd=held)
+        except FileNotFoundError:
+            pass
         raise
 
 
 # EDDA-005@0
 # EDDA-008@0
-def approve(folder, name, at, by, because, dry_run):
+def approve(folder, name, at, by, because, dry_run, guard=None):
     """the approval, under the folder's lock and on one reading; returns
-    (the new version's text, kind, number, vc)"""
+    (the new version's text, kind, number, vc); guard, the root the folder
+    and its files must resolve inside, or None (settings.Settings.guard)"""
     if not os.path.isdir(folder):
         raise Refused(f"not a folder: {folder}")
-    lock = os.open(folder, os.O_RDONLY)       # the folder itself is the lock: no file to leave behind
+    try:                                      # the folder itself is the lock: no file to leave behind
+        lock = os.open(folder, os.O_RDONLY) if guard is None else E.open_inside(guard, folder, os.O_RDONLY | os.O_DIRECTORY)
+    except E.Outside as o:
+        raise outside(folder, o.args[0])
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        reading = read_folder(folder)
+        reading = read_folder(folder, guard)
         with tempfile.TemporaryDirectory(prefix="edda-reading-") as tmp:
             materialise(reading, tmp)
             path, kind, number, pins, text = decide(tmp, name)
@@ -275,7 +300,7 @@ def approve(folder, name, at, by, because, dry_run):
             new_bytes = old_bytes + (b"" if old_bytes.endswith(b"\n") else b"\n") + new.encode()
         try_on_copy(reading, path, kind, name, number, at, by, because, new_bytes, old_versions)
         if not dry_run:
-            write_atomic(folder, reading, vc, new_bytes)
+            write_atomic(folder, reading, vc, new_bytes, lock, guard)
         return new, kind, number, vc
     finally:
         os.close(lock)
@@ -288,8 +313,14 @@ def main(argv=None):
     ap.add_argument("--because", help="one line of why; left out when not given")
     ap.add_argument("--at", help='"YYYY-MM-DD HH:MM"; default now, in the host\'s local time (the business zone)')
     ap.add_argument("--dry-run", action="store_true", help="print the new version; write nothing")
-    ap.add_argument("--folder", default=os.path.join(E.ROOT, "specs"), help="the project folder (default specs/)")
+    ap.add_argument("--root", help="the project: the folder holding edda.yaml and the spec folder")
+    ap.add_argument("--folder", help="the spec folder (default the one edda.yaml names, specs/); "
+                                     "given with --root, the two name one root")
     a = ap.parse_args(argv)
+    import settings     # edda.yaml: the spec folder and the pin (section 9)
+    project, code = settings.open_project(a.root, a.folder, sys.stderr)
+    if project is None:
+        return code
     try:
         if not re.fullmatch(E.NAME, a.by) or a.by in E.PY_KEYWORDS:
             raise Refused(f"not a name: {a.by}")
@@ -302,7 +333,7 @@ def main(argv=None):
             ok = False
         if not ok:
             raise Refused(f'not a time "YYYY-MM-DD HH:MM": {at}')
-        new, kind, number, vc = approve(os.path.abspath(a.folder), a.name, at, a.by, a.because, a.dry_run)
+        new, kind, number, vc = approve(project.folder, a.name, at, a.by, a.because, a.dry_run, project.guard)
         sys.stdout.write(new)
         if a.dry_run:
             return 0

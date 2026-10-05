@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The read view (reference section 12): each story as plain sentences.
 
-    python3 tools/view.py [--lines] [DIR] [STORY ...]
+    python3 tools/view.py [--lines] [--root ROOT | DIR] [STORY ...]
 
-DIR is the project, specs/ unless named. Every sentence is rendered from
+DIR is the spec folder, else edda.yaml's. Every sentence is rendered from
 the JSON model of section 9 (tools/check.py --model), never from the
 YAML: one per line, in file order, a story's sentences together and a
 blank line between stories; an entity's invariants come before the
@@ -835,17 +835,28 @@ MARK = {"plain": "  ", "grey": "~ ", "warning": "? "}
 def main(argv):
     ap = argparse.ArgumentParser(description="print each story as plain sentences (reference section 12)")
     ap.add_argument("--lines", action="store_true", help="put <file>:<line>: before each sentence")
-    ap.add_argument("folder", nargs="?", default=os.path.join(checker.ROOT, "specs"), metavar="DIR")
+    ap.add_argument("--root", help="the project: the folder holding edda.yaml and the spec folder; "
+                                   "then every name after the options is a STORY")
+    ap.add_argument("folder", nargs="?", metavar="DIR")
     ap.add_argument("stories", nargs="*", metavar="STORY")
     a = ap.parse_args(argv)
-    folder = os.path.abspath(a.folder)
-    if not os.path.isdir(folder):
+    if a.root is not None and a.folder is not None:
+        a.folder, a.stories = None, [a.folder] + a.stories
+    if a.folder is not None and not os.path.isdir(a.folder):
         print(f"no such folder: {a.folder}")
         return 1
-    if checker.refused(folder):
-        checker.report(folder)
+    import settings     # edda.yaml: the spec folder and the pin (section 9)
+    project, code = settings.open_project(a.root, a.folder)
+    if project is None:
+        return code
+    folder = project.folder
+    if not os.path.isdir(folder):
+        print(f"no such folder: {os.path.relpath(folder)}")
         return 1
-    model = checker.model_of(folder)
+    if checker.refused(folder, project.guard):
+        checker.report(folder, project.root if a.root else checker.ROOT, guard=project.guard)
+        return 1
+    model = checker.model_of(folder, project.guard)
     unknown = [s for s in a.stories if s not in {st["id"] for st in model["stories"]}]
     if unknown:
         print(f"no such story: {', '.join(unknown)}")
