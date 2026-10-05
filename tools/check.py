@@ -3886,7 +3886,9 @@ def model_main(args, root=None, result=None):
     for a folder or property that is not there to read or draw). The
     folder is DIR, else the one root's edda.yaml names (settings.py); a
     flag of the settings goes to stderr, so the model stays JSON; result,
-    when given, gets the model or the graph's lines (edda check --json)"""
+    when given, gets the check's files, problems and counts and, when
+    nothing is refused, the model or the graph's lines (edda check
+    --json)"""
     import settings
     named = args[-1] if len(args) == (2 if args[0] == "--model" else 3) else None
     usage = settings.not_there([named])
@@ -3900,7 +3902,11 @@ def model_main(args, root=None, result=None):
     if not os.path.isdir(folder):
         print(f"no such folder: {os.path.relpath(folder)}")
         return 1
-    if refused(folder, project.guard):
+    if result is not None:      # edda check --json: the check's files, problems and counts too (section 13)
+        import edda
+        if not edda.findings(project, result)[0]:
+            return 1
+    elif refused(folder, project.guard):
         report(folder, ROOT if root is None else project.root, project.root, project.guard)
         return 1
     model = model_of(folder, project.guard)

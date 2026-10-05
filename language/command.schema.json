@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edda.local/schema/command/v3",
+  "title": "Edda --json document (format 3, revision 74)",
+  "description": "The one JSON document every edda command prints with --json (reference section 13): the envelope, the command's own fields and messages. A field the command did not reach keeps its empty value. The model field is the model of model.schema.json. A change to this shape is a new format.",
+  "type": "object",
+  "required": ["format", "edda", "command", "exit", "messages"],
+  "unevaluatedProperties": false,
+  "properties": {
+    "format": {"const": 3},
+    "edda": {"type": "integer"},
+    "command": {"enum": ["check", "run", "view", "approve", "guide", "trend", null]},
+    "exit": {"enum": [0, 1, 2, 3]},
+    "messages": {"$ref": "#/$defs/texts"}
+  },
+  "oneOf": [
+    {
+      "properties": {"command": {"const": null}, "exit": {"const": 2}}
+    },
+    {
+      "properties": {
+        "command": {"const": "check"},
+        "files": {"type": "array", "items": {"$ref": "#/$defs/checkedFile"}},
+        "problems": {"$ref": "#/$defs/problems"},
+        "counts": {"$ref": "#/$defs/counts"},
+        "model": {"oneOf": [{"type": "null"}, {"$ref": "https://edda.local/schema/model/v2"}]},
+        "graph": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/texts"}]}
+      },
+      "required": ["files", "problems", "counts", "model", "graph"]
+    },
+    {
+      "properties": {
+        "command": {"const": "run"},
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "status", "detail", "failures"],
+            "properties": {
+              "name": {"type": "string"},
+              "status": {"type": "string"},
+              "detail": {"type": "string"},
+              "failures": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["at", "found"],
+                  "properties": {"at": {"type": "string"}, "found": {"type": "string"}}
+                }
+              }
+            }
+          }
+        },
+        "stories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "status", "detail", "examples_failed", "generated"],
+            "properties": {
+              "id": {"type": "string"},
+              "status": {"type": "string"},
+              "detail": {"type": "string"},
+              "examples_failed": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["title", "failures"],
+                  "properties": {
+                    "title": {"type": "string"},
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["at", "then", "found"],
+                        "properties": {
+                          "at": {"type": "string"},
+                          "then": {"type": ["string", "null"]},
+                          "found": {"type": "string"}
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "generated": {"$ref": "#/$defs/texts"}
+            }
+          }
+        },
+        "failures": {"$ref": "#/$defs/problems"},
+        "counts": {"$ref": "#/$defs/counts"}
+      },
+      "required": ["functions", "stories", "failures", "counts"]
+    },
+    {
+      "properties": {
+        "command": {"const": "view"},
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "kind", "name", "sentences"],
+            "properties": {
+              "file": {"type": "string"},
+              "kind": {"enum": ["story", "entity", "function"]},
+              "name": {"type": "string"},
+              "sentences": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["line", "kind", "shade", "text"],
+                  "properties": {
+                    "line": {"type": "integer"},
+                    "kind": {"type": "string"},
+                    "shade": {"enum": ["plain", "grey", "warning"]},
+                    "text": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "required": ["blocks"]
+    },
+    {
+      "properties": {
+        "command": {"const": "approve"},
+        "name": {"type": ["string", "null"]},
+        "kind": {"enum": ["story", "entity", "role", "function", null]},
+        "number": {"type": ["integer", "null"]},
+        "history": {"type": ["string", "null"]},
+        "version": {"type": ["string", "null"]},
+        "written": {"type": "boolean"},
+        "refused": {"type": ["string", "null"]}
+      },
+      "required": ["name", "kind", "number", "history", "version", "written", "refused"]
+    },
+    {
+      "properties": {
+        "command": {"const": "guide"},
+        "pointer": {"type": ["string", "null"]},
+        "guide": {"type": ["string", "null"]},
+        "written": {"type": "boolean"}
+      },
+      "required": ["pointer", "guide", "written"]
+    },
+    {
+      "properties": {
+        "command": {"const": "trend"},
+        "log": {"type": ["string", "null"]},
+        "skipped": {"type": "integer"},
+        "total": {"type": "integer"},
+        "first": {"type": ["string", "null"]},
+        "last": {"type": ["string", "null"]},
+        "per_day": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["date", "total", "counts"],
+            "properties": {
+              "date": {"type": "string"},
+              "total": {"type": "integer"},
+              "counts": {"$ref": "#/$defs/counts"}
+            }
+          }
+        },
+        "by": {"$ref": "#/$defs/texts"},
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["count", "values"],
+            "properties": {"count": {"type": "integer"}, "values": {"$ref": "#/$defs/texts"}}
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["count", "rule"],
+            "properties": {"count": {"type": "integer"}, "rule": {"type": "string"}}
+          }
+        }
+      },
+      "required": ["log", "skipped", "total", "first", "last", "per_day", "by", "groups", "rules"]
+    }
+  ],
+  "$defs": {
+    "texts": {"type": "array", "items": {"type": "string"}},
+    "counts": {
+      "description": "each category that has problems to how many, in the order of section 11",
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 1}
+    },
+    "problem": {
+      "description": "one problem with the six dimensions of section 11",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "file", "line", "category", "sub", "fix", "acts", "level", "where", "found_by", "message"],
+      "properties": {
+        "rule": {"type": "string"},
+        "file": {"type": "string"},
+        "line": {"type": ["integer", "null"]},
+        "category": {"type": "string"},
+        "sub": {"type": "string"},
+        "fix": {"type": "string"},
+        "acts": {"type": "string"},
+        "level": {"type": "string"},
+        "where": {"type": "string"},
+        "found_by": {"type": "string"},
+        "message": {"type": "string"}
+      }
+    },
+    "problems": {"type": "array", "items": {"$ref": "#/$defs/problem"}},
+    "fileProblem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "line", "message"],
+      "properties": {
+        "rule": {"type": "string"},
+        "line": {"type": ["integer", "null"]},
+        "message": {"type": "string"}
+      }
+    },
+    "checkedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "ok", "status", "problems", "flags"],
+      "properties": {
+        "file": {"type": "string"},
+        "ok": {"type": "boolean"},
+        "status": {"$ref": "#/$defs/texts"},
+        "problems": {"type": "array", "items": {"$ref": "#/$defs/fileProblem"}},
+        "flags": {"type": "array", "items": {"$ref": "#/$defs/fileProblem"}}
+      }
+    }
+  }
+}
