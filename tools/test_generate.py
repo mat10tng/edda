@@ -20,7 +20,9 @@ value) leaves the story not run when met in the starting world and
 skips the operation when met in a step, never a crash, unless another
 rule of that step fails: the failure is reported, the rule that could
 not be judged listed beside it, whether it is an OLD value, a computed
-property the frame rule reads, or a refuse condition; a change that
+property the frame rule reads, a refuse condition, or the code's own
+unset read after a failure was found; a read whose returns or
+ordered_by breaks a rule after its refuse did keeps both; a change that
 computed property could name, directly or through another, is not
 judged, one outside what it could name still fails, and examples judge
 it as before; a later refuse condition that holds is still due, and a
@@ -108,6 +110,36 @@ stories:
 """
 
 
+HOLDER = """\
+      holder:
+        is: "the box that holds the parts"
+        inputs: {box: box}
+        who: [{role: clerk}]
+        returns: "box"
+"""
+
+
+PICK = """\
+      pick:
+        is: "the box, when it has parts"
+        inputs: {box: box}
+        who: [{role: clerk}]
+        refuse:
+          - when: "size(box) < 0"
+            reason: "no parts"
+        returns: "holder(box)"
+      line_up:
+        is: "the box, in a list"
+        inputs: {box: box}
+        who: [{role: clerk}]
+        refuse:
+          - when: "size(box) < 0"
+            reason: "no parts"
+        returns: "[box]"
+        ordered_by: ["holder(box).count"]
+"""
+
+
 def put(actor, box, n):         # keeps the spec
     if n <= 0:
         raise binding.Refused("nothing to put")
@@ -119,6 +151,18 @@ def put(actor, box, n):         # keeps the spec
 def put_one_more(actor, box, n):     # keeps the refusals, adds one too many
     put(actor, box, n)
     box.count += 1
+
+
+def size_closed(actor, box):      # refuses when read inside a fact, which its spec does not allow
+    if actor is None:
+        raise binding.Refused("closed")
+    return box.count
+
+
+def holder_closed(actor, box):    # the same
+    if actor is None:
+        raise binding.Refused("closed")
+    return box
 
 
 def put_off_by_one(actor, box, n):     # refuses 10, which the spec allows
@@ -150,8 +194,8 @@ class GeneratedTest(unittest.TestCase):
 
     def tearDown(self):
         del binding.ENTITIES["box"]
-        for name in ("put", "size"):
-            del binding.OPERATIONS[name]
+        for name in ("put", "size", "holder"):
+            binding.OPERATIONS.pop(name, None)
         self.dir.cleanup()
 
     def write(self, name, text):
@@ -425,6 +469,150 @@ class GeneratedTest(unittest.TestCase):
                                        f"        {os.path.relpath(self.dir.name)}/box.edda:{put_line}: "
                                        "put changed b.tax, which the spec does not name\n"
                                        "1 code differs\n"))
+
+    def peeked(self, ensure, holder=False, code=put_one_more, unset=False):
+        """the box project with put also ensuring ensure, which reads size,
+        bound to refuse when read inside a fact, which its spec does not
+        allow, and put adding one too many, or bound to code: its seed 3
+        run, as (code, lines, text, where). With holder, a read
+        holder(box) giving the box, bound to refuse the same way; with
+        unset, box.label required and given by no run"""
+        text = BOX.replace('          - "box.count == OLD(box.count) + n"\n',
+                           f'          - "box.count == OLD(box.count) + n"\n          - "{ensure}"\n', 1)
+        if holder:
+            text = text.replace("      stamp:\n", HOLDER + "      stamp:\n", 1)
+            binding.OPERATIONS["holder"] = holder_closed
+        if unset:
+            text = text.replace("label: TEXT, OPTIONAL", "label: TEXT", 1)
+            binding.VALUES["box"] = {"count": [1, 2]}
+        self.write("box.edda", text)
+        binding.OPERATIONS.update({"put": code, "size": size_closed})
+        try:
+            code, out = self.main("--seed", "3")
+        finally:
+            binding.VALUES.pop("box", None)
+        return code, out.splitlines(), text, f"{os.path.relpath(self.dir.name)}/box.edda"
+
+    def test_a_rule_a_read_inside_an_ensure_breaks_keeps_the_steps_other_failures(self):
+        code, lines, text, where = self.peeked("size(box) >= 0")
+        ensure = text.splitlines().index('          - "box.count == OLD(box.count) + n"') + 1
+        size = text.splitlines().index("      size:") + 1
+        self.assertEqual(code, 1)
+        at = lines.index("BOX-001: generated cases: failed (seed 3); skipped stamp: no binding for stamp")
+        self.assertEqual(lines[at + 2:at + 5], [
+            f"    {where}:{ensure}: put: ensure box.count == OLD(box.count) + n: found box.count is 2",
+            f'    {where}:{size}: size (read inside put: ensure size(box) >= 0) refused: "closed", '
+            "but the spec does not refuse",
+            "    as an example:"])
+        example = lines[at + 5:-1]
+        pasted = text.replace("    examples:\n", "    examples:\n" + "\n".join(example) + "\n", 1)
+        self.write("box.edda", pasted)
+        self.write("edda.yaml", "generated_cases: {on: false}\n")
+        code, again = self.main()      # an example's call ends at the broken rule, as before
+        again = again.splitlines()
+        self.assertEqual(code, 1)
+        self.assertIn(f'        {where}:{size}: size refused: "closed", but the spec does not refuse',
+                      again[again.index('    example "generated: put breaks a rule" failed') + 1:])
+
+    def old_read(self, ensure, read="size", holder=False):
+        """the step's lines of peeked(ensure): the read's failure, met
+        before the call, then the step's own"""
+        code, lines, text, where = self.peeked(ensure, holder)
+        own = text.splitlines().index('          - "box.count == OLD(box.count) + n"') + 1
+        line = text.splitlines().index(f"      {read}:") + 1
+        self.assertEqual(code, 1)
+        at = lines.index("BOX-001: generated cases: failed (seed 3); skipped stamp: no binding for stamp")
+        return lines[at + 2:at + 5], where, own, line
+
+    def test_a_rule_a_read_inside_an_old_value_breaks_keeps_the_steps_other_failures(self):
+        lines, where, ensure, size = self.old_read("box.count > OLD(size(box))")
+        self.assertEqual(lines, [
+            f'    {where}:{size}: size (read inside put: ensure box.count > OLD(size(box))) refused: "closed", '
+            "but the spec does not refuse",
+            f"    {where}:{ensure}: put: ensure box.count == OLD(box.count) + n: found box.count is 2",
+            "    as an example:"])
+
+    def test_an_old_value_the_ensure_does_not_read_after_the_call_still_reports_its_read(self):
+        lines, where, ensure, size = self.old_read("box.count > 0 or OLD(size(box)) >= 0")
+        self.assertEqual(lines, [
+            f'    {where}:{size}: size (read inside put: ensure box.count > 0 or OLD(size(box)) >= 0) '
+            'refused: "closed", but the spec does not refuse',
+            f"    {where}:{ensure}: put: ensure box.count == OLD(box.count) + n: found box.count is 2",
+            "    as an example:"])
+
+    def test_a_comprehension_source_the_ensure_does_not_read_again_still_reports_its_read(self):
+        fact = "box.count > 0 or all(OLD(x) >= 0 for x in [size(box)])"
+        lines, where, ensure, size = self.old_read(fact)
+        self.assertEqual(lines, [
+            f'    {where}:{size}: size (read inside put: ensure {fact}) refused: "closed", '
+            "but the spec does not refuse",
+            f"    {where}:{ensure}: put: ensure box.count == OLD(box.count) + n: found box.count is 2",
+            "    as an example:"])
+
+    def test_a_read_on_a_frame_path_is_reported_once_beside_the_steps_other_failure(self):
+        # the ensure reads holder too, after the call: the failure keeps the first place met
+        lines, where, ensure, holder = self.old_read("holder(box).count >= 0", "holder", holder=True)
+        self.assertEqual(lines, [
+            f'    {where}:{holder}: holder (read inside put: frame rule, holder(box).count) refused: "closed", '
+            "but the spec does not refuse",
+            f"    {where}:{ensure}: put: ensure box.count == OLD(box.count) + n: found box.count is 2",
+            "    as an example:"])
+
+    def test_an_unset_value_the_code_reads_after_a_failure_keeps_the_failure(self):
+        def put_unlabelled(actor, box, n):      # keeps the spec, but reads the label no run gives
+            put(actor, box, n)
+            return box.label
+        fact = "box.count > OLD(size(box))"
+        code, lines, text, where = self.peeked(fact, code=put_unlabelled, unset=True)
+        size = text.splitlines().index("      size:") + 1
+        put_line = text.splitlines().index("      put:") + 1
+        self.assertEqual(code, 1)
+        at = lines.index("BOX-001: generated cases: failed (seed 3); skipped stamp: no binding for stamp")
+        self.assertEqual(lines[at + 2:at + 5], [
+            f'    {where}:{size}: size (read inside put: ensure {fact}) refused: "closed", '
+            "but the spec does not refuse",
+            f"    {where}:{put_line}: not judged: put: box_1.label is unset",
+            "    as an example:"])
+
+    def held(self, read):
+        """the RuleBroken of a read, read, held to its rules where the
+        frame rule reads what it gives back: on the box project with
+        holder and the reads pick, refusing on size, giving holder, and
+        line_up, ordered by holder, size and holder bound to refuse when
+        read inside a fact, while generated cases run; with (where, the
+        lines of size and holder)"""
+        text = BOX.replace("      stamp:\n", HOLDER + PICK + "      stamp:\n", 1)
+        self.write("box.edda", text)
+        self.write("edda.yaml", "generated_cases: {on: false}\n")
+        binding.OPERATIONS.update({"size": size_closed, "holder": holder_closed, "pick": lambda actor, box: box,
+                                   "line_up": lambda actor, box: [box]})
+        self.main()     # loads the project
+        run.UNSET_ENDS[0], run.RECORD[0] = True, set()
+        try:
+            with self.assertRaises(run.RuleBroken) as e:
+                run.run_operation(read, None, [binding.Thing("box", count=1, kind="small")], {})
+        finally:
+            run.UNSET_ENDS[0], run.RECORD[0] = False, None
+            for name in ("pick", "line_up"):
+                del binding.OPERATIONS[name]
+        lines = text.splitlines()
+        where = f"{os.path.relpath(self.dir.name)}/box.edda"
+        return e.exception.failures, where, lines.index("      size:") + 1, lines.index("      holder:") + 1
+
+    def test_a_read_whose_returns_breaks_a_rule_after_its_refuse_did_keeps_both(self):
+        failures, where, size, holder = self.held("pick")
+        self.assertEqual([f"{at}: {m}" for at, _, m in failures], [
+            f'{where}:{size}: size (read inside pick: refuse when size(box) < 0) refused: "closed", '
+            "but the spec does not refuse",
+            f'{where}:{holder}: holder (read inside pick: returns) refused: "closed", but the spec does not refuse'])
+
+    def test_a_read_whose_ordered_by_breaks_a_rule_after_its_refuse_did_keeps_both(self):
+        failures, where, size, holder = self.held("line_up")
+        self.assertEqual([f"{at}: {m}" for at, _, m in failures], [
+            f'{where}:{size}: size (read inside line_up: refuse when size(box) < 0) refused: "closed", '
+            "but the spec does not refuse",
+            f'{where}:{holder}: holder (read inside line_up: ordered_by holder(box).count) refused: "closed", '
+            "but the spec does not refuse"])
 
     def test_optional_and_many_inputs_with_nothing_to_point_at_do_not_block(self):
         self.write("box.edda", BOX.replace("stories:\n", NOTE + "stories:\n", 1)

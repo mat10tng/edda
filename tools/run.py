@@ -560,7 +560,11 @@ def run_operation(name, actor, args, kwargs):
     spec does not name. A broken rule raises RuleBroken. While generated
     cases run, a condition before it that cannot be judged also allows
     its own reason, and with none that holds, no refusal; a rule that
-    cannot be judged goes in unjudged, raised when nothing failed"""
+    cannot be judged goes in unjudged, raised when nothing failed; a rule
+    a read inside one of its rules breaks is one more failure of the call
+    (nested), and the rest are still judged; whatever ends the call once
+    a rule is found broken (the code's unset read or crash, no binding,
+    no row) leaves it failed, with every failure found and that (ended)"""
     if name not in binding.OPERATIONS:     # needs() should have found it first: the story is not run
         raise binding.NotBound(name)
     if actor is not None and not permitted(name, actor, args, kwargs):
@@ -570,8 +574,32 @@ def run_operation(name, actor, args, kwargs):
     scope = dict(required, **optionals)
     if actor is not None:
         scope["ACTOR"] = actor
-    unjudged = []
-    expected, unknown = refusal(name, rules, scope, unjudged)
+    unjudged, broken = [], []
+    try:
+        result = held(name, actor, args, optionals, rules, scope, unjudged, broken)
+    except binding.Refused:
+        if broken:
+            raise RuleBroken(broken, unjudged)
+        if unjudged:    # which refusal is due is not known; that it changed nothing is
+            raise unjudged[0][2]
+        raise
+    except (Exception, binding.UnsetRead) as e:
+        if not (broken and UNSET_ENDS[0]) or isinstance(e, EddaError):
+            raise
+        ended(e, name, rules["line"], broken, unjudged)
+        raise RuleBroken(broken, unjudged) from e
+    if broken:
+        raise RuleBroken(broken, unjudged)
+    if unjudged:
+        raise unjudged[0][2]    # nothing failed, something could not be judged: what the binding cannot give
+    return result
+
+
+def held(name, actor, args, optionals, rules, scope, unjudged, broken):
+    """the call of operation name, held to its rules (run_operation): each
+    rule it breaks goes in broken, each that cannot be judged in unjudged;
+    its refusal is raised after them, its return given"""
+    expected, unknown = refusal(name, rules, scope, unjudged, broken)
     if RECORD[0] is not None and "returns" in OPERATIONS[name]:
         found = []  # what a read gives back derives from what its returns reads,
         try:        # and its order from what ordered_by reads on each item
@@ -580,6 +608,8 @@ def run_operation(name, actor, args, kwargs):
             raise
         except (Fail, binding.UnsetRead):
             pass
+        except RuleBroken as e:
+            nested(e, f"{name}: returns", broken, unjudged)
         for item in found if type(found) is list else []:
             for o in checker.listing(OPERATIONS[name].get("ordered_by")) if isinstance(item, binding.Thing) else []:
                 try:
@@ -588,32 +618,35 @@ def run_operation(name, actor, args, kwargs):
                     raise
                 except (Fail, binding.UnsetRead):
                     pass
+                except RuleBroken as e:
+                    nested(e, f"{name}: ordered_by {o}", broken, unjudged)
     roots = GIVENS + list(scope.values())
     before = snapshot(roots)
     if expected is None:
-        scope["OLD"] = old_values(rules["ensure"], scope)
-        places, possible = named(name, rules, scope, unjudged)    # before the call too: what it derived from then
+        scope["OLD"] = old_values(name, rules["ensure"], scope, broken, unjudged)
+        places, possible = named(name, rules, scope, unjudged, broken)    # before the call too: what it derived from then
     try:
         result = binding.OPERATIONS[name](actor, *args, **optionals)
     except binding.Refused as r:
         due = list(dict.fromkeys([u[1] for u in unknown] + ([expected[1]] if expected else [])))
         if r.reason not in due:
             if not unknown and expected is None:
-                raise RuleBroken([(rules["line"], None, f"{name} refused: {show(r.reason)}, but the spec does not refuse")], unjudged)
+                broken.append((rules["line"], None, f"{name} refused: {show(r.reason)}, but the spec does not refuse"))
+                raise
             should = " or ".join(show(x) for x in due) + ("" if expected else ", or not at all")
-            raise RuleBroken([(expected[2] if expected else rules["line"], None,
-                               f"{name} should refuse: {should}, but it refused: {show(r.reason)}")], unjudged)
-        broken = changed(name, before, set())
-        if broken:
-            raise RuleBroken([(rules["line"], None, m) for m in broken], unjudged)
-        if unjudged:    # which refusal is due is not known; that it changed nothing is
-            raise unjudged[0][2]
+            broken.append((expected[2] if expected else rules["line"], None,
+                           f"{name} should refuse: {should}, but it refused: {show(r.reason)}"))
+            raise
+        broken += [(rules["line"], None, m) for m in changed(name, before, set())]
         raise
     if expected is not None:
-        raise RuleBroken([(expected[2], None, f"{name} should refuse: {show(expected[1])}, but it did not refuse")], unjudged)
-    broken = []
+        broken.append((expected[2], None, f"{name} should refuse: {show(expected[1])}, but it did not refuse"))
+        return result
     for text, at in rules["ensure"]:
-        found = judged(text, scope, at, f"{name}: ensure {text}", unjudged)
+        try:
+            found = judged(text, scope, at, f"{name}: ensure {text}", unjudged)
+        except RuleBroken as e:
+            found = nested(e, f"{name}: ensure {text}", broken, unjudged)
         if found is not None:
             broken.append((at, None, f"{name}: ensure {text}: found {found}"))
     if not ALWAYS[0]:     # a read inside an always fact keeps its other checks, not these
@@ -622,19 +655,35 @@ def run_operation(name, actor, args, kwargs):
             for thing in reachable(roots):
                 for text, at in RULES["always"].get(kind_of(thing)) or []:
                     on = f"{name}: always {text}, on {show(thing, False)}"
-                    found = judged(text, own_scope(thing, kind_of(thing)), at, on, unjudged)
+                    try:
+                        found = judged(text, own_scope(thing, kind_of(thing)), at, on, unjudged)
+                    except RuleBroken as e:
+                        found = nested(e, on, broken, unjudged)
                     if found is not None:
                         broken.append((at, None, f"{on}: found {found}"))
         finally:
             ALWAYS[0], RECORD[0] = False, saved
-    more, could = named(name, rules, scope, unjudged)
+    more, could = named(name, rules, scope, unjudged, broken)
     places, possible = places | more, possible | could
     broken += [(rules["line"], None, m) for m in changed(name, before, places, possible)]
-    if broken:
-        raise RuleBroken(broken, unjudged)
-    if unjudged:
-        raise unjudged[0][2]    # nothing failed, something could not be judged: what the binding cannot give
     return result
+
+
+def ended(e, name, at, broken, unjudged):
+    """e, which ended the call of operation name (at, its line) after a
+    rule was found broken, while generated cases run, added to what was
+    found: a broken rule's failures and rules not judged, each once; what
+    the binding cannot give as not judged; anything else as one more
+    failure. A failure found is never lost to what came after it"""
+    if isinstance(e, RuleBroken):
+        broken += [f for f in e.failures if f not in broken]
+        unjudged += [u for u in e.unjudged if u not in unjudged]
+    elif isinstance(e, cannot_judge()):
+        unjudged.append((at, name, e))
+    elif isinstance(e, Fail):
+        broken.append((at, None, f"{name}: the spec cannot be judged: {e}"))
+    else:
+        broken.append((at, None, f"{name} raised {type(e).__name__}: {e}"))
 
 
 def set_clock(t):
@@ -653,12 +702,14 @@ def cannot_judge():
     return binding.NotBound, binding.UnsetRead, UnsetFail
 
 
-def refusal(name, rules, scope, unjudged):
+def refusal(name, rules, scope, unjudged, broken):
     """(the first refuse rule whose condition holds, or None; the refuse
     rules before it whose condition could not be judged). Those are judged
-    only while generated cases run, each put in unjudged; otherwise what
-    the binding cannot give is raised. Conditions after the first that
-    holds are not read: they cannot change the verdict"""
+    only while generated cases run, each put in unjudged, or, when a read
+    inside it broke a rule, that failure in broken (nested); otherwise
+    what the binding cannot give, or the broken rule, is raised.
+    Conditions after the first that holds are not read: they cannot
+    change the verdict"""
     unknown = []
     for r in rules["refuse"]:
         try:
@@ -669,6 +720,9 @@ def refusal(name, rules, scope, unjudged):
                 raise
             unknown.append(r)
             unjudged.append((r[2], f"{name}: refuse when {r[0]}", e))
+        except RuleBroken as e:
+            nested(e, f"{name}: refuse when {r[0]}", broken, unjudged)
+            unknown.append(r)
     return None, unknown
 
 
@@ -683,6 +737,40 @@ def judged(text, env, at, what, unjudged):
             raise
         unjudged.append((at, what, e))
         return None
+
+
+def nested(e, where, broken, unjudged):
+    """a rule a read inside where broke (RuleBroken e), while generated
+    cases run: one more failure of the outer call, named as the read's,
+    `count_open (read inside put: ensure ...) should refuse ...`, its rules
+    that could not be judged beside the call's, each once; a failure met
+    again, from the same or another place, keeps the name of the first
+    place it was met (was); None is given, so the call's other rules are
+    still judged. Otherwise e is raised: an example's call ends there
+    (section 8)"""
+    if not UNSET_ENDS[0]:
+        raise e
+    for at, _, m in e.failures:
+        if not any(a == at and was(b, m) for a, _, b in broken):
+            broken.append((at, None, inside(m, where)))
+    for at, what, x in e.unjudged:
+        what = inside(what, where)
+        if all((a, w) != (at, what) for a, w, _ in unjudged):
+            unjudged.append((at, what, x))
+    return None
+
+
+def inside(m, where):
+    """m, which begins with the name of the read it is about, with where
+    that read was made after the name"""
+    read = re.match(r"\w+", m).group()
+    return f"{read} (read inside {where}){m[len(read):]}"
+
+
+def was(b, m):
+    """is b the failure m named inside some place (inside)"""
+    read = re.match(r"\w+", m).group()
+    return b.startswith(f"{read} (read inside ") and b.endswith(f"){m[len(read):]}")
 
 
 # --- the frame rule and OLD (section 6) -------------------------------------------
@@ -781,21 +869,24 @@ def changed(name, before, places, possible=()):
             and (kind_of(t), p) not in possible and (kind_of(t), "*") not in possible]
 
 
-def old_values(ensure, scope):
+def old_values(name, ensure, scope, broken, unjudged):
     """OLD for the ensure facts after the call: each OLD(x) taken now, as a
     frozen copy, for every value of the comprehension variables x is
     inside, and looked up after the call by the text of x and the names it
-    uses, each by what the call cannot change (keyed)"""
+    uses, each by what the call cannot change (keyed). A rule a read
+    taking them breaks goes in broken now (nested), named by its ensure,
+    whether or not that ensure reads the value after the call"""
     table = []
     env = dict(scope, OLD=lambda x, env: value(x, env))     # before the call OLD(x) is x
     for text, _ in ensure:
-        gather(ast.parse(text, mode="eval").body, env, scope, table)
+        gather(ast.parse(text, mode="eval").body, env, scope, table,
+               lambda e, where=f"{name}: ensure {text}": nested(e, where, broken, unjudged))
 
     def old(x, env):
         text, names = ast.unparse(x), uses(x, env, scope)
         for t, bound, v in table:
             if t == text and keyed(bound, names):
-                if isinstance(v, (Fail, binding.NotBound)):     # x could not be read before the call
+                if isinstance(v, (Fail, binding.NotBound, RuleBroken)):     # x could not be read before the call
                     raise v
                 return v
         raise Fail(f"OLD({text}) has no value for " + ", ".join(f"{n} = {show(env[n])}" for n, _ in names)
@@ -823,11 +914,12 @@ def keyed(before, now):
                for (_, a), (_, b) in zip(before, now))
 
 
-def gather(n, env, scope, table):
+def gather(n, env, scope, table, met):
     """into table, (text of x, the names x uses with their keys, its frozen
-    value, or a Fail or no binding met reading it) for each OLD(x) in n, inside a comprehension once for
-    each value its variables take now; a filter is not applied, so a value
-    the call lets in still has its OLD"""
+    value, or a Fail, no binding or broken rule met reading it) for each
+    OLD(x) in n, inside a comprehension once for each value its variables
+    take now; a filter is not applied, so a value the call lets in still
+    has its OLD. A broken rule is given to met when it is met"""
     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "OLD":
         x, bound = n.args[0], uses(n.args[0], env, scope)
         text = ast.unparse(x)
@@ -845,21 +937,24 @@ def gather(n, env, scope, table):
             if not UNSET_ENDS[0]:
                 raise
             v = e
+        except RuleBroken as e:     # a failure of the step now; an example ends here
+            met(e)
+            v = e
         table.append((text, bound, v))
         return
     if isinstance(n, (ast.ListComp, ast.GeneratorExp)):
-        gather_loop(n.generators, n.elt, env, scope, table)
+        gather_loop(n.generators, n.elt, env, scope, table, met)
         return
     for child in ast.iter_child_nodes(n):
-        gather(child, env, scope, table)
+        gather(child, env, scope, table, met)
 
 
-def gather_loop(gens, elt, env, scope, table):
+def gather_loop(gens, elt, env, scope, table, met):
     if not gens:
-        gather(elt, env, scope, table)
+        gather(elt, env, scope, table, met)
         return
     g = gens[0]
-    gather(g.iter, env, scope, table)
+    gather(g.iter, env, scope, table, met)
     try:
         source = value(g.iter, env)
     except NoRow:
@@ -870,14 +965,17 @@ def gather_loop(gens, elt, env, scope, table):
         if not UNSET_ENDS[0]:
             raise
         return
+    except RuleBroken as e:     # a failure of the step now, whether or not the fact reads the source again
+        met(e)
+        return
     for x in source if isinstance(source, list) else []:
         inner = dict(env, **{g.target.id: x})
         for c in g.ifs:
-            gather(c, inner, scope, table)
-        gather_loop(gens[1:], elt, inner, scope, table)
+            gather(c, inner, scope, table, met)
+        gather_loop(gens[1:], elt, inner, scope, table, met)
 
 
-def named(name, rules, scope, unjudged):
+def named(name, rules, scope, unjudged, broken):
     """the locations the spec names, as (id of the thing, property): the
     left operand of an ensure comparison, len of it, and each also_changes
     path; a computed or derived property named also names the stored
@@ -885,7 +983,9 @@ def named(name, rules, scope, unjudged):
     computed property that meets what the binding cannot give names what
     was read before it; while generated cases run, its part of the frame
     rule goes in unjudged and what its unread rest could name in possible
-    (unread). Gives (places, possible)"""
+    (unread); a rule a read on the path breaks goes in broken (nested),
+    and what its unread rest could name in possible.
+    Gives (places, possible)"""
     places, possible = set(), set()
     paths = []
     for text, _ in rules["ensure"]:
@@ -904,6 +1004,10 @@ def named(name, rules, scope, unjudged):
         except cannot_judge() as e:
             unread(e, unjudged, rules["line"], name, n, possible)
             continue
+        except RuleBroken as e:
+            nested(e, f"{name}: frame rule, {ast.unparse(n)}", broken, unjudged)
+            unread(e, [], rules["line"], name, n, possible)     # its unread rest is bounded, the failure is the read's
+            continue
         except NoRow:
             raise
         except Fail:
@@ -917,6 +1021,9 @@ def named(name, rules, scope, unjudged):
                 derives(thing, n.attr)
             except cannot_judge() as e:
                 unread(e, unjudged, rules["line"], name, n, possible)
+            except RuleBroken as e:
+                nested(e, f"{name}: frame rule, {ast.unparse(n)}", broken, unjudged)
+                unread(e, [], rules["line"], name, n, possible)
             except NoRow:
                 raise
             except Fail:
