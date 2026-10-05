@@ -55,6 +55,12 @@ class Fail(Exception):
     """the example fails here; the message says what was found"""
 
 
+class NoRow(Fail):
+    """a Fail because a client function was called on inputs no row covers
+    (section 8): no phase of an example swallows it, so it fails the
+    example where it was met"""
+
+
 class UnsetFail(Fail):
     """a Fail because an unset value was read; while generated cases run
     (UNSET_ENDS) judge passes it on: generation gave no value there"""
@@ -312,6 +318,8 @@ def value(n, env):
             return Duration((f, k))
         if f == "OLD" and len(args) == 1 and "OLD" in env:
             return env["OLD"](args[0], env)
+        if f in PROJECT[0].functions:
+            return function_call(f, [value(a, env) for a in args])
         if f in OPERATIONS:
             # a read inside a fact: as the checker itself, no actor, no permission (section 6)
             try:
@@ -326,6 +334,93 @@ def value(n, env):
             except Exception as e:      # the code under test crashed
                 raise Fail(f"{ast.unparse(n)} raised {type(e).__name__}: {e}")
     raise EddaError(f"not an expression the runner knows: {ast.unparse(n)}")
+
+
+# --- client functions (section 4) -------------------------------------------------
+
+REAL_FUNCTIONS = [False]    # True while generated cases run: a call goes to the bound function, verified first
+FUNCTION_RESULTS = {}       # name -> function_rows(name), worked out once per run
+REAL_CALLS = []             # while generated cases run: each call of a real function in this run, (name, inputs,
+                            # result or the exception it raised); each run clears it (generate.py)
+
+
+def row_value(v, t):
+    """a row's value as the runner holds it: a quoted time for a TIME a time"""
+    if isinstance(v, list):
+        return [row_value(x, t) for x in v]
+    return time_of(v) if t == "TIME" and isinstance(v, str) else v
+
+
+def equal(a, b):
+    """are two values the same value: a time as its moment, a list element
+    by element, yes and no never a number"""
+    if type(a) is list and type(b) is list:
+        return len(a) == len(b) and all(equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, bool) != isinstance(b, bool) or isinstance(a, datetime.datetime) != isinstance(b, datetime.datetime):
+        return False
+    return moment(a) == moment(b)
+
+
+def function_call(name, args):
+    """a call of a client function in what the runner evaluates: in an
+    example only its rows answer, the result of the row whose inputs are
+    these values, and a call no row covers fails; while generated cases
+    run, the bound function, whose rows all passed (generate.py skips an
+    operation that needs one that did not)"""
+    if REAL_FUNCTIONS[0]:
+        try:
+            got = binding.FUNCTIONS[name](*args)
+        except Exception as e:      # the client's code crashed
+            REAL_CALLS.append((name, list(args), e))
+            raise Fail(f"{name}({', '.join(show(a) for a in args)}) raised {type(e).__name__}: {e}")
+        REAL_CALLS.append((name, list(args), got))
+        return got
+    row = row_for(name, args)
+    if row is not None:
+        return row_value(row.get("gives"), PROJECT[0].functions[name]["returns"])
+    raise NoRow(f"no row for {name}({', '.join(show(a) for a in args)})")
+
+
+def row_for(name, args):
+    """the row of a client function whose inputs are these values, compared
+    as values, or None when no row covers them"""
+    fn = PROJECT[0].functions[name]
+    for row in fn["rows"]:
+        given = row.get("given") or {}
+        if all(equal(a, row_value(given.get(n), t)) for a, (n, t) in zip(args, fn["inputs"])):
+            return row
+    return None
+
+
+def function_rows(name):
+    """(status, detail, failures) of a client function's rows run through
+    its bound function, binding.FUNCTIONS[name], each row's inputs by
+    position: "rows passed", "failing" with a failure (file:line, None,
+    found) per row, or "not run" with no binding for it. The function is
+    never called inside an example"""
+    if name in FUNCTION_RESULTS:
+        return FUNCTION_RESULTS[name]
+    fn, lines = PROJECT[0].functions[name], RULES["functions"][name]
+    real = getattr(binding, "FUNCTIONS", {}).get(name)
+    if real is None:
+        FUNCTION_RESULTS[name] = ("not run", f"no binding for function {name}", [])
+        return FUNCTION_RESULTS[name]
+    failures = []
+    for row, at in zip(fn["rows"], lines):
+        args = [row_value(row["given"][n], t) for n, t in fn["inputs"]]
+        want = row_value(row["gives"], fn["returns"])
+        call = f"{name}({', '.join(show(a) for a in args)})"
+        try:
+            got = real(*args)
+        except Exception as e:      # the client's code crashed
+            failures.append((at, None, f"{call} raised {type(e).__name__}: {e}"))
+            continue
+        if not equal(got, want):
+            failures.append((at, None, f"{call} gives {show(want)}, but the code gave {show(got)}"))
+    n = len(fn["rows"])
+    FUNCTION_RESULTS[name] = (("failing", f"{len(failures)} of {n} rows failed", failures) if failures
+                              else ("rows passed", f"all {n}", []))
+    return FUNCTION_RESULTS[name]
 
 
 # --- the spec ----------------------------------------------------------------
@@ -347,6 +442,7 @@ def load_project(folder, guard=None, clock=None):
     PHRASES["roles"].clear()
     RULES["operations"].clear()
     RULES["always"].clear()
+    RULES["functions"].clear()
     for path in sorted(glob.glob(f"{folder}/*.edda")):
         source, data = checker.load(path, guard)
 
@@ -355,6 +451,8 @@ def load_project(folder, guard=None, clock=None):
         for section in ("entities", "roles"):
             for name, block in (data.get(section) or {}).items():
                 PHRASES[section][name] = block.get("properties") or {}
+        for name, fn in (data.get("functions") or {}).items():
+            RULES["functions"][name] = [line(("functions", name, "examples", i)) for i, _ in enumerate(fn["examples"])]
         for name, block in (data.get("entities") or {}).items():
             RULES["always"][name] = [(fact_text(f), line(("entities", name, "always", i) + (("fact",) if isinstance(f, dict) else ())))
                                      for i, f in enumerate(block.get("always") or [])]
@@ -425,7 +523,8 @@ PROJECT = [None]    # the checker's view of the project, set by run()
 STORIES = {}        # the project's stories as written, by id, set by run()
 STORY_FILES = {}    # the .edda file of each story, by id, set by run()
 PHRASES = {"entities": {}, "roles": {}}     # property type phrases as written, set by load_project()
-RULES = {"operations": {}, "always": {}}    # each operation's rules and each entity's always-rules, with their lines, set by load_project()
+RULES = {"operations": {}, "always": {}, "functions": {}}    # each operation's rules, each entity's always-rules
+                                                             # and each function's rows, with their lines, set by load_project()
 GIVENS = []         # the things the example's givens made, set by run_example()
 
 
@@ -477,12 +576,16 @@ def run_operation(name, actor, args, kwargs):
         found = []  # what a read gives back derives from what its returns reads,
         try:        # and its order from what ordered_by reads on each item
             found = evaluate(OPERATIONS[name]["returns"], scope)
+        except NoRow:
+            raise
         except (Fail, binding.UnsetRead):
             pass
         for item in found if type(found) is list else []:
             for o in checker.listing(OPERATIONS[name].get("ordered_by")) if isinstance(item, binding.Thing) else []:
                 try:
                     evaluate(o, {k: v for k, v in scope.items() if k == "ACTOR"} | {kind_of(item): item})
+                except NoRow:
+                    raise
                 except (Fail, binding.UnsetRead):
                     pass
     roots = GIVENS + list(scope.values())
@@ -732,6 +835,8 @@ def gather(n, env, scope, table):
             return
         try:
             v = frozen(value(x, env))
+        except NoRow:
+            raise
         except Fail as e:
             v = e
         except binding.UnsetRead as u:
@@ -757,6 +862,8 @@ def gather_loop(gens, elt, env, scope, table):
     gather(g.iter, env, scope, table)
     try:
         source = value(g.iter, env)
+    except NoRow:
+        raise
     except (Fail, binding.UnsetRead):
         return
     except binding.NotBound:    # gather(g.iter) above kept it for an OLD there
@@ -797,6 +904,8 @@ def named(name, rules, scope, unjudged):
         except cannot_judge() as e:
             unread(e, unjudged, rules["line"], name, n, possible)
             continue
+        except NoRow:
+            raise
         except Fail:
             continue        # the fact itself fails
         if not isinstance(thing, binding.Thing):
@@ -808,6 +917,8 @@ def named(name, rules, scope, unjudged):
                 derives(thing, n.attr)
             except cannot_judge() as e:
                 unread(e, unjudged, rules["line"], name, n, possible)
+            except NoRow:
+                raise
             except Fail:
                 pass        # what was read before it failed is named
             places |= RECORD[0]
@@ -1217,6 +1328,7 @@ def run(folder, wanted=(), guard=None, clock=None):
     load_project"""
     P, operations, stories = load_project(folder, guard, clock)
     PROJECT[0] = P
+    FUNCTION_RESULTS.clear()
     ZONE[0] = P.zone
     OPERATIONS.clear()
     OPERATIONS.update(operations)
@@ -1286,6 +1398,7 @@ def main(argv, result=None):
         again = [x for i, x in enumerate(argv)     # this command, its --seed this seed
                  if x != "--seed" and not x.startswith("--seed=") and (i == 0 or argv[i - 1] != "--seed")]
         replay = shlex.join(["python3", os.path.relpath(os.path.abspath(__file__)), *again, "--seed", str(seed)])
+    PROJECT[0] = None       # run() sets it: the functions below are this project's
     try:
         out = run(project.folder, a.stories, project.guard, project.clock)
     except UnknownStory as e:
@@ -1305,6 +1418,30 @@ def main(argv, result=None):
     say = print if result is None else (lambda *_: None)     # with --json, the fields say it
     if result is not None:
         result["stories"] = shown
+        result["functions"] = []
+    reported = []   # the client functions whose rows were run against the real one and reported (section 9)
+
+    def report_rows(names):
+        """run and report the rows of each function of names not reported
+        yet, in block order; a failing row fails the run"""
+        nonlocal bad
+        for kind, name in PROJECT[0].block_order:
+            if kind != "function" or name not in names or name in reported:
+                continue
+            reported.append(name)
+            status, detail, failures = function_rows(name)
+            say(f"function {name}: {status}: {detail}")
+            for line, _, found in failures:
+                say(f"    {line}: {found}")
+                at.append(("failing_function", *place_of(line), "example run", found))
+            bad = bad or status == "failing"
+            if result is not None:
+                result["functions"].append({"name": name, "status": status, "detail": detail,
+                                            "failures": [{"at": line, "found": found} for line, _, found in failures]})
+    if PROJECT[0] is not None:      # first: every function, or every one the named stories reach
+        report_rows(set(PROJECT[0].functions) if not a.stories else set().union(*(
+            checker.story_functions(PROJECT[0], sid, STORIES[sid], PROJECT[0].stories[sid],
+                                    checker.load(STORY_FILES[sid], project.guard)[0]) for sid in a.stories)))
     for sid, status, detail, failed in out:
         say(f"{sid}: {status}: {detail}")
         story = {"id": sid, "status": status, "detail": detail, "examples_failed": [], "generated": []}
@@ -1332,6 +1469,8 @@ def main(argv, result=None):
                          if m and ": not judged: " not in m.string]
                 at += [("failing_case", *p, "generated case", said)
                        for p, said in rules or [((STORY_FILES[sid], None), lines[0])]]
+    if PROJECT[0] is not None:      # rows generated cases ran against the real function for any other reason
+        report_rows(set(FUNCTION_RESULTS))
     problems = [watch.problem(rule, path, line, how, project.root, checker.load, project.guard)
                 for rule, path, line, how, _ in at]
     counts = watch.count_line(problems)

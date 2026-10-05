@@ -123,7 +123,8 @@ def story_lines(model, sid, kinds=("story",)):
     st = next((s for s in model["stories"] if s["id"] == sid), None)
     if st is None:
         raise Missing(f"no story {sid} in specs/")
-    return [s["text"] for s in view.story_sentences(st, model["operations"], model["entities"], model["roles"])
+    return [s["text"] for s in view.story_sentences(st, model["operations"], model["entities"], model["roles"],
+                                                    model["functions"])
             if s["kind"] in kinds]
 
 

@@ -2,7 +2,7 @@
 # Python tools, and the local problem log in .edda/ (kept out of git).
 # The approval examples read NOW through approve's ensure facts; their
 # clock starts at clock_start, in the business zone UTC (no zone: given).
-edda: 70
+edda: 71
 stack: python
 problem_log: local
 clock_start: "2026-10-01 09:00"

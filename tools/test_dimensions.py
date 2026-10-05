@@ -133,7 +133,8 @@ class RegistryTest(unittest.TestCase):
         cls.rules, cls.allowed = watch.registry()
 
     def test_every_rule_has_four_allowed_dimensions(self):
-        self.assertEqual(len(self.rules), 49)     # revision 68 adds the five of the settings, 70 the three of the clock
+        self.assertEqual(len(self.rules), 51)     # revision 68 adds the five of the settings, 70 the three of the
+                                                  # clock, 71 contradicting_rows and failing_function
         names = {"category": "category", "fix": "fix", "acts": "acts", "level": "level"}
         for rule, dims in self.rules.items():
             self.assertEqual(set(dims), set(watch.FIXED), rule)
@@ -149,7 +150,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(self.allowed["acts"], ["agent", "person", "language"])
         self.assertEqual(self.allowed["level"], ["blocks", "warns", "note"])
         self.assertIn("unknown", self.allowed["where"])
-        self.assertEqual(len(self.allowed["where"]), 16)
+        self.assertEqual(len(self.allowed["where"]), 17)     # revision 71 adds function
         self.assertEqual(self.allowed["found_by"], [
             "reading", "history", "analyser", "example run", "generated case", "person review"])
 
@@ -160,7 +161,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual({r["level"] for r in k["refusals"]}, {"blocks"})
         self.assertEqual({r["level"] for r in k["flags"]}, {"warns"})
         self.assertEqual([(r["rule"], r["level"]) for r in k["failures"]],
-                         [("failing_example", "blocks"), ("failing_case", "blocks")])
+                         [("failing_example", "blocks"), ("failing_case", "blocks"), ("failing_function", "blocks")])
 
     def test_the_note_s_table(self):
         self.assertEqual(self.rules["dead_refusal"], {"category": "contradiction", "sub": "refusals",
@@ -340,7 +341,7 @@ class LogTest(unittest.TestCase):
             os.chmod(locked, stat.S_IRWXU)
         self.assertEqual(blocked, off)
         self.assertEqual(off[0], 0)
-        self.assertEqual(off[1].splitlines()[-1], "6 out of date, 18 code differs")
+        self.assertEqual(off[1].splitlines()[-1], "6 out of date, 19 code differs")     # 71: view.py's function_sentences
         self.assertEqual(os.listdir(locked), [])
 
 

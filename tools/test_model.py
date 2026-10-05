@@ -233,7 +233,7 @@ class Model(unittest.TestCase):
 
     def test_exit_and_version(self):
         self.assertEqual(self.code, 0)
-        self.assertEqual((self.model["edda_model"], self.model["revision"]), (1, 70))
+        self.assertEqual((self.model["edda_model"], self.model["revision"]), (2, 71))
 
     def test_deterministic(self):
         self.assertEqual(run("--model"), (self.code, self.out))

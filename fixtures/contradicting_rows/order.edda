@@ -1,0 +1,48 @@
+# A fixture is one whole spec in one file. Line numbers matter: the
+# tests name them. Two rows of shipping_cost give different results for
+# the same weight, 1 and 1.0 being one number: contradicting_rows.
+roles:
+  shop_user:
+    is: "a person at a shop"
+
+functions:
+  shipping_cost:
+    is: "what a parcel of that weight costs to ship"
+    inputs: {weight: NUMBER}
+    returns: NUMBER
+    examples:
+      - {given: {weight: 1}, gives: 5}
+      - {given: {weight: 10}, gives: 12}
+      - {given: {weight: 1.0}, gives: 6}
+
+entities:
+  order:
+    is: "what a workshop buys"
+    properties:
+      weight: NUMBER
+      cost: {computed: "shipping_cost(weight)"}
+    may_read: [{role: shop_user}]
+
+stories:
+  FIX-001:
+    story: "see what an order costs"
+    about: order
+    as_a: shop_user
+    i_want: "to see the cost of an order"
+    so_that: "I know what to pay"
+    operations:
+      cost_of:
+        is: "gives what an order costs to ship"
+        inputs: {order: order}
+        who: [{role: shop_user}]
+        returns: "order.cost"
+    examples:
+      "a light order costs 5":
+        given:
+          - actor: erik
+            with: {roles: [shop_user]}
+          - order: purchase
+            with: {weight: 1}
+        steps:
+          - when: {actor: erik, call: "cost_of(purchase)"}
+            then: [DONE, "RESULT == 5"]

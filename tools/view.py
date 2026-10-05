@@ -201,14 +201,16 @@ def either(ts):
 
 class Types:
     """the types the view proves a value has (section 12), from the model:
-    the entities' and roles' properties with their types, and the
-    operations, whose returns give the type of a call. Only YES_NO, an
-    entity and a list are told apart; anything else is not known"""
+    the entities' and roles' properties with their types, the operations,
+    whose returns give the type of a call, and the client functions, whose
+    declared result does. Only YES_NO, an entity and a list are told apart;
+    anything else is not known"""
 
-    def __init__(self, entities=(), roles=(), operations=()):
+    def __init__(self, entities=(), roles=(), operations=(), functions=()):
         self.entities = {e["name"]: {p["name"]: prop_type(p) for p in e["properties"]} for e in entities}
         self.roles = {r["name"]: {p["name"]: prop_type(p) for p in r["properties"]} for r in roles}
         self.operations = {o["name"]: o for o in operations}
+        self.functions = {f["name"]: prop_type(f["returns"]) for f in functions if "returns" in f}
         self.returned = {}
 
     def scope(self, op):
@@ -272,6 +274,8 @@ class Types:
                 return YES_NO
             if f in self.operations:
                 return self.returns(f)
+            if f in self.functions:
+                return self.functions[f]
         return None
 
     def bind(self, gens, scope):
@@ -467,7 +471,7 @@ class Words:
         return ", and every ".join(parts), bound
 
     def call(self, n, bound):
-        if not isinstance(n.func, ast.Name) or n.func.id in RETIRED_CALLS:
+        if not isinstance(n.func, ast.Name) or n.func.id in RETIRED_CALLS and n.func.id not in self.types.functions:
             raise Unread                    # a method (startswith), min, max
         f = n.func.id
         if f in ("len", "OLD"):
@@ -800,15 +804,33 @@ def clock_said(when):
     return f", at {t['at']}" + (f" ({t['since']})" if t["since"] else "")
 
 
+def function_sentences(fn):
+    """a client function as sentences (section 12): its meaning, its inputs
+    and result, then each row, "For example, the <name> of <inputs> gives
+    <result>." """
+    name = words(fn["name"])
+    ins = fn["inputs"]
+    takes = joined([input_words(i) for i in ins]) + ("," if ins and apposed(ins[-1]) else "") if ins else "nothing"
+    out = [sentence("function", stop(cap(f"{name} is {fn['is']}")), fn["line"]),
+           sentence("signature", stop(cap(f"{name} takes {takes} and gives {type_words(fn['returns'])}")),
+                    fn["returns"]["line"])]
+    for r in fn["examples"]:
+        of = " and ".join(value_words(r["given"][i["name"]]) for i in ins if i["name"] in r["given"])
+        out.append(sentence("row", stop(f"For example, the {name}" + (f" of {of}" if of else "")
+                                        + f" gives {value_words(r['gives'])}"), r["line"]))
+    return out
+
+
 # EDDA-007@0
-def story_sentences(story, operations, entities, roles):
+def story_sentences(story, operations, entities, roles, functions=()):
     """a story of the model as sentences (section 12): the story, its notes,
     its questions, then its operations and its examples in file order,
     the examples grouped under their rules when it has rules. operations,
     the model's operations (only the story's are read as sentences, any
     gives the type of a call); entities and roles, the model's, which it
-    is read against, their properties with their types"""
-    types = Types(entities, roles, operations)
+    is read against, their properties with their types; functions, the
+    model's client functions, whose result gives the type of a call"""
+    types = Types(entities, roles, operations, functions)
     entities = {e["name"] for e in entities}
     out = [sentence("story", f"{stop(cap(story['sentence']))} As {a(words(story['as_a']))}, "
                              f"I want {story['i_want']}, so that {stop(story['so_that'])}", story["line"])]
@@ -836,7 +858,8 @@ def version_sentences(version):
     """an approved version of a story as sentences, from its snapshot as the
     model holds it, read against the blocks it pins (sections 10, 12); a
     line counts from the version's key line"""
-    return story_sentences(version["story"], version["operations"], version["entities"], version["roles"])
+    return story_sentences(version["story"], version["operations"], version["entities"], version["roles"],
+                           version.get("functions", []))
 
 
 def invariant_sentences(entity, types=None):
@@ -883,14 +906,16 @@ def main(argv, result=None):
     if unknown:
         print(f"no such story: {', '.join(unknown)}")
         return 2
-    types = Types(model["entities"], model["roles"], model["operations"])
-    blocks = []         # (file, kind, name, sentences): invariants before the stories of each file
+    types = Types(model["entities"], model["roles"], model["operations"], model["functions"])
+    blocks = []         # (file, kind, name, sentences): invariants and functions before the stories of each file
     for f in model["files"]:
         if not a.stories:
             blocks += [(f["name"], "entity", e["name"], ss) for e in model["entities"] if e["file"] == f["name"]
                        for ss in [invariant_sentences(e, types)] if ss]
+            blocks += [(f["name"], "function", fn["name"], function_sentences(fn))
+                       for fn in model["functions"] if fn["file"] == f["name"]]
         blocks += [(f["name"], "story", st["id"],
-                    story_sentences(st, model["operations"], model["entities"], model["roles"]))
+                    story_sentences(st, model["operations"], model["entities"], model["roles"], model["functions"]))
                    for st in model["stories"]
                    if st["file"] == f["name"] and (not a.stories or st["id"] in a.stories)]
     if result is not None:      # with --json, the blocks say what is printed here

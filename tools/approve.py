@@ -1,4 +1,4 @@
-"""Record the operator's yes to one story or one role or entity block as its
+"""Record the operator's yes to one story or one role, entity or function block as its
 next version in the .edda.vc beside its file (reference section 10).
 
     python3 tools/approve.py NAME --by OPERATOR [--because TEXT]
@@ -35,7 +35,7 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check as E                                       # noqa: E402
 
-SECTIONS = (("roles", "role"), ("entities", "entity"), ("stories", "story"))
+SECTIONS = (("roles", "role"), ("entities", "entity"), ("functions", "function"), ("stories", "story"))
 SECTION_OF = {kind: section for section, kind in SECTIONS}
 
 
@@ -111,7 +111,10 @@ def story_blocks(sid, P, files):
     """story.blocks (section 11): its about entity; every entity in an input
     type phrase or a given; every entity a dot path in its expressions
     reaches; every role in as_a, a who-line, a given's roles: and on a may_*
-    line of a collected entity; each once, by file name, then file order"""
+    line of a collected entity; every client function the runner may make
+    run for it (check.story_functions: the reach of check.evaluated, always
+    facts included, and the story's own expressions); each once, by file
+    name, then file order"""
     stem = P.stories[sid]
     source, data = files.get(stem)
     st = data["stories"][sid]
@@ -130,10 +133,12 @@ def story_blocks(sid, P, files):
     list(E.walk_meaning({"stories": {sid: st}}, stem, P, source))   # the checker's own typing of every expression
     entities = (entities | E.REACHED) & set(P.entities)
     E.REACHED.clear()
+    functions = E.story_functions(P, sid, st, stem, source)
     for e in entities:
         roles |= {r for rs in P.entities[e]["may"].values() for r in rs}
     roles = {r for r in roles if r in P.roles}
-    return [(k, n) for k, n in P.block_order if n in (entities if k == "entity" else roles)]
+    named = {"entity": entities, "role": roles, "function": functions}
+    return [(k, n) for k, n in P.block_order if n in named[k]]
 
 
 def blocks_not_approved(blocks, P, files):
@@ -318,7 +323,7 @@ def approve(folder, name, at, by, because, dry_run, guard=None, clock=None):
 
 def main(argv=None, result=None):
     ap = argparse.ArgumentParser(description="Append the operator's approval of a story or block to its .edda.vc.")
-    ap.add_argument("name", metavar="NAME", help="a story id (ABC-123) or a role or entity name")
+    ap.add_argument("name", metavar="NAME", help="a story id (ABC-123) or a role, entity or function name")
     ap.add_argument("--by", required=True, metavar="OPERATOR", help="the operator's name; becomes approved_by")
     ap.add_argument("--because", help="one line of why; left out when not given")
     ap.add_argument("--at", help='"YYYY-MM-DD HH:MM"; default now, in the host\'s local time (the business zone)')

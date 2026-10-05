@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edda.local/schema/v59",
-  "title": "Edda spec file (revision 59)",
+  "$id": "https://edda.local/schema/v71",
+  "title": "Edda spec file (revision 71)",
   "description": "The keys of a .edda file: the shape layer of reference section 11 together with the quoting rule. Strings that carry logic are Python expressions (section 7) or type phrases (section 4) and are checked in the meaning layer, not here. The YAML subset is checked at the source, before this schema.",
   "type": "object",
   "additionalProperties": false,
@@ -54,6 +54,26 @@
           "may_update": {"$ref": "#/$defs/whoList"},
           "may_delete": {"$ref": "#/$defs/whoList"}
         }
+      }
+    },
+    "functions": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/name"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["is", "inputs", "returns", "examples"],
+        "properties": {
+          "is": {"type": "string"},
+          "inputs": {
+            "type": "object",
+            "propertyNames": {"$ref": "#/$defs/name"},
+            "additionalProperties": {"$ref": "#/$defs/typePhrase"}
+          },
+          "returns": {"$ref": "#/$defs/typePhrase"},
+          "examples": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/row"}}
+        },
+        "description": "a client function: what Edda cannot say, declared with its meaning, types and example rows; each row names every input once (beside the schema: missing_key, unknown_key), its values of the declared types (type_mismatch) and no two rows give different results for the same inputs (contradicting_rows), in the meaning layer"
       }
     },
     "stories": {
@@ -196,6 +216,14 @@
       "if": {"required": ["when"]},
       "then": {"properties": {"then": {"prefixItems": [{"$ref": "#/$defs/verdict"}], "items": {"$ref": "#/$defs/expression"}}}},
       "else": {"properties": {"then": {"items": {"$ref": "#/$defs/expression"}}}}
+    },
+    "row": {
+      "type": "object", "additionalProperties": false, "required": ["given", "gives"],
+      "properties": {
+        "given": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/flatValue"}},
+        "gives": {"$ref": "#/$defs/flatValue"}
+      },
+      "description": "one example row of a client function: its inputs by name and the result, literal values only"
     },
     "example": {
       "type": "object",

@@ -27,7 +27,7 @@ import zoneinfo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check as checker          # noqa: E402
 
-REVISION = 70       # the revision of these tools; edda.yaml may pin it
+REVISION = 71       # the revision of these tools; edda.yaml may pin it
 STACKS = ("python",)
 PROBLEM_LOGS = ("local", "off")
 GENERATED = {

@@ -11,7 +11,7 @@
 
 Each takes the options its tool in tools/ takes, and --json. The exit
 codes are the same for every one: 0 nothing refused and nothing failed
-(flags alone are 0), 1 a refusal, a failing example or generated case,
+(flags alone are 0), 1 a refusal, a failing example, function row or generated case,
 or an approval refused, 2 a usage error, 3 Edda itself failed. Plain,
 each prints what its tool prints. With --json it prints one JSON
 document on stdout instead (FORMAT, below, names its shape): format,
@@ -38,12 +38,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-FORMAT = 1          # the shape of the --json document; a change to it is a new number
+FORMAT = 2          # the shape of the --json document; a change to it is a new number: 2 since revision 71
+                    # (run's functions)
 COMMANDS = ("check", "run", "view", "approve", "guide", "trend")
 USAGE = "usage: edda check|run|view|approve|guide|trend [--root DIR] [--json] ..."
 FIELDS = {          # each command's own fields, as they are when it stopped before its result
     "check": {"files": [], "problems": [], "counts": {}, "model": None, "graph": None},
-    "run": {"stories": [], "failures": [], "counts": {}},
+    "run": {"functions": [], "stories": [], "failures": [], "counts": {}},
     "view": {"blocks": []},
     "approve": {"name": None, "kind": None, "number": None, "history": None, "version": None,
                 "written": False, "refused": None},

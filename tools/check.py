@@ -92,6 +92,7 @@ TEXT_PATHS = [
     "stories/*/examples/*/steps/#/then/#/refused",
     "stories/*/examples/*/steps/#/when/at",
     "stories/*/examples/*/starts_at",
+    "functions/*/is",
 ]
 EXPR_PATHS = [
     "entities/*/properties/*/computed",
@@ -106,7 +107,8 @@ EXPR_PATHS = [
     "stories/*/examples/*/steps/#/when/call",
     "stories/*/examples/*/steps/#/then/#",
 ]
-TYPE_PATHS = ["roles/*/properties/*", "entities/*/properties/*", "stories/*/operations/*/inputs/*"]
+TYPE_PATHS = ["roles/*/properties/*", "entities/*/properties/*", "stories/*/operations/*/inputs/*",
+              "functions/*/inputs/*", "functions/*/returns"]
 NAME_PATHS = [
     "stories/*/about", "stories/*/as_a", "stories/*/epic", "stories/*/tags/#",
     "entities/*/part_of",
@@ -119,7 +121,7 @@ NAME_PATHS = [
     "stories/*/examples/*/steps/#/when/actor",
 ]
 TITLE_PATHS = ["stories/*/examples/*"]
-BLOCK_PATHS = ["roles", "entities", "stories", "roles/*", "entities/*", "stories/*",
+BLOCK_PATHS = ["roles", "entities", "stories", "functions", "roles/*", "entities/*", "stories/*", "functions/*",
                "stories/*/operations/*", "stories/*/examples/*"]     # written out, one key per line, never in flow form
 TITLE_REF_PATHS = ["stories/*/rules/#/shown_by/#"]     # an example title as a value
 VC_TEXT_PATHS = ["#/because", "#/approved_at"]
@@ -306,8 +308,8 @@ ITEM = {"ensure": "fact", "always": "fact", "refuse": "refusal", "given": "given
         "then": "item", "notes": "note", "questions": "question", "who": "who-line",
         "may_create": "who-line", "may_read": "who-line", "may_update": "who-line", "may_delete": "who-line",
         "pins": "pin", "ordered_by": "expression", "also_changes": "path",
-        "tags": "tag", "roles": "role", "rules": "rule", "shown_by": "example"}
-COLLECTION = {"roles": "role", "entities": "entity", "stories": "story", "operations": "operation",
+        "tags": "tag", "roles": "role", "rules": "rule", "shown_by": "example", "examples": "row"}
+COLLECTION = {"roles": "role", "entities": "entity", "stories": "story", "functions": "function", "operations": "operation",
               "examples": "example", "properties": "property", "inputs": "input"}
 KIND_WORD = {"object": "mapping", "array": "list", "string": "text", "integer": "number",
              "number": "number", "boolean": "yes/no", "null": "value"}
@@ -452,7 +454,9 @@ def schema_problems(validator, root, data, source):
 def shape_extra(data, source=None):
     """shape-layer checks beside the schema: a given name used twice, an
     example named twice under rules, a role property named name or roles, a
-    role-list item that is no name, a Python keyword as a choice value;
+    role-list item that is no name, a Python keyword as a choice value, a
+    function's row that names an input the function has not (unknown_key)
+    or, naming none such, leaves one out (missing_key);
     yields (rule, path, message, at_key)"""
     out = []
 
@@ -471,6 +475,21 @@ def shape_extra(data, source=None):
     for ename, ent in mapping(mapping(data).get("entities")).items():
         for p, v in mapping(mapping(ent).get("properties")).items():
             phrase(v, ("entities", ename, "properties", p))
+    for fname, fn in mapping(mapping(data).get("functions")).items():
+        inputs = mapping(mapping(fn).get("inputs"))
+        for n, v in inputs.items():
+            phrase(v, ("functions", fname, "inputs", n))
+        phrase(mapping(fn).get("returns"), ("functions", fname, "returns"))
+        for i, row in enumerate(listing(mapping(fn).get("examples"))):
+            given = mapping(row).get("given")
+            if not isinstance(given, dict):
+                continue
+            rw = ("functions", fname, "examples", i)
+            unknown = [n for n in given if n not in inputs]
+            for n in unknown:
+                out.append(("unknown_key", rw + ("given", n), f"unknown key: {n}", True))
+            if not unknown:     # an unknown input is usually the missing one misspelt (section 11)
+                out += [("missing_key", rw, f"row {i + 1} needs {n}:", True) for n in inputs if n not in given]
     for sid, st in mapping(mapping(data).get("stories")).items():
         for oname, op in mapping(mapping(st).get("operations")).items():
             for n, v in mapping(mapping(op).get("inputs")).items():
@@ -745,15 +764,17 @@ class Project:
         self._clock_reach = None
         self._call_reach = None
         self.entities, self.roles, self.operations, self.epics, self.stories = {}, {}, {}, set(), {}
+        self.functions = {}       # the client functions (section 4), by name
+        self._function_reach = None
         self.files = {stem for stem, _ in files}
         self.dups = {}            # stem -> [(path, name)]: a name declared twice across the project
         self.role_order = []
-        self.block_order = []     # (kind, name) of every role and entity block, by file name, then file order
+        self.block_order = []     # (kind, name) of every role, entity and function block, by file name, then file order
         for stem, data in sorted(files, key=lambda f: f[0]):
             for section, block in mapping(data).items():     # in source order, so the second is reported
                 if section == "roles":
                     for rname, role in mapping(block).items():
-                        if rname in self.roles or rname in self.entities:
+                        if rname in self.roles or rname in self.entities or rname in self.functions:
                             self.dups.setdefault(stem, []).append((("roles", rname), rname))
                             continue
                         props = {p: type_of_phrase(v) for p, v in mapping(mapping(role).get("properties")).items()}
@@ -762,7 +783,7 @@ class Project:
                         self.block_order.append(("role", rname))
                 elif section == "entities":
                     for ename, ent in mapping(block).items():
-                        if ename in self.entities or ename in self.roles:
+                        if ename in self.entities or ename in self.roles or ename in self.functions:
                             self.dups.setdefault(stem, []).append((("entities", ename), ename))
                             continue
                         props, derived, computed = {}, set(), {}
@@ -784,6 +805,19 @@ class Project:
                                                 "defaults": {p: v[len("DEFAULT "):].split(" | ")[0] for p, v in mapping(mapping(ent).get("properties")).items()
                                                              if isinstance(v, str) and v.startswith("DEFAULT ") and is_choice(type_of_phrase(v))}}
                         self.block_order.append(("entity", ename))
+                elif section == "functions":
+                    for fname, fn in mapping(block).items():
+                        if fname in OWN_WORDS or fname in self.functions or fname in self.operations \
+                                or fname in self.entities or fname in self.roles:
+                            self.dups.setdefault(stem, []).append((("functions", fname),
+                                                                   fname + (OWN if fname in OWN_WORDS else "")))
+                            continue
+                        self.functions[fname] = {
+                            "inputs": [(n, function_type(v)) for n, v in mapping(mapping(fn).get("inputs")).items()],
+                            "returns": function_type(mapping(fn).get("returns")),
+                            "rows": [r for r in listing(mapping(fn).get("examples")) if isinstance(r, dict)],
+                            "file": stem}
+                        self.block_order.append(("function", fname))
                 elif section == "epics":
                     self.epics.update(mapping(block).keys())
                 elif section == "stories":
@@ -793,7 +827,7 @@ class Project:
                             continue
                         self.stories[sid] = stem
                         for oname, op in mapping(mapping(st).get("operations")).items():
-                            if oname in self.operations:
+                            if oname in self.operations or oname in self.functions:
                                 self.dups.setdefault(stem, []).append((("stories", sid, "operations", oname), oname))
                                 continue
                             inputs = []
@@ -836,7 +870,7 @@ class Project:
         for stem, versions in histories:
             for e in listing(versions):
                 if isinstance(e, dict):
-                    kind = "story" if "story" in e else "entity" if "entity" in e else "role"
+                    kind = vc_kind(e)
                     name = e.get(kind)
                     if self.file_of(kind, name) == stem:
                         n = e.get("number")
@@ -848,7 +882,7 @@ class Project:
         """the stem of the file a block lives in, or None"""
         if kind == "story":
             return self.stories.get(name)
-        block = (self.entities if kind == "entity" else self.roles).get(name)
+        block = {"entity": self.entities, "role": self.roles, "function": self.functions}[kind].get(name)
         return block["file"] if block else None
 
     def find_computed_loops(self):
@@ -1012,6 +1046,9 @@ DURATIONS = {"DAYS": "day", "HOURS": "hour", "MINUTES": "minute"}     # section 
 ZONE = "UTC"      # the business zone when edda.yaml names none (section 9)
 TIME_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d")     # section 7.2
 REACHED = set()   # the entities a dot path has reached, the declared type of each step (story.blocks)
+USES = [None]     # while a set: ("read", entity, property), ("call", operation) and ("function", name) met (uses_of)
+OWN_WORDS = GEN_ONLY | ONE_ARG | FIXED | CLOCK | set(DURATIONS) | {"DONE"}     # Edda's own words: no client function's name
+OWN = " (a word of Edda's own)"
 
 
 def time_text(v):
@@ -1129,7 +1166,7 @@ class Expr:
         if call_slot:
             if not (isinstance(body, ast.Call) and isinstance(body.func, ast.Name) and body.func.id in self.P.operations):
                 if isinstance(body, ast.Call) and isinstance(body.func, ast.Name) and re.fullmatch(NAME, body.func.id) \
-                        and body.func.id not in ONE_ARG and body.func.id not in GEN_ONLY:
+                        and body.func.id not in ONE_ARG and body.func.id not in GEN_ONLY and body.func.id not in self.P.functions:
                     self.problem("unknown_name", f"unknown name: {body.func.id}")
                 else:
                     self.problem("not_an_expression", f"not an expression (a call of an operation was expected): {text}")
@@ -1209,8 +1246,10 @@ class Expr:
             if i in scope and i != "RESULT_OP":
                 if self.reads is not None and ("var", i) not in scope:
                     self.reads.add((self.own, i))
+                if USES[0] is not None and self.own is not None and ("var", i) not in scope:
+                    USES[0].add(("read", self.own, i))
                 return scope[i]
-            if i in ONE_ARG or i in GEN_ONLY or i in P.operations:
+            if i in ONE_ARG or i in GEN_ONLY or i in P.operations or i in P.functions:
                 self.problem("not_an_expression", f"not an expression (name {i}): {src}")
                 return None
             if re.fullmatch(NAME, i):
@@ -1238,6 +1277,8 @@ class Expr:
                     props = P.entities[a[1]]["props"]
                     if self.reads is not None:
                         self.reads.add((a[1], n.attr))
+                    if USES[0] is not None:
+                        USES[0].add(("read", a[1], n.attr))
                     if n.attr not in props:
                         self.problem("unknown_name", f"unknown name: {n.attr}")
                     outs.append(props.get(n.attr))
@@ -1445,7 +1486,22 @@ class Expr:
                     self.problem("not_an_expression", f"not an expression (a changing operation inside a fact): {src}")
                 if self.calls is not None and isinstance(op["returns"], str):
                     self.calls.add(f.id)
+                if USES[0] is not None:
+                    USES[0].add(("call", f.id))
                 return op["returns_type"] if op["returns"] is not None else "NONE"
+            if f.id in P.functions:      # a client function: its inputs by position, no actor (section 4)
+                fn = P.functions[f.id]
+                if len(n.args) != len(fn["inputs"]) or n.keywords:
+                    k = len(fn["inputs"])
+                    self.problem("type_mismatch", f"{f.id} expects {k} input{'s' if k != 1 else ''} by position: {src}")
+                for a, (iname, itype) in zip(n.args, fn["inputs"]):
+                    if not compatible(self.visit(a, scope), itype):
+                        self.problem("type_mismatch", f"{f.id} input {iname} expects {words(itype)}: {src}")
+                for a in n.args[len(fn["inputs"]):] + [kw.value for kw in n.keywords]:
+                    self.visit(a, scope)
+                if USES[0] is not None:
+                    USES[0].add(("function", f.id))
+                return fn["returns"]
             for a in n.args:
                 self.visit(a, scope)
             for kw in n.keywords:
@@ -1485,6 +1541,83 @@ def walk_reads(P, text, scope, own=None):
     if isinstance(text, str):
         E.run(text)
     return E.reads, E.calls
+
+
+def uses_of(P, text, scope, own=None, allow_old=False):
+    """what text uses directly, typed as the checker types it: each
+    ("read", entity, property), ("call", operation) and ("function",
+    name) it meets; own as for walk_reads"""
+    saved, USES[0] = USES[0], set()
+    try:
+        E = Expr(P, scope, allow_old, silent=True)
+        E.own = own
+        if isinstance(text, str):
+            E.run(text)
+        return USES[0]
+    finally:
+        USES[0] = saved
+
+
+def function_reach(P):
+    """each computed property (entity, property) and each operation to the
+    client functions it makes run, nested to the end: those its
+    expressions call (a computed property's own expression; every
+    expression of an operation: who-line conditions, refuse conditions,
+    ensure facts, returns, ordered_by over one result item and
+    also_changes paths), and those of each computed property they read
+    and each operation they call"""
+    edges = {}
+    for e, ent in P.entities.items():
+        for p, expr in ent["computed"].items():
+            edges[(e, p)] = uses_of(P, expr, dict(ent["props"]), e)
+    for o, op in P.operations.items():
+        scope = {("var", n): True for n, _, _ in op["inputs"]}
+        scope.update({n: t for n, t, _ in op["inputs"]})
+        scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op["who"] if isinstance(r, str))))
+        item = {"ACTOR": scope["ACTOR"]}
+        rl = as_list(op["returns_type"])
+        if rl and is_entity(rl[1]):
+            item.update({("var", rl[1][1]): True, rl[1][1]: rl[1]})
+        found = set()
+        for x in op["who_when"] + op["refuse_when"] + [op["returns"]] + op["also_changes"]:
+            found |= uses_of(P, x, scope)
+        for x in op["ensure"]:
+            found |= uses_of(P, x, scope, allow_old=True)
+        for x in op["order_exprs"]:
+            found |= uses_of(P, x, item)
+        edges[o] = found
+    reach = {}
+    for k in edges:
+        seen, stack, out = set(), list(edges[k]), set()
+        while stack:
+            u = stack.pop()
+            if u[0] == "function":
+                out.add(u[1])
+                continue
+            key = u[1] if u[0] == "call" else u[1:]
+            if key in edges and key not in seen:
+                seen.add(key)
+                stack.extend(edges[key])
+        reach[k] = out
+    return reach
+
+
+def functions_used(P, uses):
+    """the client functions uses (as uses_of gives them) make run: those
+    called directly, and through the computed properties read and the
+    operations called (function_reach)"""
+    if P._function_reach is None:
+        P._function_reach = function_reach(P)
+    reach = P._function_reach
+    out = set()
+    for u in uses:
+        if u[0] == "function":
+            out.add(u[1])
+        elif u[0] == "call":
+            out |= reach.get(u[1], set())
+        else:
+            out |= reach.get(u[1:], set())
+    return out
 
 
 def on_clock(reads, timed):
@@ -1647,14 +1780,47 @@ def evaluated(P, exm):
             if isinstance(text, str) and text != "DONE":
                 add("expr", text, scope)
     if called:      # the always-rules every call is held to (section 6)
-        for o in called:
-            for _, t, _ in P.operations[o]["inputs"]:
-                kinds.update(entity_kinds(t))
-            kinds.update(entity_kinds(P.operations[o]["returns_type"]))
-        for e in sorted(kinds_reached(P, kinds)):
-            for f in P.entities[e]["always"]:
-                add("expr", fact_text(f), dict(P.entities[e]["props"]), e)
+        for text, sc, own in held_always(P, called, kinds):
+            add("expr", text, sc, own)
     return out
+
+
+def held_always(P, called, kinds):
+    """(text, scope, own) of the always facts a call of each operation in
+    called is held to (section 6): those of every entity kinds and the
+    operations' inputs and returns reach, as declared"""
+    kinds = set(kinds)
+    for o in called:
+        for _, t, _ in P.operations[o]["inputs"]:
+            kinds.update(entity_kinds(t))
+        kinds.update(entity_kinds(P.operations[o]["returns_type"]))
+    return [(fact_text(f), dict(P.entities[e]["props"]), e)
+            for e in sorted(kinds_reached(P, kinds)) for f in P.entities[e]["always"]]
+
+
+def story_functions(P, sid, st, stem, source):
+    """the client functions a story names (story.blocks, section 11): those
+    every expression the runner may evaluate for it makes run, the reach
+    of evaluated: each example's (its always facts reached included), and
+    for each of the story's operations its expressions and the always
+    facts its calls are held to; and those of the story's own expressions
+    (walk_meaning). Directly or through the computed properties read and
+    the operations called (functions_used). One set for approval and its
+    pins (approve.story_blocks) and for the rows a run with STORY names
+    checks (run.main); REACHED is left as it was"""
+    saved, reached, USES[0] = USES[0], set(REACHED), set()
+    try:
+        list(walk_meaning({"stories": {sid: st}}, stem, P, source))
+        for exm in mapping(st.get("examples")).values():
+            evaluated(P, mapping(exm))
+        ops = [o for o in mapping(st.get("operations")) if o in P.operations]
+        for text, sc, own in held_always(P, ops, ()):
+            walk_reads(P, text, sc, own)
+        return functions_used(P, USES[0])
+    finally:
+        USES[0] = saved
+        REACHED.clear()
+        REACHED.update(reached)
 
 
 def time_uses(P, exm):
@@ -1800,6 +1966,8 @@ def walk_meaning(data, stem, P, source):
     for rname, role in mapping(data.get("roles")).items():
         for p, v in mapping(role.get("properties")).items():
             yield from tp(v, ("roles", rname, "properties", p))
+    for fname, fn in mapping(data.get("functions")).items():
+        yield from function_problems(fname, fn, P, source)
     for ename, ent in mapping(data.get("entities")).items():
         props = P.entities.get(ename, {}).get("props", {})
         own = dict(props)
@@ -2020,6 +2188,69 @@ def given_names(exm):
     return givens, names
 
 
+FUNCTION_TYPE = re.compile(rf"TEXT|NUMBER|INTEGER|TIME|YES_NO|{NAME}(?: \| {NAME})+")
+
+
+def function_type(v):
+    """the type of a function's input or result, None when its phrase is
+    not one of FUNCTION_TYPE (function_problems refuses it)"""
+    return type_of_phrase(v) if isinstance(v, str) and FUNCTION_TYPE.fullmatch(v) else None
+
+
+def function_problems(fname, fn, P, source):
+    """the meaning layer of one client function (section 4): its type
+    phrases, each a scalar or a choice; each row's values of the declared
+    types, a time a real one; then, only when those check, no two rows
+    giving different results for the same inputs (contradicting_rows), times
+    compared as the moments they stand for"""
+    at = ("functions", fname)
+    types, bad = {}, False
+    for n, v in list(mapping(fn.get("inputs")).items()) + [(None, fn.get("returns"))]:
+        where = at + (("inputs", n) if n else ("returns",))
+        if v == "":
+            yield "wrong_type", where, f"{where[-1]} expects a text, no value was given"
+        elif type_phrase_problems(v):
+            for rule, msg in type_phrase_problems(v):
+                yield rule, where, msg
+        elif not FUNCTION_TYPE.fullmatch(v):
+            yield "bad_type_phrase", where, ("not a type phrase (a function takes and gives TEXT, NUMBER, INTEGER, "
+                                             f"TIME, YES_NO or a choice): {v}")
+        else:
+            types[n] = type_of_phrase(v)
+            continue
+        bad = True
+    if bad:
+        return
+    seen = {}       # the inputs of a row, as values, to (its number, its result as a value)
+    for i, row in enumerate(listing(fn.get("examples"))):
+        rw = at + ("examples", i)
+        given = mapping(row.get("given"))
+        found = []      # the inputs (given) and the result (gives) kept apart: no input name is reserved
+        values = [(n, v, types[n], rw + ("given", n)) for n, v in given.items()]
+        for n, v, t, pw in values + [("gives", row.get("gives"), types[None], rw + ("gives",))]:
+            one = list(given_value(v, t, n, pw, {}, {}, source))
+            if not one and t == "TIME" and not time_text(v):
+                one.append(("type_mismatch", pw, f'{n} expects a TIME, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": {v}'))
+            found += one
+        yield from found
+        bad = bad or bool(found)
+        if bad:
+            continue
+        key = tuple(row_value(given[n], types[n], P.zone) for n in mapping(fn.get("inputs")))
+        gives = row_value(row.get("gives"), types[None], P.zone)
+        if key in seen and seen[key][1] != gives:
+            yield "contradicting_rows", rw, (f"{fname}: rows {seen[key][0]} and {i + 1} give different results "
+                                             "for the same inputs")
+        seen.setdefault(key, (i + 1, gives))
+
+
+def row_value(v, t, zone):
+    """a row's value as the value it stands for: a time as its moment"""
+    if t == "TIME" and isinstance(v, str):
+        return instant(parse_time(v), zone)
+    return tuple(row_value(x, t, zone) for x in v) if isinstance(v, list) else v
+
+
 def given_value(v, t, p, pw, givens, names, source):
     """problems of one with: value against its declared type; a value that may
     be of several types must fit one of them, quoting and names included"""
@@ -2115,7 +2346,14 @@ def normalise(text):
     return "\n".join(out) + "\n"
 
 
-SECTION = {"entity": "entities", "role": "roles", "story": "stories"}
+SECTION = {"entity": "entities", "role": "roles", "story": "stories", "function": "functions"}
+VC_KINDS = ("story", "entity", "role", "function")
+
+
+def vc_kind(e):
+    """the kind of block a .edda.vc version or a pin names"""
+    return next((k for k in VC_KINDS if k in e), "role")
+
 
 # the keys an earlier revision allowed in a block and a later one retired
 # (section 10): a snapshot approved then may still hold them, with any value
@@ -2159,11 +2397,11 @@ def history_problems(versions, P, source, stem):
     bad_pin (pins on a story version only, each to a version that exists, no
     block twice) and bad_snapshot (snapshot_ok)"""
     out, count = [], {}
-    kinds = {"story": P.stories, "entity": P.entities, "role": P.roles}
+    kinds = {"story": P.stories, "entity": P.entities, "role": P.roles, "function": P.functions}
     for i, e in enumerate(listing(versions)):
         if not isinstance(e, dict):
             continue
-        kind = "story" if "story" in e else "entity" if "entity" in e else "role"
+        kind = vc_kind(e)
         name, n = e.get(kind), e.get("number")
         line = source.line((i, "number"))
         if name not in kinds[kind]:
@@ -2184,7 +2422,7 @@ def history_problems(versions, P, source, stem):
             for j, pin in enumerate(listing(pins)):
                 if not isinstance(pin, dict):
                     continue
-                pk = "entity" if "entity" in pin else "role"
+                pk = vc_kind(pin)
                 pname, pn = pin.get(pk), pin.get("number")
                 pl = source.line((i, "pins", j), key=False)
                 if pname not in kinds[pk]:
@@ -2420,7 +2658,7 @@ def pins_stale(version, P):
         return max((n for n in P.versions.get((kind, name), ()) if isinstance(n, int)), default=0)
     pins = [p for p in listing(version.get("pins")) if isinstance(p, dict)]
     return any(isinstance(p.get("number"), int) and p["number"] < newest(k, p.get(k)) for p in pins
-               for k in ["entity" if "entity" in p else "role"])
+               for k in [vc_kind(p)])
 
 
 def approved(kind, current, newest):
@@ -2434,10 +2672,10 @@ def approved(kind, current, newest):
 
 def statuses(data, P, source):
     """(kind, name, section, approved, version, pins stale, changes) of every
-    role, entity and story of a .edda, roles, then entities, then stories,
-    each in file order (section 11); changes only under a story with a
-    version, pins stale only on an approved story"""
-    for section, kind in (("roles", "role"), ("entities", "entity"), ("stories", "story")):
+    role, entity, function and story of a .edda, roles, then entities, then
+    functions, then stories, each in file order (section 11); changes only
+    under a story with a version, pins stale only on an approved story"""
+    for section, kind in (("roles", "role"), ("entities", "entity"), ("functions", "function"), ("stories", "story")):
         for name in mapping(data.get(section, {})):
             current = block_text(source.text, source.line((section, name)))
             newest = P.newest_version.get((kind, name))
@@ -2450,7 +2688,7 @@ def statuses(data, P, source):
 
 
 def status_lines(data, P, source, linked=None):
-    """the status of every role, entity and story of a .edda that checks,
+    """the status of every role, entity, function and story of a .edda that checks,
     its history included (section 11): approved or draft with its version,
     pins stale on an approved story, and under a story with a version its
     changes; then the story's link line, when the link layer gave one"""
@@ -3186,8 +3424,8 @@ def links_of(folder, P, base=None):
 
 # --- the JSON model (section 9) ------------------------------------------------
 
-MODEL_VERSION = 1     # the model's own version, edda_model
-REVISION = 70         # the language revision the model follows
+MODEL_VERSION = 2     # the model's own version, edda_model: 2 since revision 71 (functions)
+REVISION = 71         # the language revision the model follows
 
 
 def ast_json(n):
@@ -3328,6 +3566,26 @@ class ModelParts:
         return [self.line(p + (i,), False) for i, _ in enumerate(listing(xs))]
 
 
+def function_json(name, fn, M, at, fname):
+    """one client function of the model (section 9) at path at of M's
+    source: its meaning, inputs and result as properties are, and its rows,
+    each value with its kind"""
+    inputs = mapping(fn.get("inputs"))
+    types = {n: type_of_phrase(v) for n, v in inputs.items()}
+
+    def value(v, t, p):
+        return with_json(v, t, p, {}, {}, M.source)
+    return {"name": name, "is": fn["is"],
+            "inputs": [dict({"name": n}, **phrase_json(v), line=M.line(at + ("inputs", n))) for n, v in inputs.items()],
+            "returns": dict(phrase_json(fn["returns"]), line=M.line(at + ("returns",))),
+            "examples": [{"given": {n: value(v, types.get(n), at + ("examples", i, "given", n))
+                                    for n, v in mapping(r.get("given")).items()},
+                          "gives": value(r.get("gives"), type_of_phrase(fn["returns"]), at + ("examples", i, "gives")),
+                          "line": M.line(at + ("examples", i))}
+                         for i, r in enumerate(listing(fn.get("examples")))],
+            "file": fname, "line": M.line(at)}
+
+
 def story_json(sid, st, fname, P, M, pins):
     """one story of the model and its operations (section 9), from its
     parsed YAML at ("stories", sid) of M's source; P gives the types of
@@ -3410,8 +3668,7 @@ def story_json(sid, st, fname, P, M, pins):
 
 def pins_of(version):
     """a version's pins as (kind, name, number)"""
-    return [("entity" if "entity" in p else "role", p.get("entity", p.get("role")), p["number"])
-            for p in listing(version.get("pins")) if isinstance(p, dict)]
+    return [(vc_kind(p), p[vc_kind(p)], p["number"]) for p in listing(version.get("pins")) if isinstance(p, dict)]
 
 
 def snapshot_data(text, kind):
@@ -3433,7 +3690,7 @@ def versions_json(sid, fname, entries, snapshots, clock=None):
         source, data = snapshot_data(e["text"], "story")
         st = data["stories"][sid]
         pins = pins_of(e)
-        pinned = {"roles": {}, "entities": {}}
+        pinned = {"roles": {}, "entities": {}, "functions": {}}
         sources = {}
         for k, n, v in pins:
             sources[(k, n)], block = snapshots.get((k, n, v), (None, None))
@@ -3441,6 +3698,12 @@ def versions_json(sid, fname, entries, snapshots, clock=None):
         VP = Project([(fname[:-5], dict(pinned, stories={sid: st}))], clock=clock)
         blocks = {}
         for k, n, v in pins:
+            if k == "function":
+                fn = pinned["functions"][n]
+                found = function_json(n, fn, ModelParts(sources[(k, n)], shift=1), ("functions", n), None) \
+                    if sources[(k, n)] else {"name": n}
+                blocks.setdefault("functions", []).append(found)
+                continue
             ps = mapping(pinned[SECTION[k]][n].get("properties"))
             types = VP.entities[n]["props"] if k == "entity" else VP.roles[n]["properties"]
             at = (SECTION[k], n, "properties")
@@ -3452,7 +3715,7 @@ def versions_json(sid, fname, entries, snapshots, clock=None):
                     "because": e.get("because"), "pins": story["pins"],
                     "story": dict(story, file=fname, line=M.line(("stories", sid))),
                     "operations": operations, "entities": blocks.get("entities", []),
-                    "roles": blocks.get("roles", []), "line": line})
+                    "roles": blocks.get("roles", []), "functions": blocks.get("functions", []), "line": line})
     return out
 
 
@@ -3461,13 +3724,13 @@ def model_of(folder, root=None):
     its file and line, every expression with its ast, and the graphs; root
     as for project_of"""
     P = project_of(folder, root)
-    files, epics, roles, entities, stories, operations = [], [], [], [], [], []
+    files, epics, roles, entities, functions, stories, operations = [], [], [], [], [], [], []
     story_versions, snapshots = {}, {}    # (sid) -> [(version, line)]; (kind, name, number) -> (source, block)
     for path in sorted(glob.glob(f"{folder}/*.edda.vc")):
         source, data = load(path, root)
         stem = os.path.basename(path)[:-8]
         for i, e in enumerate(listing(data)):
-            kind = "story" if "story" in e else "entity" if "entity" in e else "role"
+            kind = vc_kind(e)
             if P.file_of(kind, e[kind]) != stem:
                 continue
             if kind == "story":
@@ -3508,6 +3771,8 @@ def model_of(folder, root=None):
             for key in ("may_create", "may_read", "may_update", "may_delete"):
                 ent[key] = M.who(e.get(key), at + (key,))
             entities.append(dict(ent, file=fname, line=line(at)))
+        for name, fn in mapping(data.get("functions")).items():
+            functions.append(function_json(name, fn, M, ("functions", name), fname))
         for sid, st in mapping(data.get("stories")).items():
             story, ops = story_json(sid, st, fname, P, M, pins_of(P.newest_version.get(("story", sid)) or {}))
             versions = versions_json(sid, fname, sorted(story_versions.get(sid, []), key=lambda v: v[0]["number"]), snapshots,
@@ -3515,7 +3780,7 @@ def model_of(folder, root=None):
             stories.append(dict(story, versions=versions, file=fname, line=line(("stories", sid))))
             operations += ops
     return {"edda_model": MODEL_VERSION, "revision": REVISION, "files": files, "epics": epics, "roles": roles,
-            "entities": entities, "stories": stories, "operations": operations,
+            "entities": entities, "functions": functions, "stories": stories, "operations": operations,
             "graphs": graphs_of(roles, entities, stories, operations)}
 
 

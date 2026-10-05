@@ -66,6 +66,8 @@ def place(path):
     """the place in a .edda of a path of keys, or None"""
     if path[:1] == ("roles",) and len(path) >= 2:
         return "role"
+    if path[:1] == ("functions",) and len(path) >= 2:
+        return "function"
     if path[:1] == ("entities",) and len(path) >= 3:
         return ENTITY_PLACES.get(path[2])
     if path[:1] == ("stories",) and len(path) >= 2:

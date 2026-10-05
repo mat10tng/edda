@@ -15,7 +15,10 @@ properties reach at any depth; the call goes through the runner's
 run_operation, the rule wrapping of section 6, the only oracle. Up to
 `runs` runs, under one seed. An operation that reads the clock runs on
 a clock stopped at the project's clock_start (edda.yaml), never moved
-and never the machine's. An operation with no binding, that reads the
+and never the machine's. A client function is the client's bound
+function, whose rows edda run checks first; an operation that makes one
+run whose rows did not all pass is skipped ("function f not verified").
+An operation with no binding, that reads the
 clock in a project with no clock_start, with a required single-record
 input no record can fill, or
 that no run called, and an entity no record can be made of, is skipped
@@ -57,11 +60,15 @@ class Record(tuple):
 
 class Broken(Exception):
     """a run broke a rule: the givens and steps that led there, the
-    verdict the spec expects of the last call, and what was found"""
+    verdict the spec expects of the last call, what was found, each
+    call of a real function the run made (run.REAL_CALLS), and, for a
+    failure in the starting world, the fact a pasted example's one fact
+    step holds to fail the same way"""
 
-    def __init__(self, given, steps, found):
+    def __init__(self, given, steps, found, calls=(), fact=None):
         super().__init__("; ".join(found))
-        self.given, self.steps, self.found = given, steps, found
+        self.given, self.steps, self.found, self.calls = given, steps, found, list(calls)
+        self.fact = fact
 
 
 # --- what the spec names, as edge values ------------------------------------------
@@ -234,12 +241,16 @@ class Plan:
         scope = {n: t for n, t, _ in op["inputs"]}
         scope["ACTOR"] = ("actor", ("one", frozenset(r for r in op.get("who") or [] if isinstance(r, str))))
         # what the runner evaluates for the call: call_texts, the frame rule's paths included, then the world's always facts
-        walked = [(text, *R.checker.walk_reads(P, text, sc, own))
-                  for text, sc, own in [(t, scope, None) for t in R.checker.call_texts(op)] + self.world]
+        texts = [(t, scope, None) for t in R.checker.call_texts(op)] + self.world
+        walked = [(text, *R.checker.walk_reads(P, text, sc, own)) for text, sc, own in texts]
         for text, reads, calls in walked:
             for o in R.operations_run(P, text, reads, calls):
                 if o not in R.binding.OPERATIONS:
                     return f"no binding for {o}"
+        for text, sc, own in texts:     # a client function runs as the client's code, only once its rows pass
+            for f in sorted(R.checker.functions_used(P, R.checker.uses_of(P, text, sc, own))):
+                if R.function_rows(f)[0] != "rows passed":
+                    return f"function {f} not verified"
         if P.clock_start is None and (name in timed_ops or any(
                 clock(text, reads, calls, timed, timed_ops) for text, reads, calls in walked)):
             return "no clock start"
@@ -265,9 +276,10 @@ def machine(plan):
             self.workdir = tempfile.TemporaryDirectory()
             self.given, self.steps, self.made, self.ok, self.stopped = [], [], {}, False, False
             self.calls = []     # the operations this run called
+            R.REAL_CALLS.clear()    # the real functions this run calls
 
-        def broken(self, found):
-            return Broken([dict(g) for g in self.given], [list(s) for s in self.steps], found)
+        def broken(self, found, fact=None):
+            return Broken([dict(g) for g in self.given], [list(s) for s in self.steps], found, R.REAL_CALLS, fact)
 
         @initialize(data=st.data())
         def world(self, data):
@@ -297,17 +309,19 @@ def machine(plan):
                 self.made = R.make_givens(self.given, self.workdir.name)
             except CANNOT as e:
                 raise Cannot(cannot(e))
-            except R.Fail as e:
-                raise self.broken([str(e)])
+            except R.Fail as e:     # the example fails at its given, before any step: the step only checks
+                raise self.broken([str(e)], next(v for k, v in self.given[0].items() if k != "with") + " is not None")
             R.GIVENS[:] = self.made.values()
             R.ALWAYS[0] = True
-            unjudged = []
+            unjudged, kept, fact = [], True, None
             try:
-                kept = all([R.judged(text, R.own_scope(thing, R.kind_of(thing)), at, text, unjudged) is None
-                            for thing in R.reachable(list(self.made.values()))
-                            for text, at in R.RULES["always"].get(R.kind_of(thing)) or []])
+                for thing in R.reachable(list(self.made.values())):
+                    for text, at in R.RULES["always"].get(R.kind_of(thing)) or []:
+                        fact = (thing, text)    # every fact judged, as a false one may come before a failure
+                        kept = R.judged(text, R.own_scope(thing, R.kind_of(thing)), at, text, unjudged) is None \
+                            and kept
             except R.RuleBroken as e:
-                raise self.broken(rule_lines(e))
+                raise self.broken(rule_lines(e), over(*fact, self.made))
             finally:
                 R.ALWAYS[0] = False
             assume(kept)        # a world that breaks an always-rule is thrown away, judged or not
@@ -463,6 +477,64 @@ def verdict(name, actor, args, kwargs):
         return None
 
 
+def over(thing, text, made):
+    """the always fact text, judged on thing, as a fact of an example: each
+    property of the thing it names read through the path the example
+    names the thing by, its given's name or a chain of stored properties
+    from one (run.reachable's way), the rest as written"""
+    path = path_to(thing, made)
+    props = R.PHRASES["entities"].get(R.kind_of(thing)) or {}
+    names = sorted((n for n in free(ast.parse(text, mode="eval").body, set()) if n.id in props),
+                   key=lambda n: (n.lineno, n.col_offset))
+    lines = text.encode().split(b"\n")     # ast's offsets are bytes into each line
+    for n in reversed(names):
+        line = lines[n.lineno - 1]
+        lines[n.lineno - 1] = line[:n.col_offset] + f"{path}.{n.id}".encode() + line[n.end_col_offset:]
+    return b"\n".join(lines).decode()
+
+
+def free(n, bound):
+    """the names in n that a loop of n does not bind, a called name left
+    out; a loop's first list is read outside it, as Python reads it"""
+    if isinstance(n, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+        inner = set(bound)
+        for i, g in enumerate(n.generators):
+            yield from free(g.iter, bound if i == 0 else inner)
+            inner |= {x.id for x in ast.walk(g.target) if isinstance(x, ast.Name)}
+            for c in g.ifs:
+                yield from free(c, inner)
+        for part in (n.key, n.value) if isinstance(n, ast.DictComp) else (n.elt,):
+            yield from free(part, inner)
+    elif isinstance(n, ast.Name):
+        if n.id not in bound:
+            yield n
+    else:
+        for child in ast.iter_child_nodes(n):
+            if not (isinstance(n, ast.Call) and child is n.func and isinstance(child, ast.Name)):
+                yield from free(child, bound)
+
+
+def path_to(thing, made):
+    """the path an example names thing by: the name of the given it is, or
+    the given's name and the stored properties that reach it"""
+    queue, seen = [(t, n) for n, t in made.items()], set()
+    while queue:
+        x, path = queue.pop(0)
+        if x is thing:
+            return path
+        if id(x) in seen or not isinstance(x, R.binding.Thing) or R.kind_of(x) not in R.PHRASES["entities"]:
+            continue
+        seen.add(id(x))
+        d = R.fields(x)
+        for p in R.stored(R.kind_of(x)):
+            v = dict.get(d, p)
+            if type(v) is list:
+                queue += [(y, f"{path}.{p}[{i}]") for i, y in enumerate(v)]
+            elif v is not None:
+                queue.append((v, f"{path}.{p}"))
+    raise R.EddaError(f"no path from the givens to {R.label(thing)}")
+
+
 # --- the run and its report ---------------------------------------------------------
 
 def cases(runner, sid, story, runs, steps, seed, replay):
@@ -478,6 +550,7 @@ def cases(runner, sid, story, runs, steps, seed, replay):
     home = tempfile.TemporaryDirectory()    # Hypothesis's caches, never in the project
     set_hypothesis_home_dir(home.name)
     R.UNSET_ENDS[0] = True
+    R.REAL_FUNCTIONS[0] = True      # a client function is the client's code here, its rows passed (Plan)
     P = R.PROJECT[0]        # the clock, stopped at the project's start for every run
     R.set_clock(R.checker.resolved(R.checker.parse_time(P.clock_start), P.zone) if P.clock_start else None)
     try:
@@ -495,6 +568,7 @@ def cases(runner, sid, story, runs, steps, seed, replay):
         return [f"{sid}: generated cases: failed once, and not again on replay (seed {seed}){skips(plan)}: {e}"], True
     finally:
         R.UNSET_ENDS[0] = False
+        R.REAL_FUNCTIONS[0] = False
         R.set_clock(None)
         set_hypothesis_home_dir(None)
         home.cleanup()
@@ -534,8 +608,10 @@ def failure(sid, story, e, seed, replay, skipped):
         if g["with"]:
             out.append("            with: {" + ", ".join(f"{p}: {shown(v, prop_type(g, kind, p))}"
                                                         for p, v in g["with"].items()) + "}")
-    if e.steps:
-        out.append("        steps:")
+    out.append("        steps:")
+    if not e.steps:     # met in the starting world: one fact step, so the example checks and fails the same way
+        out.append(f"          - then: [{json.dumps(e.fact)}]")
+    else:
         for actor, call, then in e.steps:
             out.append(f"          - when: {{actor: {actor}, call: {json.dumps(call)}}}")
             if then in ("DONE", None):
@@ -547,7 +623,55 @@ def failure(sid, story, e, seed, replay, skipped):
         which = f"the rule {json.dumps(rules[0].get('rule'))}" if len(rules) == 1 else "the rule it shows"
         out.append(f"    and under the shown_by: of {which}:")
         out.append(f"          - {json.dumps(title)}")
+    return out + rows_needed(e.calls)
+
+
+def rows_needed(calls):
+    """for the calls of the run on inputs no row covers, the rows the pasted
+    example needs (section 8), under each function in block order: each
+    from the real function, to add once a person approves it; or why it
+    is not known: the function has no binding or is not verified, or the
+    real function raised"""
+    P, out = R.PROJECT[0], []
+    for kind, name in P.block_order:
+        if kind != "function":
+            continue
+        fn, seen, needed = P.functions[name], [], []     # needed: (the call, the real result or exception)
+        for f, args, got in calls:
+            if f == name and R.row_for(name, args) is None and not any(R.equal(args, a) for a in seen):
+                seen.append(args)
+                needed.append((args, got))
+        if not needed:
+            continue
+
+        def call(args):
+            return f"{name}({', '.join(row_text(a, t) for a, (_, t) in zip(args, fn['inputs']))})"
+        status = R.function_rows(name)[0]
+        if status != "rows passed":
+            why = "has no binding" if status == "not run" else "is not verified: its rows do not all pass"
+            out.append(f"    the function {name} {why}, so the rows the example needs are not known: "
+                       + ", ".join(call(args) for args, _ in needed))
+            continue
+        out.append(f"    and under the examples: of the function {name}, the rows the example needs, "
+                   "from the real function, to add only once a person approves them:")
+        for args, got in needed:
+            if isinstance(got, Exception):
+                out.append(f"      {call(args)} raised {type(got).__name__}: {got}, so its row is not known")
+                continue
+            given = ", ".join(f"{n}: {row_text(a, t)}" for a, (n, t) in zip(args, fn["inputs"]))
+            gives = row_text(got, fn["returns"])
+            out.append(f"      - {{given: {{{given}}}, gives: {gives}}}    # {call(args)} gives {gives}")
     return out
+
+
+def row_text(v, t):
+    """a value of a call of a client function as a row writes it: a time
+    quoted as YYYY-MM-DD HH:MM, a text quoted, a choice bare"""
+    if isinstance(v, datetime.datetime):
+        return json.dumps(v.strftime("%Y-%m-%d %H:%M"))
+    if type(v) is list:
+        return "[" + ", ".join(row_text(x, t) for x in v) + "]"
+    return shown(v, t) if isinstance(v, str) else repr(v)
 
 
 def prop_type(g, kind, p):

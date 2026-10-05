@@ -14,6 +14,10 @@ follows too:
               the properties of its roles
   OPERATIONS  operation name -> run(actor, *inputs, **optional_inputs):
               the operation's return, or raise Refused(reason)
+  FUNCTIONS   optional: client function name -> f(*inputs): the client's
+              real function, its inputs by position; edda run runs each
+              function's example rows through it, never an example
+              (reference section 4). Edda's own binding has none
   clock       optional: clock(now), called whenever the clock is set
               or moves, before anything is read at it (section 8), or
               None in an example that uses no time. Edda's own binding
@@ -244,7 +248,7 @@ def stories_of(file):
                     for v in st["versions"]]
         out.append(Story("story", file=file, versions=versions,
                          sentences=sentences(viewer.story_sentences(st, model["operations"], model["entities"],
-                                                                    model["roles"]))))
+                                                                    model["roles"], model["functions"]))))
     return out
 
 
@@ -300,3 +304,4 @@ ENTITIES = {"spec_file": make_spec_file}
 VALUES = {"spec_file": {"fixture": sorted(f for f in os.listdir(FIXTURES)
                                           if len(glob.glob(os.path.join(FIXTURES, f, "*.edda"))) == 1)}}
 OPERATIONS = {"check": check, "view": view, "view_at": view_at, "notes": notes}
+FUNCTIONS = {}      # Edda's own spec declares no client function

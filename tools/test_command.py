@@ -366,7 +366,7 @@ class JsonTest(unittest.TestCase):
 
     def test_check_model_and_graph(self):
         doc = self.host.json("check", "--root", ".", "--model")
-        self.assertEqual(doc["model"]["revision"], 70)
+        self.assertEqual(doc["model"]["revision"], 71)
         doc = self.host.json("check", "--root", ".", "--graph", "order.status")
         self.assertTrue(doc["graph"] and all(isinstance(s, str) for s in doc["graph"]))
 

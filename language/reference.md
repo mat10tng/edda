@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 70, 5 Oct 2026. Replaces revision 69. Decisions behind it:
+Revision 71, 5 Oct 2026. Replaces revision 70. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
@@ -17,7 +17,8 @@ one `edda` command with `--json` and fixed exit codes: decision AA,
 entry 132; both the build Plan's phase 2809; the frozen clock in
 examples: decision FF, entry 138, kb:9380368 section 2, with decisions
 Z (a day is a calendar day) and GG (`TODAY` is the day of `NOW`), and
-the build Plan's phase 2727), and Astra's review
+the build Plan's phase 2727; client functions: decisions EE and FF,
+kb:9380368 section 3, and the build Plan's phase 2728), and Astra's review
 rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file) and
@@ -60,7 +61,7 @@ so the subset below does not apply to it).
 
 ```
 specs/
-  glossary.edda      roles:
+  glossary.edda      roles: (and functions:, in any file)
   glossary.edda.vc   versions of the role blocks, append-only
   epics.edda         epics:
   order.edda         entities: order (and its parts), stories: about order
@@ -85,7 +86,7 @@ language/
 A `.edda` file is YAML 1.2, core schema, in this subset, which the
 checker enforces at the source, before the schema:
 
-- free text (`is:`, `story:`, `i_want:`, `so_that:`, `reason:`,
+- free text (`is:` of a role, entity, operation or function, `story:`, `i_want:`, `so_that:`, `reason:`,
   `means:`, `rule:`, notes, questions, example
   titles, as keys and under `shown_by:`) and
   every expression (an `also_changes` path with them) is quoted, with
@@ -111,11 +112,12 @@ checker enforces at the source, before the schema:
 - a key is written `name:`, the colon straight after the key: never
   with a space before the colon (`operations :`) or introduced by an
   explicit `?` key indicator, in `.edda` and `.edda.vc` alike;
-- `roles:`, `entities:` and `stories:`, each role, entity and story
-  under them, and each operation under `operations:` and example under
-  `examples:` are written out, one key per line, never in flow form
-  (`{ }` or `[ ]`); values below them
-  (`inputs:`, `who:`, `with:`, `then:` and the like) may be flow;
+- `roles:`, `entities:`, `functions:` and `stories:`, each role,
+  entity, function and story under them, and each operation under
+  `operations:` and example under a story's `examples:` are written out,
+  one key per line, never in flow form (`{ }` or `[ ]`); values below
+  them (`inputs:`, `who:`, `with:`, `then:`, a function's rows and the
+  like) may be flow;
 - two-space indentation, enforced: a line's indentation is even and at
   most two deeper than the line before it, a list dash counting as two
   for the line after it; keys are snake_case except
@@ -123,7 +125,10 @@ checker enforces at the source, before the schema:
   text);
 - a duplicate key is `declared_twice` at the second key; so is a
   role, entity, story or operation name declared twice in one
-  project (at the second, in file order, then file-name order), a
+  project, a function name that is also a role, entity, operation or
+  another function, or one of Edda's own words (`len`, `sum`, `any`,
+  `all`; section 4) (at the second, in file order, then file-name
+  order), a
   given name used twice in one example, and a role property named
   `name` or `roles`, which every actor has already; a declared
   name or choice value that is a Python keyword (`class`, `in`,
@@ -138,7 +143,8 @@ entity's file, which for a part is its owner's (`wrong_file`
 otherwise). `about` is authoritative. A part (`part_of:`)
 lives in its owner's file, through the whole chain of owners
 (`wrong_file` otherwise). One home per story; a story with two homes
-is two stories under one epic.
+is two stories under one epic. A client function (section 4) may live
+in any file; its versions are in the history beside that file.
 
 ## 3. Roles
 
@@ -300,6 +306,64 @@ A choice value keeps its list: a choice stands for another only when
 every value of its list is in the other's. The
 fixed names of 7.2 are roots everywhere they are allowed.
 
+**Client functions** (decisions EE and FF). Anything Edda cannot say is
+a function the client provides, declared once, in a top-level
+`functions:` block of any `.edda` file, with its meaning, its types and
+example rows:
+
+```yaml
+functions:
+  shipping_cost:
+    is: "what a parcel of that weight costs to ship"
+    inputs: {weight: NUMBER}
+    returns: NUMBER
+    examples:
+      - {given: {weight: 1}, gives: 5}
+      - {given: {weight: 10}, gives: 12}
+```
+
+| key | section | means | why |
+|---|---|---|---|
+| `functions:` | Client functions | name to client function: a value Edda cannot compute, which the client's code provides | anything Edda cannot say is declared, never left implicit (decision EE) |
+| `is:` | Client functions | what the function gives, one sentence; required | the read view; its meaning beside its rows |
+| `inputs:` | Client functions | name to type phrase, in call order; every input is passed by position | calls are typed against it |
+| `returns:` | Client functions | the type phrase of its result | a call has this type |
+| `examples:` | Client functions | the rows, at least one, each `{given: {<input>: <value>, ...}, gives: <value>}` | the function's contract: they answer for it in examples and are run against the real function |
+| `given:` | Client functions | in a row, every input by name, each once, to a value | the row's inputs |
+| `gives:` | Client functions | in a row, the result for those inputs | the row's result |
+
+A function's inputs and result are `TEXT`, `NUMBER`, `INTEGER`, `TIME`,
+`YES_NO` or a choice; any other type phrase there (an entity, `MANY`,
+`DEFAULT`, `OPTIONAL`, `DERIVED`) is `bad_type_phrase`. A row's values
+are literal values only, written as a `with:` value of that type is
+(section 8): a number, quoted text, a quoted time, `True`, `False`, a
+choice value. A row that leaves out an input is `missing_key`, one that
+names an input the function has not `unknown_key` (and then only that,
+as for a block, section 11), a value of another type `type_mismatch`;
+two rows with the same inputs and different results are
+`contradicting_rows`, values compared as values: `1` and `1.0` are one
+number, two times one when they stand for one moment. A function's name
+is unique across the project: one that is also a role, an entity, an
+operation or another function, or one of Edda's own words (`len`,
+`sum`, `any`, `all`; the fixed names of 7.2 are uppercase and so never
+a name), is `declared_twice` (the same name from two sources, decision
+EE).
+
+A function is called in any expression slot as a read is,
+`shipping_cost(order.weight)`, its inputs by position, with no actor
+and no permission check; it never changes anything (7.1). In an
+example, a call answers only from the rows (section 8); `edda run` runs
+the same rows against the client's real function through the binding
+(section 9), so its contract is never checked by the code under test.
+Results only: no call counts, no "was it called". A function is a block,
+approved and pinned like an entity block (section 10).
+
+A `DERIVED` property is not a client function: it is a value of one
+record the host computes, by a rule of section 11, with no rows, and
+the runner reads it from the binding. Growing `DERIVED` into client
+functions, and moving `ordered_by` and nested or filtered list-building
+to them, is the second part of decision FF, not in this revision.
+
 ## 5. Stories
 
 ```yaml
@@ -428,8 +492,9 @@ operations:
 - **Reads inside expressions.** `check(file)` in a fact calls a declared
   read operation, as the checker itself, with no actor and no
   permission check; a changing operation there is refused
-  (`not_an_expression`). `call:` in a step is the example asking as an
-  actor.
+  (`not_an_expression`). A client function (section 4) is called the
+  same way and never changes anything. `call:` in a step is the
+  example asking as an actor, and only an operation can be asked for.
 - **One at a time.** Operations have the results they would have if run
   one at a time. `NOW` is the example's clock (section 8): its start,
   moved only by a step's `at:`; nothing reads the machine's clock.
@@ -522,6 +587,7 @@ form are Python's.
 | `OLD(x)` | the value before the operation, one argument, only under `ensure` | Edda, after Eiffel's `old` |
 | `len(x)` | one argument, no keywords | Python |
 | `check(file)`, `approve(story, because="why")` | a declared operation called in Python call form: required inputs by position, optional ones by keyword | Python |
+| `shipping_cost(order.weight)` | a client function (section 4) called in Python call form, every input by position, no keyword; its type is its `returns` | Python syntax, Edda meaning (decision EE) |
 
 Nothing else: no lambda, dict, set, tuple, slice, conditional
 (`a if c else b`), comparison chain (`a <= x <= b`), f-string, walrus,
@@ -537,7 +603,10 @@ checked against its `inputs:`: as many positional arguments as
 required inputs, keywords only for optional inputs, each once, each
 argument of its input's type (`type_mismatch` otherwise); a changing
 operation inside a fact is `not_an_expression`; after a call, `RESULT`
-has the type of the operation's `returns`. A property read on a value
+has the type of the operation's `returns`. A call of a client function
+is checked against its `inputs:` the same way, every argument by
+position (`type_mismatch` for a keyword, too many or too few, or an
+argument of another type), and has the type of its `returns:`. A property read on a value
 that is no entity (`order.units_sent.made_up`) is `type_mismatch`. A
 value that may be of two types (`x or y`) stands only where both fit,
 and in a comparison every value one side may be is checked against
@@ -663,9 +732,43 @@ read inside it that breaks a rule fails the example at the rule's line.
 found nothing in the file, since an example's use of time is read
 through expressions that must check first.
 
+**Client functions in an example** (decision FF). A call of a client
+function (section 4), wherever the runner evaluates it in an example,
+answers only from the function's rows: the `gives` of the row whose
+inputs are the call's values, compared as values (a time as the moment
+it stands for). That holds in every phase: a step's `at:`, its call and
+arguments, a `then` fact, the called operation's who-line and refuse
+conditions, its `OLD` captures, its ensure facts, the frame rule's
+tracking of what a named property derives from, a read's `returns` and
+`ordered_by`, and an `always` fact. A call no row
+covers fails the example there, `no row for shipping_cost(3)`, at the
+line of the fact (or the verdict, for a step's call and for what its
+operation evaluates before the code runs: its conditions, `OLD`
+captures and frame rule); no phase swallows it or answers it some other
+way. The real function is never called by the spec inside an example,
+and nothing counts or checks calls.
+
+**A computed property the code gives.** Wherever an example reads a
+computed property, the value is the code's bound property, which may
+call the client's real function itself: that is the code under test
+(decision II). Edda does not work out the property's spec expression
+to compare with it, whether or not the expression calls a client
+function. Facts that read the property are what catch wrong code: with
+the code's `parcel.cost` at 999, a `then` fact `box.cost == 5` fails,
+`box.cost is 999`, and a refuse condition `parcel.cost > 100` makes a
+refusal due that correct code would not give. A computed property no
+fact reads is not checked. The frame rule's tracking of what a named
+computed property derives from evaluates the spec's expression; that
+is not a read of its value.
+
 A failure of the generated cases (section 9) is printed in this form,
 ready to paste under a story's `examples:`; pasted, it is an example
-like any other.
+like any other. When the failing run called a client function on
+inputs no row covers, the failure also lists, under that function, the
+rows the pasted example needs, `- {given: {weight: 3}, gives: 12}`,
+each the real function's answer, to add only once a person approves
+them; if the function has no binding or is not verified, it says so
+and names the calls instead.
 
 **Keys inside keys**, for the registry, each with the section that
 defines it:
@@ -827,6 +930,7 @@ the spec's, and the runner checks them. A binding provides:
 | the actor maker | the actor's name, its `roles:` and its other values | the actor: `name`, `roles` and the properties of its roles |
 | an operation | the asking actor (none for a read inside a fact), the required inputs by position, every optional one by keyword, `None` when the call leaves it out | the operation's return, or a refusal with its reason |
 | a value space, optional | an entity and a `with:` key the types cannot generate | the values generated cases pick there (section 9, generated cases): Edda's own `spec_file` takes the fixture folders holding one `.edda` |
+| a client function, optional (`FUNCTIONS`) | the function's inputs by position | the client's real result, which `edda run` holds to the rows (below); Edda's own binding has none |
 
 The runner fills in the values a maker gets, so the binding holds no
 rule of section 8. They hold every `with:` value: a value names a
@@ -908,13 +1012,31 @@ business zone's wall clock (its `fold` set for the second of a doubled
 hour), as every time the binding is given is, a `with:` time
 included. Edda's own binding has none: its operations read no time.
 
+**The rows against the real function.** Before the stories, `edda run`
+runs the rows (section 4) of each client function, every one when no
+`STORY` is named, else every one the named stories reach (the functions
+of their `story.blocks`, section 11), through the binding's real
+function, `FUNCTIONS[name](*inputs)`, in file-name, then file order; any
+other function whose rows generated cases check (below) is reported
+the same way after the stories. Whenever a run checks a function's rows,
+for any reason, it reports them: a `TIME` input is a time, as a `with:` time
+is, and the result is compared with `gives` as a value. Per function:
+`function <name>: rows passed: all <n>`; `function <name>: failing: <k>
+of <n> rows failed`, then one line per failing row, `<file>:<line>:
+shipping_cost(10) gives 12, but the code gave 13` (or `raised <error>`),
+a `failing_function` at the row's line; or `function <name>: not run: no
+binding for function <name>`. A failing row makes the exit 1. Edda
+itself calls the real function nowhere else but in generated cases
+(below).
+
 Per example: passed, or failed with, for each failing `then` item,
 its file and line, its text and what was found (the left side of a
 comparison, or why it could not be read). Per story: `examples
 passed` (every example passed), `failing` (any example failed, even
 when something after the failure had no binding), or `not run` with
 the reason: no binding for an operation, entity or property, or no
-examples. The clock is no reason any more: an example that uses time
+examples; a client function a story calls needs no binding for its
+examples, whose calls answer from the rows. The clock is no reason any more: an example that uses time
 runs on its clock (section 8), and one with no start is refused
 before the runner sees it (`no_clock_start`); a `NOW` or `TODAY` read
 on no clock all the same is Edda's own failure, exit 3 (`edda failed:
@@ -1077,7 +1199,13 @@ line is followed by one more, its generated cases
    while it still fails) and printed: what broke, at the rule's file
    and line as section 6 words it, the seed, and the run as an example
    ready to paste, titled `"generated: <operation> breaks a rule"`,
-   each step's `then` the verdict the spec gives that call. In a story
+   each step's `then` the verdict the spec gives that call. A failure
+   met in the starting world is titled `"generated: the starting world
+   breaks a rule"` and has one fact step: the `always` fact whose call
+   of a read broke a rule, written on the record it was judged on
+   (`cheap(parcel_1.cost)`), or,
+   when a given could not be made, a fact on the first given, as the
+   example fails at its given before any step. In a story
    with `rules:`, the line its title needs under a rule's `shown_by:`
    follows (`and under the shown_by: of the rule "<rule>":` when the
    story has one rule, `of the rule it shows:` when it has more), so
@@ -1091,7 +1219,19 @@ line is followed by one more, its generated cases
 
 An operation that reads the clock, as section 8 counts it for
 examples, runs on a clock stopped at the project's `clock_start:`,
-never moved. An operation with no binding, with a required
+never moved. A client function is the client's real function here,
+since rows cannot answer random inputs: an operation whose rules make
+one run (directly, through a computed property or a read they call, or
+through the starting world's `always` facts) runs only when every row of
+that function passes against it (above), else it is skipped, `function
+<name> not verified`; a failing row found so is reported and makes the
+exit 1 (above). A computed property is the code's value here too, never
+compared with its spec expression (section 8): a rule that reads it
+catches wrong code, and a starting world in which the code's value
+breaks an `always` fact is thrown away like any other. The pasted
+failure meets the same calls; a failure lists the rows it needs
+(section 8).
+An operation with no binding, with a required
 single-record input of an entity no binding makes or reaches, calling
 an operation with no binding in a condition or fact, or reading the
 clock in a project with no `clock_start:` (`no clock start`), is
@@ -1161,15 +1301,16 @@ A value left out is `null`, a list left out `[]`.
 
 | field | holds |
 |---|---|
-| `edda_model` | the model's own version, 1; a reader refuses a version it does not know |
-| `revision` | the language revision the model follows, 70: revision 70 added the clock of an example and the time of a step; revisions 64 to 69 left it as revision 63 made it |
-| `files` | each `.edda` file: `name`, `history` (its `.edda.vc` or `null`), `blocks`: each role, entity and story in the order of the status lines (section 11) with `kind`, `name`, `line`, `status` (`approved` or `draft`), `version` and `pins_stale` |
+| `edda_model` | the model's own version, 2 since revision 71 added the client functions (1 before); a reader refuses a version it does not know |
+| `revision` | the language revision the model follows, 71: revision 71 added the client functions, revision 70 the clock of an example and the time of a step; revisions 64 to 69 left it as revision 63 made it |
+| `files` | each `.edda` file: `name`, `history` (its `.edda.vc` or `null`), `blocks`: each role, entity, function and story in the order of the status lines (section 11) with `kind`, `name`, `line`, `status` (`approved` or `draft`), `version` and `pins_stale` |
 | `epics` | `id`, `text`, `file`, `line` |
 | `roles` | `name`, `is`, `properties`, `file`, `line` |
 | `entities` | `name`, `is`, `part_of` and `part_of_line`, `properties`, `may_change` (one item per property it names, an empty one included: `property`, `line`, `arrows`: one per from-value, `from`, `to`, `line`), `always` (facts), `may_create`, `may_read`, `may_update` and `may_delete` (who-lines), `file`, `line` |
-| `stories` | `id`, `sentence` (the `story:` text), `about`, `as_a`, `i_want`, `so_that`, `epic`, `tags`, `notes` and `note_lines` (the line of each note's text), `questions` and `question_lines`, `rules` (`rule`, `shown_by`, `line`), `operations` (their names), `examples`, `pins` (of the newest version: `kind`, `name`, `version`), `versions`, `file`, `line` |
+| `stories` | `id`, `sentence` (the `story:` text), `about`, `as_a`, `i_want`, `so_that`, `epic`, `tags`, `notes` and `note_lines` (the line of each note's text), `questions` and `question_lines`, `rules` (`rule`, `shown_by`, `line`), `operations` (their names), `examples`, `pins` (of the newest version: `kind`, `name`, `version`; `kind` `entity`, `role` or `function`), `versions`, `file`, `line` |
+| `functions` | each client function: `name`, `is`, `inputs` (as properties), `returns` (a property, without its `name`), `examples` (the rows: `given`, each input to a `with:` value, `gives`, a `with:` value, and `line`), `file`, `line` |
 | `operations` | `name`, `story`, `is`, `inputs` (as properties), `who` (who-lines), `refuse` (`when`, `reason`, `drift`, `line`), `ensure` (facts), `returns`, `ordered_by` and `also_changes` (expressions), `notes` and `note_lines`, `file`, `line` |
-| a version | of a story, oldest first: `number`, `approved_at`, `approved_by`, `because`, `pins` (`kind`, `name`, `version`), `story` and `operations`: its snapshot modelled as the story is, read against the blocks it pins at their pinned versions, its lines counted from its key line, 1; `entities` and `roles`: the blocks it pins, at their pinned versions, each with `name` and `properties` typed as an entity's are; and `line` (of the version in the `.edda.vc`) |
+| a version | of a story, oldest first: `number`, `approved_at`, `approved_by`, `because`, `pins` (`kind`, `name`, `version`), `story` and `operations`: its snapshot modelled as the story is, read against the blocks it pins at their pinned versions, its lines counted from its key line, 1; `entities` and `roles`: the blocks it pins, at their pinned versions, each with `name` and `properties` typed as an entity's are; `functions`: the functions it pins, at their pinned versions, each as in `functions` (its `file` `null`); and `line` (of the version in the `.edda.vc`) |
 | a property or input | `name`; `phrase` as written; `type`: `TEXT`, `NUMBER`, `INTEGER`, `TIME`, `YES_NO` (for a `DEFAULT` literal, the type it fixes), `choice` or `entity`; `values` (a choice's, in order); `entity` (a reference's or a `MANY`'s); `many`; `in_order`; `default` (the `DEFAULT` value as JSON, a choice's first value, a number read by the grammar of section 4, so `DEFAULT 01` is 1); `optional`; `derived`; `computed` (an expression; then `phrase` is `null`, and `type` and `values` are what the checker resolves the expression to: a choice with its values, a scalar word, or `null`); `line` |
 | a who-line | `role`, `when` (an expression), `line` |
 | a fact | `fact` (an expression), `means`, `drift`, `line` |
@@ -1247,22 +1388,25 @@ model only; drawing them is not built.
 
 | key | means | why |
 |---|---|---|
-| `story:` | which story this is a version of; exactly one of `story:`, `entity:` and `role:` | one version, one story or block |
+| `story:` | which story this is a version of; exactly one of `story:`, `entity:`, `role:` and `function:` | one version, one story or block |
 | `entity:` | which entity block this is a version of | one version, one story or block |
 | `role:` | which role block this is a version of | one version, one story or block |
+| `function:` | which client function block this is a version of | one version, one story or block |
 | `number:` | 1, 2, 3 ... per story or block, in file order | `bad_version` otherwise |
 | `approved_at:` | when, in the time format of 7.2 | the audit line |
 | `approved_by:` | who: the operator's name | the audit line |
 | `because:` | why, one line; optional | the audit line |
-| `pins:` | on a story version: `{entity, number}` or `{role, number}` for every block the story names, in `story.blocks` order, no extras, no duplicates | the fence against a block changing under an approved story |
+| `pins:` | on a story version: `{entity, number}`, `{role, number}` or `{function, number}` for every block the story names, in `story.blocks` order, no extras, no duplicates | the fence against a block changing under an approved story |
 | `text:` | the block as approved, normalised | the exact copy |
 
 - `.edda` is current; the agent edits it. `.edda.vc` is the file's
   history: append-only, oldest first, one version per approval of a
-  story, an entity block or a role block of that file (role blocks in
+  story, an entity block, a role block or a function block of that file
+  (role blocks in
   `glossary.edda.vc`; a version of a block of another file is
   `bad_version`, and a pin sees only the versions in the history
-  beside the block's file); only the operator's approve command,
+  beside the block's file; a history with no function version, as every
+  one before revision 71, stays valid); only the operator's approve command,
   `tools/approve.py`, writes it; a repository guard keeps the agent out.
 - **Normalised text.** A block's `text` is its lines from its key line
   (`order:`, `FUL-005:`) to its last line, with comments, blank lines
@@ -1317,10 +1461,17 @@ model only; drawing them is not built.
   one: the next number, the normalised text, the asker, the time, the
   `because`, and the pins. Blocks first, then stories; for Edda itself
   the ten entities and two roles, then EDDA-001.
-- **Approve a block.** Refused when the file does not check or when the
+- **Approve a block.** A role, entity or function block. Refused when
+  the file does not check or when the
   block is approved ("nothing to approve: the block matches its newest
   version"). Otherwise the history becomes exactly the old versions
-  followed by one, without pins.
+  followed by one, without pins. A story names among its blocks
+  (section 11, `story.blocks`) every client function the runner may
+  make run for it: in any expression it may evaluate for the story's
+  examples and operations, the `always` facts their calls are held to
+  included, and in the story's own expressions; so approving
+  the story needs the function approved first ("approve its blocks
+  first"), and a newer version of the function makes its pins stale.
 - **The approve command** is `tools/approve.py`:
 
   ```
@@ -1328,7 +1479,7 @@ model only; drawing them is not built.
       [--at "YYYY-MM-DD HH:MM"] [--dry-run] [--root DIR | --folder DIR]
   ```
 
-  `NAME` is a story id or a role or entity name, looked up across the
+  `NAME` is a story id or a role, entity or function name, looked up across the
   spec folder (the one the project's `edda.yaml` names, section 9,
   unless `--folder` names another); `--by` is
   `approved_by`; `--at` is `approved_at`, now in the host's local time
@@ -1368,7 +1519,9 @@ model only; drawing them is not built.
   matched by position in their list (the first refusal with the first
   refusal) and only when both versions have an item at that position;
   the `fact`/`means` pair only when the newest version's item has a
-  `means`. Flagged `wording_drift` at the changed side. Shown side by
+  `means`. A function's `is:` has no such partner: its rows are its
+  mechanics, and a change to either makes the block a draft, which the
+  operator reads whole. Flagged `wording_drift` at the changed side. Shown side by
   side in the diff
   view, in the warning shade in the read view. The agent re-reads the
   meaning against the mechanics and fixes or justifies it; approval
@@ -1398,6 +1551,7 @@ anchor and its aliases are one problem, at the anchor.
    `not_an_expression`, `type_mismatch`,
    `returns_and_ensure`, `wrong_file`, `not_ordered`,
    `computed_cycle`, `derived_in_given`, `wider_than_entity`, `no_rule`,
+   `contradicting_rows`,
    then, only when those found nothing in the file, `no_clock_start`
    and `clock_backwards` (section 8);
 4. history and flags: in a `.edda.vc`, `bad_version`, `bad_pin` and
@@ -1438,7 +1592,7 @@ for `computed_cycle`, the `then` item's line for
 `not_ordered`, the operation's key line for `returns_and_ensure`, the
 entity's key line for `wrong_file` on a part, the example's title
 line for `no_rule` and `no_clock_start`, the `at:` line for
-`clock_backwards`, the `starts_at:` line for `clock_unused`, the title's line under `shown_by:` for
+`clock_backwards`, the later row's line for `contradicting_rows`, the `starts_at:` line for `clock_unused`, the title's line under `shown_by:` for
 `unknown_name` on a title, the
 story's key line for `wrong_file`, `no_example` and
 `question_on_approved`, the changed
@@ -1461,15 +1615,15 @@ operation resolved by the rule, the marker's line for a marker, and the
 | `unquoted_text` | free text or an expression written plain | `quote the <key>; an unquoted # drops the rest of the line` |
 | `not_a_list` | a repeated thing written as a scalar or a mapping, an actor's `roles` as one name among them | `<key> must be a list, one <item> per line`, the item being fact, refusal, who-line, given, step, item, note, question, pin, expression, path, rule, example, tag or role |
 | `wrong_type` | a mapping, list or scalar where another is expected; an empty list where one item is needed; a given item without exactly one name; a `with` value that is not flat; an empty expression or type phrase; a quoted `DONE` after the first `then` item; a `.vc` version or pin naming no block | `<key> must be a <mapping, list, text, number or yes/no>`, or `<key> must be a <kind> or a <kind>` where the schema allows several; `<key> must be a list with at least one <item>`; `given must name exactly one thing besides with`; `<key> must be a number, text, yes/no, name or a flat list of those`; `<key> expects a text, no value was given`; `<key> expects an expression, not DONE`; `then must start with DONE or refused` for a first `then` item under a `when` that is neither; `<version> must name one of story or entity or role`; `<pin> must name one of entity or role` |
-| `missing_key` | a required key absent | `<block> needs <key>:`, the block named by kind and name: `operation remove`, `entity order`, `refusal 2`, `step 1`, `file` |
-| `unknown_key` | a key the schema does not name | `unknown key: <key>` |
+| `missing_key` | a required key absent; an input a function's row leaves out | `<block> needs <key>:`, the block named by kind and name: `operation remove`, `entity order`, `refusal 2`, `step 1`, `row 2`, `file` |
+| `unknown_key` | a key the schema does not name; an input a function's row names that the function has not | `unknown key: <key>` |
 | `bad_name` | a name not snake_case, an id not `ABC-123`, a name, choice value or role-list item that is a Python keyword (`True` and `False` as keys included), a quoted name, a quoted `DONE` as the first `then` item, a role-list item that is no name | `not a name: <text>`, the text as written; for a quoted name `not a name: "<text>" (a name is plain)` |
-| `declared_twice` | a duplicate key, a name declared twice in one project, a given name used twice in one example, a role property named `name` or `roles`, an example named twice under a story's `rules:`; at the second | `declared twice: <name>`; for an example, `declared twice: <title>` |
+| `declared_twice` | a duplicate key, a name declared twice in one project, a function name that is also a role, entity, operation or function, or one of Edda's own words, a given name used twice in one example, a role property named `name` or `roles`, an example named twice under a story's `rules:`; at the second | `declared twice: <name>`; for an example, `declared twice: <title>`; for one of Edda's own words, `declared twice: <name> (a word of Edda's own)` |
 | `unknown_name` | an undeclared lowercase word, actor, entity, role, epic, operation, property, fixture or given; a bare name that is neither in scope nor a choice value compared with a choice property; a `shown_by` title that names no example of the story | `unknown name: <name>`; for a `shown_by` title, `unknown example: <title>` |
 | `unknown_choice` | a choice value that is not one of its property's values: in a comparison, `may_change` or a given | `not one of <property>'s values: <value>` |
-| `bad_type_phrase` | a type phrase outside the grammar | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>` |
+| `bad_type_phrase` | a type phrase outside the grammar; a function's input or result that is not `TEXT`, `NUMBER`, `INTEGER`, `TIME`, `YES_NO` or a choice | `not a type phrase: <text>`; with a reason, `not a type phrase (<reason>): <text>`, for a function's `not a type phrase (a function takes and gives TEXT, NUMBER, INTEGER, TIME, YES_NO or a choice): <text>` |
 | `not_an_expression` | a string Python cannot parse, a node outside 7.1, a step in disguise, a changing call inside a fact, a `call` that is not a call of an operation, `RESULT` outside a `then` item after a call (a `call` itself never sees it) | `not an expression: <text>`; with a reason, `not an expression (<reason>): <text>` |
-| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, an index on a text, a `TIME` call whose argument is not one quoted time in the format of 7.2, a comparison of two values of different kinds (`==`), of a non-element with a list (`in`) or of anything but two numbers, texts or times (`<`), a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, `may_change` on a property that is no choice, a given value of another type than its property or fitting none of its possible types, a duration (`DAYS`, `HOURS`, `MINUTES`) anywhere but after `TIME +` or `TIME -` or with a count that is no INTEGER, an `at:` that is neither a time nor `NOW` moved by durations, a `starts_at:` that is no time | `<what> expects <kind>: <text>`; for a comparison `== expects two values of one kind: <text>`, `in expects an element of the list: <text>`, `in expects a text in a text: <text>`, `in expects a list or a text: <text>`, `< expects two numbers, two texts or two times: <text>`; `may_change expects a choice property: <property>`; `TIME expects one quoted time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": <text>`; `DAYS expects to move a time, as TIME + DAYS(n) or TIME - DAYS(n): <text>`, `DAYS expects one INTEGER: <text>` (and so for `HOURS` and `MINUTES`); `at expects a time, "YYYY-MM-DD HH:MM", or NOW moved by DAYS, HOURS or MINUTES: <text>`; `starts_at expects a time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": <text>` |
+| `type_mismatch` | a list word on a non-list, `len` on a number, `+` between a list and a number, a NUMBER or yes/no as an index, an index on a text, a `TIME` call whose argument is not one quoted time in the format of 7.2, a comparison of two values of different kinds (`==`), of a non-element with a list (`in`) or of anything but two numbers, texts or times (`<`), a call with the wrong inputs, `None` for a required input, a value of two possible types where one does not fit, a property read on a non-entity, an unordered list for an `IN ORDER` input, a choice value outside the expected list, `ordered_by` on a result that is no list, `may_change` on a property that is no choice, a given value of another type than its property or fitting none of its possible types, a duration (`DAYS`, `HOURS`, `MINUTES`) anywhere but after `TIME +` or `TIME -` or with a count that is no INTEGER, an `at:` that is neither a time nor `NOW` moved by durations, a `starts_at:` that is no time, a client function called with a keyword or the wrong inputs, a row's value of another type than its input or result, or a row's time that is no time | `<what> expects <kind>: <text>`; for a comparison `== expects two values of one kind: <text>`, `in expects an element of the list: <text>`, `in expects a text in a text: <text>`, `in expects a list or a text: <text>`, `< expects two numbers, two texts or two times: <text>`; `may_change expects a choice property: <property>`; `TIME expects one quoted time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": <text>`; `DAYS expects to move a time, as TIME + DAYS(n) or TIME - DAYS(n): <text>`, `DAYS expects one INTEGER: <text>` (and so for `HOURS` and `MINUTES`); `at expects a time, "YYYY-MM-DD HH:MM", or NOW moved by DAYS, HOURS or MINUTES: <text>`; `starts_at expects a time, "YYYY-MM-DD HH:MM" or "YYYY-MM-DD": <text>` |
 | `returns_and_ensure` | a read key with a write key, or `ordered_by` without `returns`, or `also_changes` without `ensure` | `returns and ensure on one operation: <name>`, `returns and also_changes on one operation: <name>`, `ordered_by needs returns: <name>`, `also_changes needs ensure: <name>` |
 | `wrong_file` | a story in another entity's file; a part outside its owner's file | `story <id> is about <entity> and belongs in <entity>.edda`; `entity <name> is part of <owner> and belongs in <entity>.edda` |
 | `not_ordered` | `RESULT[n]` on an unordered return, through an `or` or comprehension of `RESULT` as well | `<operation> gives no order; RESULT[<n>] needs ordered_by or IN ORDER` |
@@ -1477,6 +1631,7 @@ operation resolved by the rule, the marker's line for a marker, and the
 | `derived_in_given` | a `with:` value for a derived or computed property, or for an actor's `name` | `<property> is derived and cannot be given`, `<property> is computed and cannot be given`, `name is fixed and cannot be given` |
 | `wider_than_entity` | `who:` admits a role the `about` entity's matrix never names | `<operation> admits <role>, which <entity> does not` |
 | `no_rule` | a story with `rules:` has an example no rule names | `example "<title>" belongs to no rule` |
+| `contradicting_rows` | two rows of a client function with the same inputs and different results, values compared as values (section 4), judged once every row's values check; at the later row | `<function>: rows <i> and <j> give different results for the same inputs` |
 | `no_clock_start` | an example that uses time (section 8) with no `starts_at:` and no project `clock_start:` | `example "<title>" uses time (<how>) but has no start; give it starts_at: or the project clock_start:`, `<how>` the first use found: `reads NOW`, `moves time with at:`, `reads <entity>.<property>, which reads the clock` or `calls <operation>, which reads the clock` |
 | `clock_backwards` | an `at:` the checker can tell is earlier than the clock before it (section 8) | `at <at> is before the clock's <time>; time never goes backwards`, an expression followed by its time in brackets |
 | `bad_version` | a `.vc` number out of sequence, an unknown story or block, or a version of a block of another file | `<kind> <name> v<n> out of sequence; expected v<m>`; for an unknown block, `<kind> <name> v<n>: no such <kind>`; for another file's block, `<kind> <name> v<n>: belongs in <file>.edda.vc` |
@@ -1515,6 +1670,7 @@ operation resolved by the rule, the marker's line for a marker, and the
 |---|---|---|
 | `failing_example` | an example of a story whose operations are bound fails: a wrong verdict, a `then` fact that does not hold, a given that cannot be made, an `at:` that would move the clock back, or a call or a read inside a fact that breaks a rule of its operation; one per failure line, at that line | the runner's line under `example "<title>" failed`: `<file>:<line>: then <text>: found <found>`, or `<file>:<line>: <found>` |
 | `failing_case` | a generated case breaks a rule (section 9); one per broken rule the failure names, at the rule's line, or one at no line when it names none | `<id>: generated cases: failed (seed <n>)`, then `<file>:<line>: <what>` for each broken rule |
+| `failing_function` | a row of a client function that its bound real function does not give back (section 9): another result, or an error; one per failing row, at the row's line | `function <name>: failing: <k> of <n> rows failed`, then `<file>:<line>: <name>(<inputs>) gives <result>, but the code gave <found>` or `<name>(<inputs>) raised <error>` |
 
 **Dimensions.** Every problem, a refusal, a flag or a failure, carries
 six dimensions (decision U, kb:9379257), so problems can be counted and
@@ -1528,7 +1684,7 @@ the tool that reports it.
 | fix | `missing`, `wrong`, `extra` | the rule: add, change or delete |
 | acts | `agent`, `person`, `language` | the rule; a person may re-tag one problem as `language` |
 | level | `blocks`, `warns`, `note` | the rule: a refusal or a failure blocks, a flag warns, a status only is a note |
-| where | `role`, `entity property`, `status rules`, `always`, `permissions`, `story`, `story rules`, `operation who`, `refuse`, `ensure`, `returns`, `example given`, `example step`, `history`, `code`, `unknown` | the problem's line |
+| where | `role`, `entity property`, `status rules`, `always`, `permissions`, `function`, `story`, `story rules`, `operation who`, `refuse`, `ensure`, `returns`, `example given`, `example step`, `history`, `code`, `unknown` | the problem's line |
 | found by | `reading`, `history`, `analyser`, `example run`, `generated case`, `person review` | the tool |
 
 `what went wrong`: `unreadable`, the file is not valid Edda text;
@@ -1568,6 +1724,7 @@ a problem, and is neither counted nor logged.
 | `wider_than_entity` | misplaced | permission scope | extra | person | blocks |
 | `computed_cycle` | misplaced | computed loop | wrong | person | blocks |
 | `no_rule` | misplaced | example ungrouped | missing | agent | blocks |
+| `contradicting_rows` | contradiction | function rows | wrong | person | blocks |
 | `no_clock_start` | weak check | no clock start | missing | agent | blocks |
 | `clock_backwards` | contradiction | time backwards | wrong | agent | blocks |
 | `bad_version` | out of date | history broken | wrong | person | blocks |
@@ -1595,6 +1752,7 @@ a problem, and is neither counted nor logged.
 | `clock_unused` | misplaced | unused start | extra | agent | warns |
 | `failing_example` | code differs | behaviour | wrong | agent | blocks |
 | `failing_case` | code differs | behaviour | wrong | agent | blocks |
+| `failing_function` | code differs | behaviour | wrong | agent | blocks |
 
 `where` is read from the problem's file and line: any line of a
 `.edda.vc` is `history`, of a `.links` or a code file `code`; in a
@@ -1602,7 +1760,7 @@ a problem, and is neither counted nor logged.
 when every key and item that starts on the line maps to the same one
 place, and a line that also holds a key of another place or of none (a
 block written in flow form, `box: {is: ..., may_read: [...]}`) is
-`unknown`. The places: a role's block, `role`; an entity's `properties`, `entity property`;
+`unknown`. The places: a role's block, `role`; a client function's block, `function`; an entity's `properties`, `entity property`;
 `may_change`, `status rules`; `always`, `always`; `may_create`,
 `may_read`, `may_update` and `may_delete`, `permissions`; a story's key
 or its own keys (its own `notes` among them), `story`, but `rules`,
@@ -1617,7 +1775,7 @@ problem with no line) is `unknown`; it is never guessed.
 `wording_drift`, `question_on_approved`, `stale_link` and
 `unapproved_link`; `analyser` for the analyser's four flags; `reading`
 for every other rule of the checker; `example run` for
-`failing_example`; `generated case` for `failing_case`. `person review`
+`failing_example` and `failing_function`; `generated case` for `failing_case`. `person review`
 is for a problem a person finds; no tool sets it yet.
 
 **Re-tagging as `language`.** A person who finds that a problem is the
@@ -1680,7 +1838,7 @@ and `False` for a yes/no, ranges for a number (whole numbers for an
 for a `NUMBER`), and for any other type only "no value" and "a value";
 an `OPTIONAL` property also has "no value". Two different paths are
 taken as independent. A condition outside that shape, with a list word,
-a sum, a call, `OLD`, `ACTOR` or two properties compared, is skipped for
+a sum, a call (a client function's included), `OLD`, `ACTOR` or two properties compared, is skipped for
 the check that needs it, never guessed at. `forbidden_change` runs for
 an `ensure` fact only in one shape, where a warning is provably right,
 and is skipped for anything else:
@@ -1743,7 +1901,15 @@ but never invent one. An `always` fact is read under the path of the entity the
   story reading `order.children` with `children: MANY item` names
   `item`); every role in
   `as_a`, a who-line, a given's `roles:`, and on a `may_*` line of a
-  collected entity; each once; ordered by file name, then file order.
+  collected entity; every client function the runner may make run for
+  the story: in every expression it may evaluate for the story's
+  examples (a step's `at:` and call, its `then` facts, and the `always`
+  facts of the things they reach), in every expression of the story's
+  operations and the `always` facts their calls are held to, and in the
+  story's own expressions; directly or through the computed properties
+  read and the operations called (their every expression, nested to the
+  end). The same set names the rows `edda run STORY` checks (section 9).
+  Each once; ordered by file name, then file order.
 - `story.versions`, `block.versions`: the history's versions of this
   story or block, oldest first. `pins_stale` looks at the newest
   version only.
@@ -1770,9 +1936,10 @@ the fixtures. `--root DIR` names the project (section 9).
 
 **Status and changes.** Under each `.edda` file that checks, its
 history included (no refusal in the file or in the `.edda.vc` beside
-it), the checker prints one line per role, entity and story, roles
-first, then entities, then stories, each in file order: `<kind>
-<name>: approved v<n>` or `<kind> <name>: draft v<n>`, `n` the block's
+it), the checker prints one line per role, entity, function and story,
+roles first, then entities, then functions, then stories, each in file
+order: `<kind>
+<name>: approved v<n>` or `<kind> <name>: draft v<n>` (`function shipping_cost: draft v0`), `n` the block's
 or story's `version`, `len(versions)` (0 when there are none), with
 `, pins stale` after an approved story whose pins are stale. Under a
 story with a version, one line per change of `story.changes`, in walk
@@ -1848,6 +2015,9 @@ rule:
 | outcome | `When <name> succeeds, <means>.` or, without `means`, `When <name> succeeds, <fact in words>.` |
 | read | `<Name> gives <returns in words>[, ordered by <keys>].` |
 | invariant | `Always, <fact>.` |
+| function | `<Name> is <is>.`, a client function's meaning |
+| signature | `<Name> takes <inputs> and gives <type>.`, its inputs read as a permission's are, `nothing` when it has none |
+| row | `For example, the <name> of <values> gives <value>.`, one per row, the values read as a given's are, joined with "and" |
 | rule | `Rule: <sentence>.` as a heading line before its examples; with `rules:`, the rules come where the examples stood, in `rules` order, each followed by its examples in `shown_by` order; without `rules:`, no rule sentence and the examples in file order |
 | example | `Example: <title>.` |
 | given | one sentence for all givens: `Given <item>, and <item>.`; an actor reads `<name>, a <role>`; an entity `<name>, a <entity> with <property> <value> and <property> <value>`; items are joined with `, ` and the last with `, and ` (the comma stays because each item carries its own apposition) |
@@ -1891,7 +2061,7 @@ read.
 the note's or question's text line; the operation's key line; the
 who-line for `permission`; the `when` line for `refusal`; the fact's
 line for `outcome`; the `returns` line for `read`; the fact's line for
-`invariant`; the line of the `rule:` key for `rule`, wherever that
+`invariant`; the function's key line for `function`, its `returns:` line for `signature`, the row's line for `row`; the line of the `rule:` key for `rule`, wherever that
 key stands in the item (after `shown_by:` too); the title line for
 `example`; the `given:` line for
 `given`; the step's `when` line for `when`; the step's `then` line for
@@ -1919,7 +2089,11 @@ Where the rules above are silent, the view reads so:
   `when` before `then`, by line, then its notes.
 - **Invariants** belong to no story: `view.py` prints an entity's
   `always` facts, one sentence each, before the stories of its file,
-  only when no `STORY` is named. Their bare names are the entity's own
+  only when no `STORY` is named. So are client functions: each one's
+  sentences follow the invariants of its file, only when no `STORY` is
+  named. A call of one reads as a call of an operation does ("the
+  shipping cost of the order's weight"), and is proven yes or no by its
+  `returns:`. Their bare names are the entity's own
   properties and read as words (`Always, units sent is at least 0.`).
 - **Articles and stops.** "a" or "an" by the sound the word starts
   with, roles included (`As an operator`): a single-letter name goes by
@@ -2139,13 +2313,14 @@ four codes:
 | exit | means |
 |---|---|
 | 0 | nothing refused and nothing failed; flags alone are 0 |
-| 1 | a refusal (of the settings, of the spec, or of the log folder by `trend`), a failing example or generated case, or an approval refused |
+| 1 | a refusal (of the settings, of the spec, or of the log folder by `trend`), a failing example, function row or generated case, or an approval refused |
 | 2 | a usage error: no command or an unknown one, an unknown or missing option, a folder or file an option names that is not there or not of its kind (`no such folder`, `not a folder`, `no such file`, `not a file`, one line, before anything is done), a story or property named that is not there (or a property with no graph to draw), `--root` with a spec folder or a log of another root, an `--at`, `--by` or `--because` not well formed, `--root` to `guide` without `--pointer`, `trend` with the log off and no `--log` |
 | 3 | Edda itself failed: an error the tools did not foresee (`edda failed: <error>`), a spec the runner meets that the checker should have refused, generated cases on and Hypothesis missing, a pin newer than the tools (`pinned_newer`), a passage the guide needs missing from this reference |
 
 **`--json`.** With `--json` a command prints one JSON document on
-stdout instead of its text, and exits as above. Its shape is format 1;
-a change to it is a new number. Every document has `format` (1), `edda`
+stdout instead of its text, and exits as above. Its shape is format 2
+(revision 71 added `run`'s `functions`; format 1 before); a change to
+it is a new number. Every document has `format` (2), `edda`
 (the revision of the tools), `command` (`null` for an unknown one),
 `exit` (the exit code), the command's own fields below, and `messages`:
 every line the plain output would print that the fields do not hold,
@@ -2164,8 +2339,8 @@ in the order of section 11.
 | command | fields |
 |---|---|
 | `check` | `files`: in the plain run's order, each `.edda` and `.edda.vc` file of the spec folder, then each `.links` and covered code file, each with `file`, `ok` (no refusal), `status` (its status, change and link lines), `problems` and `flags` (each `rule`, `line` and `message`); `problems`: every problem of the project, a flag of the settings included; `counts`; `model`, the model, with `--model`; `graph`, its lines, with `--graph`. The fixtures are not in it |
-| `run` | `stories`: each `id`, `status`, `detail`, `examples_failed` (each `title` and `failures`, each `at`, the `file:line`, `then`, the fact or `null`, and `found`) and `generated` (the lines of its generated cases); `failures`: each failure as a problem; `counts` |
-| `view` | `blocks`: in the plain order, each `file`, `kind` (`story`, or `entity` for an entity's invariants), `name` and `sentences`, each `line`, `kind`, `shade` and `text` (section 12) |
+| `run` | `functions`: every client function whose rows the run checked against its real function (section 9), in the order reported: with no `STORY` every one, with `STORY` names those the named stories reach, then any other whose rows generated cases checked; each `name`, `status`, `detail` and `failures` (each `at`, the `file:line`, and `found`); `stories`: each `id`, `status`, `detail`, `examples_failed` (each `title` and `failures`, each `at`, the `file:line`, `then`, the fact or `null`, and `found`) and `generated` (the lines of its generated cases); `failures`: each failure as a problem; `counts` |
+| `view` | `blocks`: in the plain order, each `file`, `kind` (`story`, `entity` for an entity's invariants, or `function`), `name` and `sentences`, each `line`, `kind`, `shade` and `text` (section 12) |
 | `approve` | `name`, `kind`, `number`, `history` (the `.edda.vc`), `version` (the new version's text), `written` (`false` with `--dry-run`) and `refused` (why it was refused, or `null`) |
 | `guide` | `pointer` (the line, with `--pointer`, else `null`), `guide` (the guide's path) and `written` |
 | `trend` | `log`, `skipped`, `total`, `first` and `last` (the first and last day), `per_day` (each `date`, `total` and `counts`), `by`, `groups` (each `count` and `values`, one value per dimension of `by`) and `rules` (each `count` and `rule`) |
@@ -2182,12 +2357,72 @@ Qualities and infrastructure (#2487), time-triggered operations
 existing code (#2492), story to Plan tasks (#2493), richer calculations
 and durations beyond moving a time (#2494), tooling (#2495), the KDL skeleton trial (#2512),
 rule packs a project follows and their key in `edda.yaml` (#2612), the
-agent guide served by the KB as a skill;
+agent guide served by the KB as a skill, the second part of client
+functions (decision FF: `ordered_by`, nested or filtered list-building
+and `DERIVED` moved to client functions);
 the running of examples and the rule wrapping round every call are
 begun (sections 6 and 9: Edda's own `check`); the rest of the done
 computation gets its own stories.
 
-## 15. Changes from revision 69
+## 15. Changes from revision 70
+
+Build Plan kb:9379223, phase 2728, part 1, and decisions EE and FF
+(kb:9380368 section 3): client functions.
+
+- A new top-level block `functions:`, in any `.edda` file: each client
+  function with `is:`, `inputs:`, `returns:` and example rows,
+  `examples:`, each `{given: {...}, gives: ...}` (4). Its inputs and
+  result are scalars or a choice; its rows literal values of those
+  types; a row leaving out or misnaming an input is `missing_key` or
+  `unknown_key`; a function's name clashing with a role, entity,
+  operation, function or one of Edda's own words is `declared_twice`
+  (2, 4, 11).
+- A new refusal `contradicting_rows`: two rows with the same inputs and
+  different results, in the registry with its dimensions and with a
+  fixture, `fixtures/contradicting_rows` (11).
+- A client function is called in any expression slot,
+  `shipping_cost(weight)`, by position, with no actor; its type is its
+  `returns:` (7.1).
+- In an example a call answers only from the rows; one no row covers
+  fails the example, `no row for shipping_cost(3)`, in every phase (8).
+- A computed property is still the code's bound property, as in
+  revision 70, whether or not its expression calls a client function:
+  Edda does not work out its spec expression to compare (decision II).
+  Facts that read it catch wrong code; a computed property no fact
+  reads is not checked (8, 9).
+- `edda run` runs function rows through the binding's new `FUNCTIONS`
+  before the stories: every function with no `STORY`, with `STORY`
+  names those the named stories reach (`story.blocks`), then after the
+  stories any other whose rows generated cases checked: `rows passed`,
+  `failing` with a new failure `failing_function` per row (exit 1), or
+  `not run: no binding for function <name>`. Generated cases call the
+  real function only once its rows pass; an operation needing one that
+  does not is skipped, `function <name> not verified` (9).
+- A function is a block: `.edda.vc` gains `function:` versions and pins
+  (`vc-schema.json`); `approve.py` approves a function; `story.blocks`
+  names every function the runner may make run for a story (in its
+  examples and the `always` facts they reach, its operations and the
+  `always` facts their calls are held to, and its own expressions;
+  directly or through computed properties and called operations), so
+  approving the story needs it approved first and a newer version makes
+  the pins stale. A history
+  without function versions stays valid (10, 11).
+- The read view gives a function's meaning, inputs and result and each
+  row, `For example, the shipping cost of 1 gives 5.`; new sentence
+  kinds `function`, `signature` and `row` (12). A new `where` value,
+  `function` (11).
+- The model lists `functions`, a version its pinned `functions`; its
+  `edda_model` is now 2 and its `revision` 71. `--json` is format 2:
+  `run` gains `functions` (9, 13).
+- `DERIVED` is unchanged; section 4 says how it relates to a client
+  function. Moving `ordered_by`, list-building and `DERIVED` to client
+  functions is part 2, not here (4, 14).
+- Edda's own repository declares no client function; its `edda.yaml`
+  pins `edda: 71`. `edda check` adds `fixtures/contradicting_rows` to
+  its fixture report, and the line numbers of its link flags on the
+  changed tools move; `edda run` prints what it did in revision 70.
+
+## 16. Changes from revision 69
 
 Build Plan kb:9379223, phase 2727, and decision FF (entry 138,
 kb:9380368 section 2), with decisions Z and GG: the frozen clock in
@@ -2240,7 +2475,7 @@ examples.
   in revision 69. `edda check` adds the three new fixtures to its
   fixture report.
 
-## 16. Changes from revision 68
+## 17. Changes from revision 68
 
 Build Plan kb:9379223, phase 2809, and decisions HH (entry 140) and AA
 (entry 132): the problem log is opt-in, and one `edda` command.
@@ -2292,7 +2527,7 @@ Build Plan kb:9379223, phase 2809, and decisions HH (entry 140) and AA
 - The guide and the README name the `edda` command; the guide is
   regenerated. No block's text changes.
 
-## 17. Changes from revision 67
+## 18. Changes from revision 67
 
 Build Plan kb:9379223, phase 2657, and decisions W and X (kb:9380137):
 the import contract.
@@ -2347,7 +2582,7 @@ the import contract.
   `edda.yaml`, so its checker's run, its runner and its model are
   unchanged; the model's `revision` stays 63. No block's text changes.
 
-## 18. Changes from revision 66
+## 19. Changes from revision 66
 
 Build Plan kb:9379223, phase 2649, and decision U (kb:9379257,
 questions 4 to 6): every problem carries six dimensions, and problems
@@ -2381,7 +2616,7 @@ are counted and logged.
   `tools/test_dimensions.py` tests them. The model's `revision` stays
   63, and no block's text changes.
 
-## 19. Changes from revision 65
+## 20. Changes from revision 65
 
 Build Plan kb:9379223, phase 2648, and decision U (kb:9379257,
 questions 1 to 3): the analyser, four flags found from the spec alone.
@@ -2414,7 +2649,7 @@ questions 1 to 3): the analyser, four flags found from the spec alone.
   and the model are unchanged, the model's `revision` stays 63, and
   no block's text changes.
 
-## 20. Changes from revision 64
+## 21. Changes from revision 64
 
 Build Plan kb:9379223, phase 2636, and decision T (kb:9379252):
 generated cases, off by default.
@@ -2492,7 +2727,7 @@ generated cases, off by default.
   run, the checker's run and the model are unchanged; the model's
   `revision` stays 63. No block's text changes.
 
-## 21. Changes from revision 63
+## 22. Changes from revision 63
 
 Build Plan kb:9379223, phase 2623, and decision N (kb:9379218, Q6):
 every operation is linked to the code that does it.
@@ -2565,7 +2800,7 @@ every operation is linked to the code that does it.
   the model's `revision` stays 63, as nothing in it changed (9). No
   block's text changes, so nothing needs re-approval.
 
-## 22. Changes from revision 62
+## 23. Changes from revision 62
 
 Build Plan kb:9379223, phase 2622: the read view, built.
 
@@ -2668,7 +2903,7 @@ Build Plan kb:9379223, phase 2622: the read view, built.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 23. Changes from revision 61
+## 24. Changes from revision 61
 
 Build Plan kb:9379223, phase 2621, and decision N (kb:9379218, Q7): one
 versioned JSON model of the whole spec, the graphs in it as data.
@@ -2705,7 +2940,7 @@ versioned JSON model of the whole spec, the graphs in it as data.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 24. Changes from revision 60
+## 25. Changes from revision 60
 
 Build Plan kb:9379223, phase 2625: every bound operation is held to its
 contract, on every call the runner makes.
@@ -2742,7 +2977,7 @@ contract, on every call the runner makes.
   wrapping as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 25. Changes from revision 59
+## 26. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -2783,7 +3018,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 26. Changes from revision 58
+## 27. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -2801,7 +3036,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 27. Changes from revision 57
+## 28. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -2888,7 +3123,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 28. Changes from revision 56
+## 29. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -2907,7 +3142,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 29. Changes from revision 55
+## 30. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -2931,7 +3166,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 30. Changes from revision 54
+## 31. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -2946,7 +3181,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 31. Changes from revision 53
+## 32. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -2981,7 +3216,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 32. Changes from revision 52
+## 33. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -2997,7 +3232,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 33. Changes from revision 51
+## 34. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -3019,7 +3254,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 34. Changes from revision 50
+## 35. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -3029,7 +3264,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 35. Changes from revision 49
+## 36. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -3038,14 +3273,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 36. Changes from revision 48
+## 37. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 37. Changes from revision 47
+## 38. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -3055,7 +3290,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 38. Changes from revision 46
+## 39. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -3064,7 +3299,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 39. Changes from revision 45
+## 40. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -3074,7 +3309,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 40. Changes from revision 44
+## 41. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -3083,7 +3318,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 41. Changes from revision 43
+## 42. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -3092,7 +3327,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 42. Changes from revision 42
+## 43. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -3103,7 +3338,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 43. Changes from revision 41
+## 44. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -3112,21 +3347,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 44. Changes from revision 40
+## 45. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 45. Changes from revision 39
+## 46. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 46. Changes from revision 38
+## 47. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -3134,7 +3369,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 47. Changes from revision 37
+## 48. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -3143,7 +3378,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 48. Changes from revision 36
+## 49. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -3154,7 +3389,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 49. Changes from revision 35
+## 50. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -3167,7 +3402,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 50. Changes from revision 34
+## 51. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -3180,7 +3415,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 51. Changes from revision 33
+## 52. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -3196,7 +3431,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 52. Changes from revision 32
+## 53. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -3214,7 +3449,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 53. Changes from revision 31
+## 54. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -3233,7 +3468,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 54. Changes from revision 30
+## 55. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -3254,7 +3489,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 55. Changes from revision 29
+## 56. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -3275,7 +3510,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 56. Changes from revision 28
+## 57. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -3292,7 +3527,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 57. Changes from revision 27
+## 58. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -3314,7 +3549,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 58. Changes from revision 26
+## 59. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

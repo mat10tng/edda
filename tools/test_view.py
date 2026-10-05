@@ -783,8 +783,8 @@ class Run(unittest.TestCase):
     def test_a_broken_renderer_fails_edda_007(self):
         real = view.story_sentences
 
-        def broken(story, operations, entities, roles):     # the permissions left out
-            return [s for s in real(story, operations, entities, roles) if s["kind"] != "permission"]
+        def broken(story, operations, entities, roles, functions=()):     # the permissions left out
+            return [s for s in real(story, operations, entities, roles, functions) if s["kind"] != "permission"]
         binding.viewer.story_sentences = broken
         try:
             sid, status, detail, failed = run.run(SPECS, ["EDDA-007"])[0]
