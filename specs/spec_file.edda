@@ -562,6 +562,9 @@ stories:
         is: "lists the notes of several files, equal wording together"
         inputs: {files: MANY spec_file}
         who: [{role: agent}, {role: operator}]
+        refuse:
+          - when: "any(p.kind == refused for f in files for p in check(f))"
+            reason: "a file does not check"
         returns: "[note for file in files for note in file.notes]"
         ordered_by: ["note.text", "note.file.name", "note.line"]
     examples:
@@ -588,3 +591,14 @@ stories:
               - "RESULT[3].text == \"the stock feed is refreshed every night\""
               - "RESULT[3].file.name == \"stock\""
               - "RESULT[3].line == 20"
+      "a file that does not check is refused and no notes are listed":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: a
+            with: {fixture: notes_a}
+          - spec_file: bad
+            with: {fixture: notes_bad}
+        steps:
+          - when: {actor: tuan, call: "notes([a, bad])"}
+            then: [{refused: "a file does not check"}]

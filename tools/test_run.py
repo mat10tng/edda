@@ -30,6 +30,7 @@ a time as a time, and "2026-02-30" stays a text.
 """
 import contextlib
 import copy
+import datetime
 import io
 import json
 import os
@@ -1392,7 +1393,17 @@ class RunTest(unittest.TestCase):
 
     def test_real_checker_passes_edda_003(self):
         sid, status, detail, failed = story(run.run(SPECS, ["EDDA-003"]), "EDDA-003")
-        self.assertEqual((status, detail, failed), ("examples passed", "all 1", []))
+        self.assertEqual((status, detail, failed), ("examples passed", "all 2", []))
+
+    def test_notes_that_do_not_refuse_a_file_that_does_not_check_fail_edda_003(self):
+        real = binding.notes_of
+        binding.notes_of = lambda files: real([f for f in files if "ensures:" not in f.text])  # the bad file left out
+        try:
+            sid, status, detail, failed = story(run.run(SPECS, ["EDDA-003"]), "EDDA-003")
+        finally:
+            binding.notes_of = real
+        self.assertEqual((status, detail), ("failing", "1 of 2 examples failed"))
+        self.assertEqual(failed[0][0], "a file that does not check is refused and no notes are listed")
 
     def test_notes_out_of_order_fail_edda_003(self):
         real = binding.checker.notes
@@ -1401,7 +1412,7 @@ class RunTest(unittest.TestCase):
             sid, status, detail, failed = story(run.run(SPECS, ["EDDA-003"]), "EDDA-003")
         finally:
             binding.checker.notes = real
-        self.assertEqual((status, detail), ("failing", "1 of 1 examples failed"))
+        self.assertEqual((status, detail), ("failing", "1 of 2 examples failed"))
 
     def test_actor_without_an_allowed_role_is_refused(self):
         run.run(SPECS, ["EDDA-001"])            # loads the operations as written
@@ -1409,6 +1420,126 @@ class RunTest(unittest.TestCase):
         with self.assertRaises(binding.Refused) as r:
             run.run_operation("check", stranger, [None], {})
         self.assertEqual(r.exception.reason, "check is not allowed for shop_user")
+
+
+def tree(folder):
+    """every file under folder with its bytes"""
+    out = {}
+    for d, _, names in os.walk(folder):
+        for n in names:
+            with open(os.path.join(d, n), "rb") as f:
+                out[os.path.join(d, n)] = f.read()
+    return out
+
+
+class ApprovalTest(unittest.TestCase):
+    """approve, approve_block and diff run through the binding against
+    approve.py and check.py, on the fixture copy, never on specs/ or
+    fixtures/; notes refuses a file that does not check"""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.tuan = binding.make_actor("tuan", ["operator"], {})
+        binding.clock(datetime.datetime(2026, 10, 2, 9, 0))
+
+    def tearDown(self):
+        binding.clock(None)
+        self.dir.cleanup()
+
+    def file(self, fixture, name="f"):
+        return binding.make_spec_file(name, {"fixture": fixture}, self.dir.name)
+
+    def test_the_real_code_passes_edda_004_to_008(self):
+        found = run.run(SPECS, ["EDDA-004", "EDDA-005", "EDDA-006", "EDDA-008"])
+        self.assertEqual([(sid, status, detail) for sid, status, detail, _ in found],
+                         [("EDDA-008", "examples passed", "all 8"), ("EDDA-004", "examples passed", "all 9"),
+                          ("EDDA-005", "examples passed", "all 6"), ("EDDA-006", "examples passed", "all 6")])
+
+    def test_running_every_story_writes_nothing_under_specs_or_fixtures(self):
+        before = tree(SPECS), tree(binding.FIXTURES)
+        run.run(SPECS)
+        self.assertEqual((tree(SPECS), tree(binding.FIXTURES)), before)
+
+    def test_approve_appends_a_version_to_the_copy(self):
+        f = self.file("blocks_approved")
+        fixture = tree(os.path.join(binding.FIXTURES, "blocks_approved"))
+        st, old = f.stories[0], f.history.versions
+        binding.OPERATIONS["approve"](self.tuan, st, because="the shop asked for it")
+        self.assertIs(f.stories[0], st)
+        self.assertEqual(f.history.versions[:-1], old)
+        self.assertIs(f.history.versions[-1], st.versions[-1])
+        v = st.versions[-1]
+        self.assertEqual((v.number, v.approved_by, v.approved_at, v.because), (1, "tuan",
+                         datetime.datetime(2026, 10, 2, 9, 0), "the shop asked for it"))
+        self.assertEqual([(p.kind, p.name, p.number) for p in v.pins], [("role", "shop_user", 1), ("entity", "order", 1)])
+        self.assertEqual([p.block for p in v.pins], st.blocks)
+        self.assertTrue(st.approved)
+        self.assertFalse(st.pins_stale)
+        with open(f._path + ".vc") as vc:
+            self.assertEqual(f.history.text, vc.read())
+        self.assertEqual(tree(os.path.join(binding.FIXTURES, "blocks_approved")), fixture)
+
+    def test_approve_refuses_with_approve_py_s_reason_and_writes_nothing(self):
+        for fixture, reason, version in (("approved", "nothing to approve: the story matches its newest version "
+                                                      "and its pins are current", 1),
+                                         ("order", "approve its blocks first", 0),
+                                         ("unknown_key", "the file does not check", 0)):
+            f = self.file(fixture, fixture)
+            text = f.history.text
+            with self.assertRaises(binding.Refused) as r:
+                binding.OPERATIONS["approve"](self.tuan, f.stories[0])
+            self.assertEqual(r.exception.reason, reason)
+            self.assertEqual((f.history.text, f.stories[0].version), (text, version))
+
+    def test_approve_needs_the_clock(self):
+        binding.clock(None)
+        with self.assertRaises(ValueError):
+            binding.OPERATIONS["approve"](self.tuan, self.file("blocks_approved").stories[0])
+
+    def test_approve_block_appends_a_block_version(self):
+        f = self.file("order")
+        order = f.blocks[1]
+        binding.OPERATIONS["approve_block"](self.tuan, order)
+        self.assertEqual((order.kind, order.name, order.version, order.approved), ("entity", "order", 1, True))
+        self.assertEqual((order.versions[0].because, order.versions[0].pins, f.blocks[0].version), (None, [], 0))
+
+    def test_approve_block_refuses_an_approved_block(self):
+        f = self.file("approved")
+        with self.assertRaises(binding.Refused) as r:
+            binding.OPERATIONS["approve_block"](self.tuan, f.blocks[1])
+        self.assertEqual(r.exception.reason, "nothing to approve: the block matches its newest version")
+        self.assertEqual(f.blocks[1].version, 1)
+
+    def test_diff_gives_the_checker_s_changes(self):
+        changes = binding.OPERATIONS["diff"](self.tuan, self.file("reason_changed").stories[0])
+        self.assertEqual([(c.kind, c.line) for c in changes], [("removed", 16), ("added", 16), ("removed", 37), ("added", 37)])
+        fresh = binding.OPERATIONS["diff"](self.tuan, self.file("order", "fresh").stories[0])
+        self.assertEqual((len(fresh), {c.kind for c in fresh}), (48, {"added"}))
+
+    def test_changes_out_of_order_fail_edda_006(self):
+        real = binding.checker.changes
+        binding.checker.changes = lambda old, new: real(old, new)[::-1]
+        try:
+            sid, status, detail, failed = story(run.run(SPECS, ["EDDA-006"]), "EDDA-006")
+        finally:
+            binding.checker.changes = real
+        self.assertEqual((status, detail), ("failing", "5 of 6 examples failed"))
+
+    def test_an_approval_that_writes_nothing_fails_edda_005(self):
+        real = binding.approver.approve
+        binding.approver.approve = lambda folder, name, at, by, because, dry_run: real(folder, name, at, by, because, True)
+        try:
+            sid, status, detail, failed = story(run.run(SPECS, ["EDDA-005"]), "EDDA-005")
+        finally:
+            binding.approver.approve = real
+        self.assertEqual((status, detail), ("failing", "2 of 6 examples failed"))
+
+    def test_notes_refuses_a_file_that_does_not_check(self):
+        a, bad = self.file("notes_a", "a"), self.file("notes_bad", "bad")
+        with self.assertRaises(binding.Refused) as r:
+            binding.OPERATIONS["notes"](self.tuan, [a, bad])
+        self.assertEqual(r.exception.reason, "a file does not check")
+        self.assertEqual(len(binding.OPERATIONS["notes"](self.tuan, [a])), 2)
 
 
 if __name__ == "__main__":

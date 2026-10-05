@@ -1,4 +1,4 @@
-# Edda keyword registry, generated from language/reference.md (revision 74).
+# Edda keyword registry, generated from language/reference.md (revision 75).
 # Plain YAML, not a spec file: the .edda subset does not apply here.
 # Every key, expression form, fixed name, checker rule and read-view
 # sentence kind, with what it means, why it exists and where it comes
@@ -304,7 +304,7 @@ keys:
   - key: 'problem_log:'
     section: 'Settings'
     means: 'at the root of edda.yaml; local or off; left out, or no file, off; with local the checker and the runner append each problem to .edda/checks.log, which edda trend reads (section 11)'
-    why: 'a KB is the main home of a project''s history and reads edda --json (section 13); a project keeps a history of its own only when it asks for one (decision HH)'
+    why: 'a KB is the main home of a project''s history and reads edda check --json and edda run --json (section 13); a project keeps a history of its own only when it asks for one (decision HH)'
   - key: 'generated_cases:'
     section: 'Settings'
     means: 'at the root of edda.yaml; a mapping; left out, or no file, generated cases are off'

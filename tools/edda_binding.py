@@ -21,7 +21,7 @@ follows too:
   clock       optional: clock(now), called whenever the clock is set
               or moves, before anything is read at it (section 8), or
               None in an example that uses no time. Edda's own binding
-              has none: its operations read no time
+              keeps it: approve and approve_block record it as approved_at
 
 The runner applies the spec's rules before it calls the binding: values
 hold every with: value, a time as a datetime with no zone (the business
@@ -46,6 +46,7 @@ import glob
 import os
 import shutil
 
+import approve as approver
 import check as checker
 import view as viewer
 
@@ -187,23 +188,147 @@ def make_actor(name, roles, values):
     return Thing("actor", values, name=name, roles=list(roles))
 
 
+# --- the clock -----------------------------------------------------------------
+
+NOW = [None]    # the clock's time in the example being run, as the runner tells it
+
+
+def clock(now):
+    """the runner tells the binding the time (reference section 9):
+    approve and approve_block record it as approved_at"""
+    NOW[0] = now
+
+
 # --- spec_file ---------------------------------------------------------------
 
+def own(thing):
+    """a thing's own dict, raw"""
+    return object.__getattribute__(thing, "__dict__")
+
+
+class Files:
+    """a spec_file's .edda and .edda.vc as they are on disk now: the
+    checker's reading of each and its project, read again whenever either
+    file changed (an approval appends to the history), the model made at
+    the first read of it"""
+
+    def __init__(self, path):
+        self.path, self.folder = path, os.path.dirname(path)
+        self.source, self.data = checker.load(path)
+        _, entries = checker.load(path + ".vc") if os.path.exists(path + ".vc") else (None, [])
+        self.entries = [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+        self.P = checker.project_of(self.folder)
+        self._model = None
+
+    @staticmethod
+    def key(path):
+        """the bytes of the .edda and the .edda.vc, None for one not there"""
+        out = []
+        for p in (path, path + ".vc"):
+            if os.path.exists(p):
+                with open(p, "rb") as f:
+                    out.append(f.read())
+            else:
+                out.append(None)
+        return tuple(out)
+
+    def model(self):
+        """the checker's model of the folder; a folder that does not check has none"""
+        if self._model is None:
+            if checker.refused(self.folder):
+                raise ValueError(f"{os.path.basename(self.path)} does not check, so it has no model")
+            self._model = checker.model_of(self.folder)
+        return self._model
+
+    def block_text(self, section, name):
+        """block.text, story.text: the normalised text of the block now"""
+        return checker.block_text(self.source.text, self.source.line((section, name)))
+
+
 class SpecFile(Thing):
-    """a spec_file; its stories are read from the checker's model of the
-    copied folder, made once, at the first read"""
+    """a spec_file: a fixture folder copied to the work folder. Its blocks,
+    stories and versions are read from the files on disk at each read,
+    each one thing for as long as the example runs, so a story or a
+    version read again is the same thing (entities are equal only to
+    themselves)"""
+
+    def files(self):
+        """the files as they are now (Files)"""
+        d = own(self)
+        key = Files.key(self._path)
+        if dict.get(d, "_files_key") != key:
+            dict.__setitem__(d, "_files", Files(self._path))
+            dict.__setitem__(d, "_files_key", key)
+        return dict.__getitem__(d, "_files")
+
+    def made(self, key, make):
+        """the one thing for key, made at the first read"""
+        things = dict.setdefault(own(self), "_made", {})
+        if key not in things:
+            things[key] = make()
+        return things[key]
+
+    def block(self, kind, name):
+        """the block of this file of that kind and name"""
+        return self.made(("block", kind, name), lambda: Block("block", file=self, kind=kind, name=name))
+
+    @property
+    def blocks(self):
+        """spec_file.blocks: the role and entity blocks, in file order"""
+        data = checker.mapping(self.files().data)
+        return [self.block(kind, name) for section, kind in (("roles", "role"), ("entities", "entity"))
+                for name in checker.mapping(data.get(section))]
 
     @property
     def stories(self):
-        d = object.__getattribute__(self, "__dict__")
-        if "_stories" not in d:
-            dict.__setitem__(d, "_stories", stories_of(self))
-        return dict.__getitem__(d, "_stories")
+        """spec_file.stories, in file order, read from the file as YAML,
+        whether or not it checks"""
+        data = checker.mapping(self.files().data)
+        return [self.made(("story", sid), lambda sid=sid: Story("story", file=self, id=sid))
+                for sid in checker.mapping(data.get("stories"))]
 
     @property
     def notes(self):
         """spec_file.notes: the checker's notes of this one file, in file order"""
         return sorted(notes_of([self]), key=lambda n: n.line)
+
+    def versions(self):
+        """history.versions: every version in the .edda.vc, oldest first;
+        a version, never changed once approved, is one thing by its place
+        in the history"""
+        out = []
+        for i, e in enumerate(self.files().entries):
+            kind = checker.vc_kind(e)
+            out.append(self.made(("version", i, kind, e.get(kind), e.get("number")),
+                                 lambda e=e, kind=kind: make_version(self, kind, e)))
+        return out
+
+
+def make_version(file, kind, e):
+    """a version of the history from its entry e: its stored properties as
+    written, approved_at as a time"""
+    at = e.get("approved_at")
+    pins = [Pin("pin", _file=file, kind=checker.vc_kind(p), name=p.get(checker.vc_kind(p)), number=p.get("number"))
+            for p in checker.listing(e.get("pins")) if isinstance(p, dict)]
+    return Version("version", number=e.get("number"), approved_at=checker.parse_time(at) or at,
+                   approved_by=e.get("approved_by"), because=e.get("because"), text=e.get("text"), pins=pins,
+                   _file=file, _kind=kind, _name=e.get(kind), _entry=e)
+
+
+class History(Thing):
+    """the .edda.vc beside a spec_file; text, the file as it is"""
+
+    @property
+    def versions(self):
+        return self._file.versions()
+
+
+def vc_text(path):
+    """history.text: the .edda.vc beside path as it is, "" when there is none"""
+    if not os.path.exists(path + ".vc"):
+        return ""
+    with open(path + ".vc") as f:
+        return f.read()
 
 
 def make_spec_file(name, values, workdir):
@@ -216,7 +341,9 @@ def make_spec_file(name, values, workdir):
     path = files[0]
     with open(path) as f:
         text = f.read()
-    return SpecFile("spec_file", name=os.path.basename(path)[:-len(".edda")], text=text, _path=path)
+    file = SpecFile("spec_file", name=os.path.basename(path)[:-len(".edda")], text=text, _path=path)
+    dict.__setitem__(own(file), "history", History("history", text=vc_text(path), _file=file))
+    return file
 
 
 def sentences(found):
@@ -224,32 +351,105 @@ def sentences(found):
     return [Thing("sentence", **s) for s in found]
 
 
-class Story(Thing):
-    """a story; version is len(versions), as the spec computes it"""
+class Versioned(Thing):
+    """what a block and a story share: their versions in the history, and
+    the newest one"""
+
+    def entry(self):
+        """the newest version as the history holds it, or None"""
+        return dict.__getitem__(own(self.versions[-1]), "_entry") if self.versions else None
 
     @property
     def version(self):
+        """len(versions), as the spec computes it"""
         return len(self.versions)
 
 
-def stories_of(file):
-    """spec_file.stories: the file's stories from the checker's model of its
-    folder, each with its sentences and its versions' (reference section
-    12); a folder that does not check has no model"""
-    folder = os.path.dirname(file._path)
-    if checker.refused(folder):
-        raise ValueError(f"{os.path.basename(file._path)} does not check, so it has no model")
-    model = checker.model_of(folder)
-    out = []
-    for st in model["stories"]:
-        if st["file"] != os.path.basename(file._path):
-            continue
-        versions = [Thing("version", number=v["number"], sentences=sentences(viewer.version_sentences(v)))
-                    for v in st["versions"]]
-        out.append(Story("story", file=file, versions=versions,
-                         sentences=sentences(viewer.story_sentences(st, model["operations"], model["entities"],
-                                                                    model["roles"], model["functions"]))))
-    return out
+class Block(Versioned):
+    """a role or entity block of a spec_file"""
+
+    @property
+    def text(self):
+        return self.file.files().block_text(checker.SECTION[self.kind], self.name)
+
+    @property
+    def versions(self):
+        return [v for v in self.file.versions() if (v._kind, v._name) == (self.kind, self.name)]
+
+    @property
+    def approved(self):
+        return checker.approved(self.kind, self.text, self.entry())
+
+
+class Story(Versioned):
+    """a story of a spec_file"""
+
+    @property
+    def text(self):
+        return self.file.files().block_text("stories", self.id)
+
+    @property
+    def body_text(self):
+        return checker.body_text(self.text)
+
+    @property
+    def versions(self):
+        return [v for v in self.file.versions() if (v._kind, v._name) == ("story", self.id)]
+
+    @property
+    def approved(self):
+        return checker.approved("story", self.text, self.entry())
+
+    @property
+    def pins_stale(self):
+        """check.py's reading: a pin of the newest version older than its block's newest version"""
+        newest = self.entry()
+        return newest is not None and checker.pins_stale(newest, self.file.files().P)
+
+    @property
+    def blocks(self):
+        """story.blocks, as approve.py works them out"""
+        files = self.file.files()
+        return [self.file.block(k, n) for k, n in approver.story_blocks(self.id, files.P, approver.Files(files.folder))]
+
+    @property
+    def changes(self):
+        """story.changes: the checker's walk from the newest version's text,
+        none when there is no version, to the text now"""
+        newest = self.entry()
+        return [Thing("change", kind=k, line=line, sentence=s)
+                for k, line, s in checker.changes(newest["text"] if newest else "", self.text)]
+
+    @property
+    def sentences(self):
+        """the read view of the story in the model of the file now"""
+        model = self.file.files().model()
+        st = next(s for s in model["stories"] if s["id"] == self.id)
+        return sentences(viewer.story_sentences(st, model["operations"], model["entities"], model["roles"],
+                                                model["functions"]))
+
+
+class Version(Thing):
+    """one version in a history"""
+
+    @property
+    def body_text(self):
+        return checker.body_text(self.text)
+
+    @property
+    def sentences(self):
+        """the read view of a story's version, from the model of the file now"""
+        model = self._file.files().model()
+        st = next(s for s in model["stories"] if s["id"] == self._name)
+        return sentences(viewer.version_sentences(next(v for v in st["versions"] if v["number"] == self.number)))
+
+
+class Pin(Thing):
+    """one block version a story version was approved against"""
+
+    @property
+    def block(self):
+        return self._file.block(self.kind, self.name)
 
 
 def notes_of(files):
@@ -285,7 +485,12 @@ def view(actor, story):
 
 
 def notes(actor, files):
-    return notes_of(files)
+    """check.py's notes; a file that does not check has none, which the
+    spec gives as its refusal"""
+    try:
+        return notes_of(files)
+    except ValueError:
+        raise Refused("a file does not check")
 
 
 # EDDA-007@0
@@ -293,6 +498,32 @@ def view_at(actor, story, number):
     if number < 1 or number > len(story.versions):
         raise Refused("no such version")
     return story.versions[number - 1].sentences
+
+
+def diff(actor, story):
+    return story.changes
+
+
+def approve_story(actor, story, because=None):
+    record(actor, story.file, story.id, because)
+
+
+def approve_block(actor, block, because=None):
+    record(actor, block.file, block.name, because)
+
+
+def record(actor, file, name, because):
+    """approve.py's approve of the story or block called name, in the
+    copied folder, by the actor, at the clock's time; its refusal as the
+    reason it gives. The history then holds the file as written"""
+    if NOW[0] is None:
+        raise ValueError("an approval needs the clock, and the example has none")
+    try:
+        approver.approve(os.path.dirname(file._path), name, NOW[0].strftime("%Y-%m-%d %H:%M"), actor.name,
+                         because, dry_run=False)
+    except approver.Refused as r:
+        raise Refused(str(r))
+    dict.__setitem__(own(file.history), "text", vc_text(file._path))
 
 
 ENTITIES = {"spec_file": make_spec_file}
@@ -303,5 +534,6 @@ ENTITIES = {"spec_file": make_spec_file}
 # holding one .edda, as make_spec_file needs.
 VALUES = {"spec_file": {"fixture": sorted(f for f in os.listdir(FIXTURES)
                                           if len(glob.glob(os.path.join(FIXTURES, f, "*.edda"))) == 1)}}
-OPERATIONS = {"check": check, "view": view, "view_at": view_at, "notes": notes}
+OPERATIONS = {"check": check, "view": view, "view_at": view_at, "notes": notes,
+              "approve": approve_story, "diff": diff, "approve_block": approve_block}
 FUNCTIONS = {}      # Edda's own spec declares no client function

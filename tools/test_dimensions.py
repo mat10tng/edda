@@ -341,7 +341,7 @@ class LogTest(unittest.TestCase):
             os.chmod(locked, stat.S_IRWXU)
         self.assertEqual(blocked, off)
         self.assertEqual(off[0], 0)
-        self.assertEqual(off[1].splitlines()[-1], "6 out of date, 19 code differs")     # 71: view.py's function_sentences
+        self.assertEqual(off[1].splitlines()[-1], "6 out of date, 20 code differs")     # 75: the binding's clock
         self.assertEqual(os.listdir(locked), [])
 
 
