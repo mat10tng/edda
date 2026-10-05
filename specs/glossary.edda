@@ -1,0 +1,6 @@
+# Edda's own roles. A role is a kind of actor, person or program.
+roles:
+  agent:
+    is: "a program that writes .edda files from the customer's words"
+  operator:
+    is: "the person who reads the read view and approves; owns level 1"

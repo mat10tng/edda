@@ -1,0 +1,223 @@
+entities:
+  fulfillment:
+    is: "a request for a part for a repair job"
+    properties:
+      job_reference: TEXT
+      part: part
+      quantity: INTEGER
+      status: DEFAULT draft | pending | shipped | cancelled
+    may_change:
+      status: {draft: [pending, cancelled], pending: [shipped, cancelled]}
+    may_create:
+      - {role: buyer}
+    may_read:
+      - {role: buyer}
+      - {role: warehouse_staff}
+    may_update:
+      - {role: buyer}
+      - {role: warehouse_staff}
+
+stories:
+  FUL-002:
+    story: "submit a parts request for a repair job"
+    about: fulfillment
+    as_a: buyer
+    i_want: "to submit a draft request so the warehouse knows what to prepare"
+    so_that: "the request is pending"
+    epic: FUL
+    operations:
+      submit:
+        is: "submits a draft fulfillment request"
+        inputs: {fulfillment: fulfillment}
+        who:
+          - {role: buyer}
+        refuse:
+          - when: "fulfillment.quantity <= 0"
+            reason: "quantity must be positive"
+          - when: "fulfillment.part.status == discontinued"
+            reason: "part is discontinued"
+          - when: "fulfillment.status != draft"
+            reason: "fulfillment is already submitted"
+        ensure:
+          - "fulfillment.status == pending"
+    examples:
+      "Submit a positive request for an active part":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator", stock: 5}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2}
+        steps:
+          - when: {actor: lee, call: "submit(request)"}
+            then:
+              - DONE
+              - "request.status == pending"
+      "A request with zero quantity is refused":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator"}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 0}
+        steps:
+          - when: {actor: lee, call: "submit(request)"}
+            then:
+              - refused: "quantity must be positive"
+      "A request for a discontinued part is refused":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator", status: discontinued}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2}
+        steps:
+          - when: {actor: lee, call: "submit(request)"}
+            then:
+              - refused: "part is discontinued"
+      "A submitted request cannot be submitted again":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator"}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2, status: pending}
+        steps:
+          - when: {actor: lee, call: "submit(request)"}
+            then:
+              - refused: "fulfillment is already submitted"
+
+  FUL-003:
+    story: "ship a pending parts request"
+    about: fulfillment
+    as_a: warehouse_staff
+    i_want: "to ship a pending request"
+    so_that: "the request is shipped and its quantity comes off stock"
+    epic: FUL
+    operations:
+      ship:
+        is: "ships a pending fulfillment request"
+        inputs: {fulfillment: fulfillment}
+        who:
+          - {role: warehouse_staff}
+        refuse:
+          - when: "fulfillment.status != pending"
+            reason: "fulfillment is not pending"
+          - when: "fulfillment.part.stock < fulfillment.quantity"
+            reason: "insufficient stock"
+        ensure:
+          - "fulfillment.status == shipped"
+          - "fulfillment.part.stock == OLD(fulfillment.part.stock) - fulfillment.quantity"
+    examples:
+      "Ship a pending request with enough stock":
+        given:
+          - actor: dana
+            with: {roles: [warehouse_staff]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator", stock: 5}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2, status: pending}
+        steps:
+          - when: {actor: dana, call: "ship(request)"}
+            then:
+              - DONE
+              - "request.status == shipped"
+              - "alternator.stock == 3"
+      "A draft request cannot be shipped":
+        given:
+          - actor: dana
+            with: {roles: [warehouse_staff]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator", stock: 5}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2}
+        steps:
+          - when: {actor: dana, call: "ship(request)"}
+            then:
+              - refused: "fulfillment is not pending"
+      "A pending request without enough stock is refused":
+        given:
+          - actor: dana
+            with: {roles: [warehouse_staff]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator", stock: 1}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2, status: pending}
+        steps:
+          - when: {actor: dana, call: "ship(request)"}
+            then:
+              - refused: "insufficient stock"
+
+  FUL-004:
+    story: "cancel a request that is no longer needed"
+    about: fulfillment
+    as_a: buyer
+    i_want: "to cancel a draft or pending request"
+    so_that: "the request becomes cancelled"
+    epic: FUL
+    operations:
+      cancel:
+        is: "cancels a draft or pending fulfillment request"
+        inputs: {fulfillment: fulfillment}
+        who:
+          - {role: buyer}
+        refuse:
+          - when: "fulfillment.status in [shipped, cancelled]"
+            reason: "fulfillment cannot be cancelled"
+        ensure:
+          - "fulfillment.status == cancelled"
+    examples:
+      "Cancel a draft request":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator"}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2}
+        steps:
+          - when: {actor: lee, call: "cancel(request)"}
+            then:
+              - DONE
+              - "request.status == cancelled"
+      "Cancel a pending request":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator"}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2, status: pending}
+        steps:
+          - when: {actor: lee, call: "cancel(request)"}
+            then:
+              - DONE
+              - "request.status == cancelled"
+      "A shipped request cannot be cancelled":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator"}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2, status: shipped}
+        steps:
+          - when: {actor: lee, call: "cancel(request)"}
+            then:
+              - refused: "fulfillment cannot be cancelled"
+      "A cancelled request cannot be cancelled again":
+        given:
+          - actor: lee
+            with: {roles: [buyer]}
+          - part: alternator
+            with: {code: "W-002", description: "alternator"}
+          - fulfillment: request
+            with: {job_reference: "JOB-101", part: alternator, quantity: 2, status: cancelled}
+        steps:
+          - when: {actor: lee, call: "cancel(request)"}
+            then:
+              - refused: "fulfillment cannot be cancelled"

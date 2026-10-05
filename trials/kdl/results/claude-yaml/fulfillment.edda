@@ -1,0 +1,225 @@
+entities:
+  fulfillment:
+    is: "a buyer's request for a quantity of one part for a repair job"
+    properties:
+      job: TEXT
+      part: part
+      quantity: INTEGER
+      status: DEFAULT draft | pending | shipped | cancelled
+    may_change: {status: {draft: [pending, cancelled], pending: [shipped, cancelled]}}
+    may_create: [{role: buyer}]
+    may_read: [{role: buyer}, {role: warehouse_staff}]
+    may_update: [{role: buyer}, {role: warehouse_staff}]
+
+stories:
+  FUL-001:
+    story: "request parts for a job"
+    about: fulfillment
+    as_a: buyer
+    i_want: "to submit a draft request for a part"
+    so_that: "the warehouse knows what to prepare"
+    epic: FUL
+    operations:
+      submit:
+        is: "turns a draft request into a pending one"
+        inputs: {fulfillment: fulfillment}
+        who: [{role: buyer}]
+        refuse:
+          - when: "fulfillment.quantity <= 0"
+            reason: "quantity must be positive"
+          - when: "fulfillment.part.status == discontinued"
+            reason: "part is discontinued"
+          - when: "fulfillment.status != draft"
+            reason: "fulfillment is already submitted"
+        ensure:
+          - "fulfillment.status == pending"
+    examples:
+      "A buyer submits a draft":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 2}
+        steps:
+          - when: {actor: bea, call: "submit(request)"}
+            then:
+              - DONE
+              - "request.status == pending"
+      "Zero quantity is refused":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 0}
+        steps:
+          - when: {actor: bea, call: "submit(request)"}
+            then:
+              - refused: "quantity must be positive"
+              - "request.status == draft"
+      "A discontinued part is refused":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: old_pad
+            with: {code: "W-003", description: "old pad", stock: 4, status: discontinued}
+          - fulfillment: request
+            with: {job: "JOB-101", part: old_pad, quantity: 1}
+        steps:
+          - when: {actor: bea, call: "submit(request)"}
+            then:
+              - refused: "part is discontinued"
+              - "request.status == draft"
+      "A second submit is refused":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 2}
+        steps:
+          - when: {actor: bea, call: "submit(request)"}
+            then:
+              - DONE
+          - when: {actor: bea, call: "submit(request)"}
+            then:
+              - refused: "fulfillment is already submitted"
+              - "request.status == pending"
+
+  FUL-002:
+    story: "ship a request"
+    about: fulfillment
+    as_a: warehouse_staff
+    i_want: "to ship a pending request"
+    so_that: "the buyer gets the part and the stock is kept right"
+    epic: FUL
+    operations:
+      ship:
+        is: "ships a pending request and takes its quantity off the part's stock"
+        inputs: {fulfillment: fulfillment}
+        who: [{role: warehouse_staff}]
+        refuse:
+          - when: "fulfillment.status != pending"
+            reason: "fulfillment is not pending"
+          - when: "fulfillment.part.stock < fulfillment.quantity"
+            reason: "insufficient stock"
+        ensure:
+          - "fulfillment.status == shipped"
+          - "fulfillment.part.stock == OLD(fulfillment.part.stock) - fulfillment.quantity"
+    examples:
+      "Staff ship a pending request":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 3, status: pending}
+        steps:
+          - when: {actor: sam, call: "ship(request)"}
+            then:
+              - DONE
+              - "request.status == shipped"
+              - "brake_pad.stock == 7"
+      "A draft cannot be shipped":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 3}
+        steps:
+          - when: {actor: sam, call: "ship(request)"}
+            then:
+              - refused: "fulfillment is not pending"
+              - "brake_pad.stock == 10"
+      "Not enough stock is refused":
+        given:
+          - actor: sam
+            with: {roles: [warehouse_staff]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 2}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 3, status: pending}
+        steps:
+          - when: {actor: sam, call: "ship(request)"}
+            then:
+              - refused: "insufficient stock"
+              - "request.status == pending"
+              - "brake_pad.stock == 2"
+
+  FUL-003:
+    story: "cancel a request"
+    about: fulfillment
+    as_a: buyer
+    i_want: "to cancel a request I no longer need"
+    so_that: "the warehouse does not prepare it"
+    epic: FUL
+    operations:
+      cancel:
+        is: "cancels a draft or pending request"
+        inputs: {fulfillment: fulfillment}
+        who: [{role: buyer}]
+        refuse:
+          - when: "fulfillment.status in [shipped, cancelled]"
+            reason: "fulfillment cannot be cancelled"
+        ensure:
+          - "fulfillment.status == cancelled"
+    examples:
+      "A buyer cancels a draft":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 2}
+        steps:
+          - when: {actor: bea, call: "cancel(request)"}
+            then:
+              - DONE
+              - "request.status == cancelled"
+      "A buyer cancels a pending request":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 2, status: pending}
+        steps:
+          - when: {actor: bea, call: "cancel(request)"}
+            then:
+              - DONE
+              - "request.status == cancelled"
+      "A shipped request cannot be cancelled":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 2, status: shipped}
+        steps:
+          - when: {actor: bea, call: "cancel(request)"}
+            then:
+              - refused: "fulfillment cannot be cancelled"
+              - "request.status == shipped"
+      "A cancelled request cannot be cancelled again":
+        given:
+          - actor: bea
+            with: {roles: [buyer]}
+          - part: brake_pad
+            with: {code: "W-002", description: "brake pad", stock: 10}
+          - fulfillment: request
+            with: {job: "JOB-101", part: brake_pad, quantity: 2, status: cancelled}
+        steps:
+          - when: {actor: bea, call: "cancel(request)"}
+            then:
+              - refused: "fulfillment cannot be cancelled"
+              - "request.status == cancelled"

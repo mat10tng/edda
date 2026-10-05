@@ -1,0 +1,16 @@
+- role: agent
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    agent:
+      is: "a program that writes .edda files from the customer's words"
+- role: operator
+  number: 1
+  approved_at: "2026-10-03 12:16"
+  approved_by: tuan
+  because: "First approval, operator decision in KB session 1497 (kb:9378274 entry 96)"
+  text: |
+    operator:
+      is: "the person who reads the read view and approves; owns level 1"

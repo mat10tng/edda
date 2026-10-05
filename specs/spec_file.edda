@@ -1,0 +1,590 @@
+entities:
+  spec_file:
+    is: "one .edda file; a fixture is one whole spec in one folder"
+    properties:
+      name: TEXT, DERIVED
+      text: TEXT
+      history: history
+      blocks: MANY block, IN ORDER, DERIVED
+      stories: MANY story, IN ORDER, DERIVED
+      notes: MANY note, IN ORDER, DERIVED
+      problems: MANY problem, IN ORDER, DERIVED
+    may_create: [{role: agent}]
+    may_read: [{role: agent}, {role: operator}]
+    may_update: [{role: agent}]
+
+  history:
+    is: "the .edda.vc file beside a spec file: its approved versions, append-only, empty until the first approval"
+    part_of: spec_file
+    properties:
+      text: DEFAULT ""
+      versions: MANY version, IN ORDER, DERIVED
+    may_create: [{role: operator}]
+    may_read: [{role: agent}, {role: operator}]
+    may_update: [{role: operator}]
+
+  version:
+    is: "one version in a history: a story or a block as approved"
+    part_of: history
+    properties:
+      number: INTEGER
+      approved_at: TIME
+      approved_by: TEXT
+      because: TEXT, OPTIONAL
+      text: TEXT
+      body_text: TEXT, DERIVED
+      pins: MANY pin, IN ORDER
+      sentences: MANY sentence, IN ORDER, DERIVED
+
+  pin:
+    is: "one block version a story was approved against"
+    part_of: version
+    properties:
+      kind: entity | role
+      name: TEXT
+      number: INTEGER
+      block: block, DERIVED
+
+  note:
+    is: "one note entry under a story, an operation or an example"
+    part_of: spec_file
+    properties:
+      file: spec_file
+      story_id: TEXT
+      line: INTEGER
+      text: TEXT
+
+  problem:
+    is: "one thing the checker found in a file or its history"
+    part_of: spec_file
+    properties:
+      kind: refused | flagged
+      rule: not_yaml | yaml_feature | unquoted_text | not_a_list | wrong_type | missing_key | unknown_key | bad_name | declared_twice | unknown_name | unknown_choice | bad_type_phrase | not_an_expression | type_mismatch | returns_and_ensure | wrong_file | not_ordered | computed_cycle | derived_in_given | wider_than_entity | no_rule | bad_version | bad_pin | bad_snapshot | unreachable_choice | no_example | question_on_approved | wording_drift
+      file_name: TEXT
+      line: INTEGER
+      message: TEXT
+
+stories:
+  EDDA-001:
+    story: "the checker refuses what it cannot read"
+    about: spec_file
+    as_a: agent
+    i_want: "every fault that stops a file from checking refused, with its file, line and one plain message"
+    so_that: "a file that passes has one reading and nothing hidden in it"
+    epic: CHK
+    tags: [checker, static]
+    notes:
+      - "EDDA-001 and EDDA-002 are the static checks of build step 1; links, examples run, rules wrapped and done are later stories"
+      - "the four layers of reference section 11 decide which problems are reported together; each fixture here holds one problem in the first failing layer"
+    rules:
+      - rule: "a file that keeps these rules has no refusal"
+        shown_by:
+          - "a clean file has no problems"
+      - rule: "every key is one the language knows, every required key is there, and every value has the shape its key asks for"
+        shown_by:
+          - "an unknown key is refused"
+          - "an operation without is: is refused"
+          - "a list where a mapping is expected is refused"
+          - "a repeated thing written as one value is refused"
+      - rule: "free text is quoted and YAML features outside the subset are refused, so nothing is dropped or copied unseen"
+        shown_by:
+          - "unquoted free text is refused"
+          - "a YAML anchor is refused once, at the anchor"
+          - "a file that is not YAML is refused"
+          - "an example title wrapped over two lines is refused"
+      - rule: "a condition is an allowed expression and a type phrase keeps to its grammar, comparing like with like"
+        shown_by:
+          - "a string that is not an expression is refused"
+          - "a type phrase outside the grammar is refused"
+          - "a condition comparing a number with a time is refused"
+      - rule: "every name is declared once and every use of it fits its declaration"
+        shown_by:
+          - "an unknown name is refused"
+          - "an unknown choice value is refused"
+          - "a name declared twice is refused at the second"
+          - "a computed property that depends on itself is refused"
+          - "a story in the wrong file is refused"
+          - "a name that is not snake_case is refused"
+          - "an actor's fixed name given in an example is refused"
+          - "an operation admitting a role its entity does not is refused"
+      - rule: "an operation either changes things or answers a question, never both; a positional check needs an ordered result"
+        shown_by:
+          - "returns and ensure on one operation is refused"
+          - "a positional check on an unordered result is refused"
+      - rule: "the history holds exactly what was approved"
+        shown_by:
+          - "a history out of sequence is refused in the history file"
+          - "a pin to a version that does not exist is refused in the history file"
+          - "a snapshot that is not a normalised block is refused in the history file"
+      - rule: "when a story has rules, every example belongs to exactly one of them"
+        shown_by:
+          - "an example that belongs to no rule is refused"
+    operations:
+      check:
+        is: "reads a spec file and its history and lists every problem"
+        inputs: {file: spec_file}
+        who: [{role: agent}, {role: operator}]
+        returns: "file.problems"
+    examples:
+      "a clean file has no problems":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: good
+            with: {fixture: order}
+        steps:
+          - when: {actor: bot, call: "check(good)"}
+            then: [DONE, "RESULT == []"]
+      "an unknown key is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: unknown_key}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == refused"
+              - "RESULT[0].rule == unknown_key"
+              - "RESULT[0].file_name == \"order.edda\""
+              - "RESULT[0].line == 33"
+              - "RESULT[0].message == \"unknown key: ensures\""
+      "an unknown name is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: unknown_name}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == unknown_name"
+              - "RESULT[0].line == 31"
+              - "RESULT[0].message == \"unknown name: units_sold\""
+      "a string that is not an expression is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: not_an_expression}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_an_expression"
+              - "RESULT[0].line == 34"
+              - "RESULT[0].message == \"not an expression: set the order status to removed\""
+      "a name declared twice is refused at the second":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: declared_twice}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == declared_twice"
+              - "RESULT[0].line == 13"
+              - "RESULT[0].message == \"declared twice: units_sent\""
+      "an unknown choice value is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: unknown_choice}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == unknown_choice"
+              - "RESULT[0].line == 29"
+              - "RESULT[0].message == \"not one of status's values: archived\""
+      "returns and ensure on one operation is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: returns_and_ensure}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == returns_and_ensure"
+              - "RESULT[0].line == 24"
+              - "RESULT[0].message == \"returns and ensure on one operation: remove\""
+      "a story in the wrong file is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: wrong_file}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == wrong_file"
+              - "RESULT[0].file_name == \"stock.edda\""
+              - "RESULT[0].line == 17"
+              - "RESULT[0].message == \"story FIX-001 is about order and belongs in order.edda\""
+      "a repeated thing written as one value is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: not_a_list}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_a_list"
+              - "RESULT[0].line == 33"
+              - "RESULT[0].message == \"ensure must be a list, one fact per line\""
+      "unquoted free text is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: unquoted_text}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == unquoted_text"
+              - "RESULT[0].line == 32"
+              - "RESULT[0].message == \"quote the reason; an unquoted # drops the rest of the line\""
+      "a YAML anchor is refused once, at the anchor":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: yaml_feature}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == yaml_feature"
+              - "RESULT[0].line == 39"
+              - "RESULT[0].message == \"anchors and aliases are not allowed\""
+      "an operation without is: is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: missing_key}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == missing_key"
+              - "RESULT[0].line == 24"
+              - "RESULT[0].message == \"operation remove needs is:\""
+      "a list where a mapping is expected is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: wrong_type}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == wrong_type"
+              - "RESULT[0].line == 26"
+              - "RESULT[0].message == \"inputs must be a mapping\""
+      "a type phrase outside the grammar is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_type_phrase}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_type_phrase"
+              - "RESULT[0].line == 12"
+              - "RESULT[0].message == \"not a type phrase: DEFAULT 0 NUMBER\""
+      "a positional check on an unordered result is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: not_ordered}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_ordered"
+              - "RESULT[0].line == 86"
+              - "RESULT[0].message == \"open_lines gives no order; RESULT[0] needs ordered_by or IN ORDER\""
+      "a computed property that depends on itself is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: computed_cycle}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == computed_cycle"
+              - "RESULT[0].line == 13"
+              - "RESULT[0].message == \"computed properties loop: units_held -> units_free -> units_held\""
+      "a file that is not YAML is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: not_yaml}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == not_yaml"
+              - "RESULT[0].line == 22"
+              - "RESULT[0].message == \"not YAML: mapping values are not allowed here\""
+      "a name that is not snake_case is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_name}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_name"
+              - "RESULT[0].line == 19"
+              - "RESULT[0].message == \"not a name: Order\""
+      "a condition comparing a number with a time is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: type_mismatch}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == type_mismatch"
+              - "RESULT[0].line == 31"
+              - "RESULT[0].message == \"== expects two values of one kind: order.units_sent == NOW\""
+      "an actor's fixed name given in an example is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: derived_in_given}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == derived_in_given"
+              - "RESULT[0].line == 39"
+              - "RESULT[0].message == \"name is fixed and cannot be given\""
+      "an operation admitting a role its entity does not is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: wider_than_entity}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == wider_than_entity"
+              - "RESULT[0].line == 29"
+              - "RESULT[0].message == \"remove admits admin, which order does not\""
+      "an example that belongs to no rule is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: no_rule}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == no_rule"
+              - "RESULT[0].line == 57"
+              - "RESULT[0].message == \"example \\\"a removed order is not removed again\\\" belongs to no rule\""
+      "an example title wrapped over two lines is refused":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: wrapped_title}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == yaml_feature"
+              - "RESULT[0].line == 26"
+              - "RESULT[0].message == \"an example title is one line\""
+      "a history out of sequence is refused in the history file":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_version}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_version"
+              - "RESULT[0].file_name == \"order.edda.vc\""
+              - "RESULT[0].line == 9"
+              - "RESULT[0].message == \"entity order v2 out of sequence; expected v1\""
+      "a pin to a version that does not exist is refused in the history file":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_pin}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_pin"
+              - "RESULT[0].file_name == \"order.edda.vc\""
+              - "RESULT[0].line == 24"
+              - "RESULT[0].message == \"pin entity order v99: no such version\""
+      "a snapshot that is not a normalised block is refused in the history file":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: bad
+            with: {fixture: bad_snapshot}
+        steps:
+          - when: {actor: bot, call: "check(bad)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].rule == bad_snapshot"
+              - "RESULT[0].file_name == \"order.edda.vc\""
+              - "RESULT[0].line == 21"
+              - "RESULT[0].message == \"text of story FIX-001 v1 is not a normalised block\""
+
+  EDDA-002:
+    story: "the checker flags what is allowed but doubtful"
+    about: spec_file
+    as_a: operator
+    i_want: "a choice value nothing reaches, a story with no example and a question on an approved story shown as flags, not refusals"
+    so_that: "the file still passes and I decide what to do"
+    epic: CHK
+    tags: [checker, static]
+    notes:
+      - "wording_drift is a flag too; it needs versions and sits with EDDA-004"
+    examples:
+      "a choice value nothing reaches is flagged":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: odd
+            with: {fixture: unreachable_choice}
+        steps:
+          - when: {actor: bot, call: "check(odd)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == unreachable_choice"
+              - "RESULT[0].line == 11"
+              - "RESULT[0].message == \"no change reaches status's value: delivered\""
+      "a story with no example is flagged":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: odd
+            with: {fixture: no_example}
+        steps:
+          - when: {actor: bot, call: "check(odd)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == no_example"
+              - "RESULT[0].line == 17"
+              - "RESULT[0].message == \"story FIX-001 has no example\""
+      "a question on an approved story is flagged":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: odd
+            with: {fixture: approved_question}
+        steps:
+          - when: {actor: bot, call: "check(odd)"}
+            then:
+              - DONE
+              - "len(RESULT) == 1"
+              - "RESULT[0].kind == flagged"
+              - "RESULT[0].rule == question_on_approved"
+              - "RESULT[0].line == 17"
+              - "RESULT[0].message == \"story FIX-001 is approved and still has a question\""
+
+  EDDA-003:
+    story: "every note is collected in one place"
+    about: spec_file
+    as_a: operator
+    i_want: "every note across all files listed together, the same wording side by side"
+    so_that: "a kind of note that keeps coming back shows itself"
+    epic: CHK
+    tags: [checker, backlog]
+    operations:
+      notes:
+        is: "lists the notes of several files, equal wording together"
+        inputs: {files: MANY spec_file}
+        who: [{role: agent}, {role: operator}]
+        returns: "[note for file in files for note in file.notes]"
+        ordered_by: ["note.text", "note.file.name", "note.line"]
+    examples:
+      "notes from two files are listed with the same wording side by side":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: a
+            with: {fixture: notes_a}
+          - spec_file: b
+            with: {fixture: notes_b}
+        steps:
+          - when: {actor: tuan, call: "notes([a, b])"}
+            then:
+              - DONE
+              - "len(RESULT) == 4"
+              - "RESULT[0].text == \"a removed order keeps its history\""
+              - "RESULT[0].story_id == \"FIX-001\""
+              - "RESULT[0].line == 30"
+              - "RESULT[1].text == \"a workshop sees stock as of the last refresh\""
+              - "RESULT[2].text == \"the stock feed is refreshed every night\""
+              - "RESULT[2].file.name == \"order\""
+              - "RESULT[2].line == 24"
+              - "RESULT[3].text == \"the stock feed is refreshed every night\""
+              - "RESULT[3].file.name == \"stock\""
+              - "RESULT[3].line == 20"

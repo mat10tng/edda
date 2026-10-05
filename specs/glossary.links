@@ -1,0 +1,12 @@
+# Edda's links (reference section 9): the code target, the naming rule,
+# and the code files the link check reads, relative to the folder above
+# specs/. Covered: the tools that do an operation of a story. Left out:
+# run.py (the runner holds operations to their rules; it does none),
+# gen_fixtures.py and gen_keywords.py (generators), test_*.py (tests).
+target: python
+rule: same_name
+covers:
+  - "tools/check.py"
+  - "tools/approve.py"
+  - "tools/view.py"
+  - "tools/edda_binding.py"

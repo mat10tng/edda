@@ -1,0 +1,8 @@
+# Edda's own settings (reference section 9): the stories in specs/, the
+# Python tools, and the local problem log in .edda/ (kept out of git).
+# The approval examples read NOW through approve's ensure facts; their
+# clock starts at clock_start, in the business zone UTC (no zone: given).
+edda: 73
+stack: python
+problem_log: local
+clock_start: "2026-10-01 09:00"

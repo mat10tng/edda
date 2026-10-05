@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edda.local/schema/vc/v71",
+  "title": "Edda .edda.vc file (revision 71)",
+  "description": "Append-only, oldest first: one version per approval of a story, an entity block, a role block or a function block. Only the operator's approve command writes it. This is the shape layer only: sequence, pin policy and snapshot text are checked in the history layer (bad_version, bad_pin, bad_snapshot), not here.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["number", "approved_at", "approved_by", "text"],
+    "properties": {
+      "story": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+      "entity": {"$ref": "#/$defs/name"},
+      "role": {"$ref": "#/$defs/name"},
+      "function": {"$ref": "#/$defs/name"},
+      "number": {"type": "integer"},
+      "approved_at": {"type": "string"},
+      "approved_by": {"$ref": "#/$defs/name"},
+      "because": {"type": "string"},
+      "pins": {
+        "type": "array",
+        "items": {
+          "type": "object", "additionalProperties": false, "required": ["number"],
+          "properties": {
+            "entity": {"$ref": "#/$defs/name"},
+            "role": {"$ref": "#/$defs/name"},
+            "function": {"$ref": "#/$defs/name"},
+            "number": {"type": "integer"}
+          },
+          "oneOf": [{"required": ["entity"]}, {"required": ["role"]}, {"required": ["function"]}]
+        }
+      },
+      "text": {"type": "string", "description": "the block as approved, normalised: comments, blank lines and trailing spaces removed, re-indented so the key line starts at column 0"}
+    },
+    "oneOf": [{"required": ["story"]}, {"required": ["entity"]}, {"required": ["role"]}, {"required": ["function"]}]
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^(?!(False|None|True|and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield)$)[a-z][a-z0-9_]*$", "description": "snake_case and not a Python keyword, as in schema.json"}
+  }
+}

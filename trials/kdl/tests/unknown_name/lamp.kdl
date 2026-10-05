@@ -1,0 +1,72 @@
+// A small whole spec: one role, one entity, one story.
+roles {
+  caretaker {
+    is "a person who looks after the lamps"
+  }
+}
+
+epics {
+  LMP "keep the lamps working"
+}
+
+entities {
+  lamp {
+    is "a lamp in the hall"
+    properties {
+      label TEXT
+      hours DEFAULT 0
+      status DEFAULT working | broken
+    }
+    may_change { status { working { - broken } } }
+    may_read { - role=caretaker }
+    may_update { - role=caretaker }
+  }
+}
+
+stories {
+  LMP-001 {
+    story "log the hours a lamp has burned"
+    about lamp
+    as_a caretaker
+    i_want "to add burned hours to a lamp"
+    so_that "I know when to replace it"
+    epic LMP
+    operations {
+      burn {
+        is "adds hours to a working lamp"
+        inputs l=lamp h=INTEGER
+        who { - role=caretaker }
+        refuse {
+          - when="l.state == broken" reason="the lamp is broken"
+        }
+        ensure { - "l.hours == OLD(l.hours) + h" }
+      }
+    }
+    examples {
+      "burning a lamp adds hours" {
+        given {
+          - actor=ana { with { roles { - caretaker } } }
+          - lamp=hall { with label=#"Hall "A""# hours=10 status=working }
+        }
+        steps {
+          - {
+              when actor=ana call="burn(hall, 5)"
+              then { - DONE; - #"hall.hours == 15 and hall.label == "Hall \"A\"""# }
+            }
+        }
+      }
+      "a broken lamp cannot burn" {
+        given {
+          - actor=ana { with { roles { - caretaker } } }
+          - lamp=hall { with label="Hall B" status=broken }
+        }
+        steps {
+          - {
+              when actor=ana call="burn(hall, 5)"
+              then { - refused="the lamp is broken"; - "hall.hours == 0" }
+            }
+        }
+      }
+    }
+  }
+}

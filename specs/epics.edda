@@ -1,0 +1,4 @@
+epics:
+  CHK: "the checker reads a file and says what is wrong"
+  VC: "a story has versions and only the operator moves them"
+  VIEW: "the operator reads stories as sentences"

@@ -1,0 +1,3 @@
+# An exception for an operation the spec does not have.
+links:
+  cancel: "unknown_link/code.py::remove"

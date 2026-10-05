@@ -1,0 +1,13 @@
+entities:
+  part:
+    is: "an auto part the warehouse keeps in stock"
+    properties:
+      code: TEXT
+      description: TEXT
+      stock: INTEGER
+      minimum: DEFAULT 1
+      status: DEFAULT active | discontinued
+    may_change: {status: {active: [discontinued]}}
+    may_create: [{role: warehouse_staff}]
+    may_read: [{role: warehouse_staff}, {role: buyer}]
+    may_update: [{role: warehouse_staff}]

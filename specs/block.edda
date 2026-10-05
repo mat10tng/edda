@@ -1,0 +1,156 @@
+entities:
+  block:
+    is: "the definition of one entity or role in a spec_file, versioned like a story"
+    properties:
+      file: spec_file
+      kind: entity | role, DERIVED
+      name: TEXT, DERIVED
+      text: TEXT, DERIVED
+      versions: MANY version, IN ORDER, DERIVED
+      version: {computed: "len(versions)"}
+      approved: {computed: "versions != [] and text == versions[-1].text"}
+    may_create: [{role: agent}]
+    may_read: [{role: agent}, {role: operator}]
+    may_update: [{role: agent}, {role: operator}]
+
+stories:
+  EDDA-008:
+    story: "an entity or role block has versions, and a story is pinned to them"
+    about: block
+    as_a: operator
+    i_want: "each entity and role block approved like a story, each story approval to pin the block versions it was approved against, and a story approved against an older block shown with stale pins until I approve it again"
+    so_that: "a permission or a property cannot change under an approved story unnoticed"
+    epic: VC
+    tags: [version, approval]
+    operations:
+      approve_block:
+        is: "records the operator's yes to an entity or role block as its next version"
+        inputs: {block: block, because: "TEXT, OPTIONAL"}
+        who: [{role: operator}]
+        refuse:
+          - when: "any(p.kind == refused for p in check(block.file))"
+            reason: "the file does not check"
+          - when: "block.approved"
+            reason: "nothing to approve: the block matches its newest version"
+        ensure:
+          - fact: "block.file.history.versions == OLD(block.file.history.versions) + [block.versions[-1]]"
+            means: "the earlier versions are kept untouched and exactly one new one is added at the end"
+          - "block.versions[-1].number == len(block.versions)"
+          - "block.versions[-1].text == block.text"
+          - "block.versions[-1].approved_by == ACTOR.name"
+          - "block.versions[-1].approved_at == NOW"
+          - "block.versions[-1].because == because"
+          - "block.versions[-1].pins == []"
+          - "block.approved"
+    examples:
+      "the first approval of an entity block makes version 1":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: good
+            with: {fixture: order}
+        steps:
+          - when: {actor: tuan, call: "approve_block(good.blocks[1], because=\"first cut\")", at: "2026-10-02 09:00"}
+            then:
+              - DONE
+              - "good.blocks[1].kind == entity"
+              - "good.blocks[1].name == \"order\""
+              - "good.blocks[1].version == 1"
+              - "good.blocks[1].versions[0].number == 1"
+              - "good.blocks[1].versions[0].approved_by == \"tuan\""
+              - "good.blocks[1].versions[0].because == \"first cut\""
+              - "good.blocks[1].versions[0].text == good.blocks[1].text"
+              - "len(good.history.versions) == 1"
+              - "good.blocks[1].approved"
+              - "good.blocks[0].version == 0"
+      "a role block is approved the same way":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: good
+            with: {fixture: order}
+        steps:
+          - when: {actor: tuan, call: "approve_block(good.blocks[0])"}
+            then:
+              - DONE
+              - "good.blocks[0].kind == role"
+              - "good.blocks[0].name == \"shop_user\""
+              - "good.blocks[0].version == 1"
+              - "good.blocks[0].versions[0].because is None"
+              - "good.blocks[0].approved"
+      "approving an approved block is refused":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: same
+            with: {fixture: approved}
+        steps:
+          - when: {actor: tuan, call: "approve_block(same.blocks[1])"}
+            then:
+              - refused: "nothing to approve: the block matches its newest version"
+              - "same.blocks[1].version == 1"
+      "a block in a file that does not check is refused":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: bad
+            with: {fixture: unknown_key}
+        steps:
+          - when: {actor: tuan, call: "approve_block(bad.blocks[1])"}
+            then:
+              - refused: "the file does not check"
+              - "bad.blocks[1].version == 0"
+      "the agent may not approve a block":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: good
+            with: {fixture: order}
+        steps:
+          - when: {actor: bot, call: "approve_block(good.blocks[1])"}
+            then:
+              - refused: "approve_block is not allowed for agent"
+              - "good.blocks[1].version == 0"
+      "a story approved against an older block version is approved with stale pins":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - spec_file: pinned
+            with: {fixture: pinned_old}
+        steps:
+          - when: {actor: bot, call: "check(pinned)"}
+            then:
+              - DONE
+              - "RESULT == []"
+              - "pinned.stories[0].approved"
+              - "pinned.stories[0].pins_stale"
+      "a block edited after its approval blocks the story until it is approved again":
+        given:
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: edited
+            with: {fixture: block_edited}
+        steps:
+          - then: ["not edited.blocks[1].approved", "edited.blocks[1].version == 1"]
+          - when: {actor: tuan, call: "approve(edited.stories[0])"}
+            then:
+              - refused: "approve its blocks first"
+              - "edited.stories[0].version == 1"
+      "approving the story again refreshes its pins and clears the stale pins":
+        given:
+          - actor: bot
+            with: {roles: [agent]}
+          - actor: tuan
+            with: {roles: [operator]}
+          - spec_file: pinned
+            with: {fixture: pinned_old}
+        steps:
+          - when: {actor: tuan, call: "approve(pinned.stories[0])", at: "2026-10-02 10:00"}
+            then:
+              - DONE
+              - "pinned.stories[0].version == 2"
+              - "[p.name for p in pinned.stories[0].versions[1].pins] == [\"shop_user\", \"order\"]"
+              - "pinned.stories[0].versions[1].pins[1].number == 2"
+              - "not pinned.stories[0].pins_stale"
+          - when: {actor: bot, call: "check(pinned)"}
+            then: [DONE, "RESULT == []"]

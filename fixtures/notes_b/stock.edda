@@ -1,0 +1,37 @@
+roles:
+  workshop_user:
+    is: "a person at the workshop"
+
+entities:
+  stock:
+    is: "what the workshop has on the shelf"
+    properties:
+      units: DEFAULT 0
+    may_update: [{role: workshop_user}]
+
+stories:
+  FIX-002:
+    story: "see the stock"
+    about: stock
+    as_a: workshop_user
+    i_want: "to see how many units are on the shelf"
+    so_that: "I know what to order"
+    notes:
+      - "the stock feed is refreshed every night"
+      - "a workshop sees stock as of the last refresh"
+    operations:
+      units_of:
+        is: "gives the units on the shelf"
+        inputs: {stock: stock}
+        who: [{role: workshop_user}]
+        returns: "stock.units"
+    examples:
+      "the units are read":
+        given:
+          - actor: lena
+            with: {roles: [workshop_user]}
+          - stock: bolts
+            with: {units: 7}
+        steps:
+          - when: {actor: lena, call: "units_of(bolts)"}
+            then: [DONE, "RESULT == 7"]

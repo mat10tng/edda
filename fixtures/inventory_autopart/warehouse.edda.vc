@@ -1,0 +1,72 @@
+- entity: warehouse
+  number: 1
+  approved_at: "2026-10-03 18:53"
+  approved_by: tuan
+  text: |
+    warehouse:
+      is: "the parts storage facility"
+      properties:
+        name: TEXT
+        parts: MANY part, IN ORDER
+      may_read: [{role: warehouse_staff}, {role: buyer}]
+- story: FUL-005
+  number: 1
+  approved_at: "2026-10-03 18:53"
+  approved_by: tuan
+  pins: [{role: warehouse_staff, number: 1}, {role: buyer, number: 1}, {entity: part, number: 1}, {entity: warehouse, number: 1}]
+  text: |
+    FUL-005:
+      story: "list parts low on stock"
+      about: warehouse
+      as_a: warehouse_staff
+      i_want: "to see which active parts have stock below their minimum"
+      so_that: "I can reorder before they run out"
+      epic: FUL
+      rules:
+        - rule: "only active parts with stock below their minimum are listed"
+          shown_by:
+            - "a part with stock below minimum is listed"
+            - "a discontinued part with low stock is not listed"
+        - rule: "active parts with stock at or above their minimum are not listed"
+          shown_by:
+            - "a part with stock at minimum is not listed"
+      operations:
+        low_stock:
+          is: "lists all active parts whose stock count is below their minimum"
+          inputs: {w: warehouse}
+          who: [{role: warehouse_staff}]
+          returns: "[p for p in w.parts if p.stock_count < p.min_stock and p.status == active]"
+      examples:
+        "a part with stock below minimum is listed":
+          given:
+            - actor: sam
+              with: {roles: [warehouse_staff]}
+            - part: widget
+              with: {code: "W-003", description: "Air filter", stock_count: 1, min_stock: 2, status: active}
+            - warehouse: depot
+              with: {name: "Main", parts: [widget]}
+          steps:
+            - when: {actor: sam, call: "low_stock(depot)"}
+              then: [DONE, "widget in RESULT"]
+        "a discontinued part with low stock is not listed":
+          given:
+            - actor: sam
+              with: {roles: [warehouse_staff]}
+            - part: widget
+              with: {code: "W-003", description: "Air filter", stock_count: 0, min_stock: 2, status: discontinued}
+            - warehouse: depot
+              with: {name: "Main", parts: [widget]}
+          steps:
+            - when: {actor: sam, call: "low_stock(depot)"}
+              then: [DONE, "widget not in RESULT"]
+        "a part with stock at minimum is not listed":
+          given:
+            - actor: sam
+              with: {roles: [warehouse_staff]}
+            - part: widget
+              with: {code: "W-003", description: "Air filter", stock_count: 2, min_stock: 2, status: active}
+            - warehouse: depot
+              with: {name: "Main", parts: [widget]}
+          steps:
+            - when: {actor: sam, call: "low_stock(depot)"}
+              then: [DONE, "widget not in RESULT"]

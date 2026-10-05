@@ -1,0 +1,73 @@
+- role: shop_user
+  number: 1
+  approved_at: "2026-09-28 10:00"
+  approved_by: tuan
+  text: |
+    shop_user:
+      is: "a person at a shop"
+- entity: order
+  number: 1
+  approved_at: "2026-09-28 10:00"
+  approved_by: tuan
+  text: |
+    order:
+      is: "what a workshop buys"
+      properties:
+        status: DEFAULT incoming | removed
+        units_sent: DEFAULT 0
+      may_change: {status: {incoming: [removed]}}
+      may_update: [{role: shop_user}]
+- story: FIX-001
+  number: 1
+  approved_at: "2026-09-28 10:05"
+  approved_by: tuan
+  pins: [{role: shop_user, number: 1}, {entity: order, number: 1}]
+  text: |
+    FIX-001:
+      story: "remove an order"
+      about: order
+      as_a: shop_user
+      i_want: "to remove an order"
+      so_that: "the list is clean"
+      operations:
+        remove:
+          is: "takes an unsent order off the list"
+          inputs: {order: order}
+          who: [{role: shop_user}]
+          refuse:
+            - when: "order.units_sent > 0"
+              reason: "already sent"
+            - when: "order.status == removed"
+              reason: "already removed"
+          ensure:
+            - "order.status == removed"
+      examples:
+        "a fresh order is removed":
+          given:
+            - actor: erik
+              with: {roles: [shop_user]}
+            - order: purchase
+              with: {status: incoming, units_sent: 0}
+          steps:
+            - when: {actor: erik, call: "remove(purchase)"}
+              then: [DONE, "purchase.status == removed"]
+        "a sent order is not removed":
+          given:
+            - actor: erik
+              with: {roles: [shop_user]}
+            - order: shipped
+              with: {status: incoming, units_sent: 2}
+          steps:
+            - when: {actor: erik, call: "remove(shipped)"}
+              then: [{refused: "already sent"}, "shipped.status == incoming"]
+        "a removed order is not removed again":
+          given:
+            - actor: erik
+              with: {roles: [shop_user]}
+            - order: purchase
+              with: {status: incoming, units_sent: 0}
+          steps:
+            - when: {actor: erik, call: "remove(purchase)"}
+              then: [DONE]
+            - when: {actor: erik, call: "remove(purchase)"}
+              then: [{refused: "already removed"}, "purchase.status == removed"]

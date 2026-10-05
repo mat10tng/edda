@@ -1,0 +1,12 @@
+roles {
+  buyer {
+    is "a person who requests parts for repair jobs"
+  }
+  warehouse_staff {
+    is "a person who receives and ships parts"
+  }
+}
+
+epics {
+  FUL "manage the auto parts inventory and fulfil requests"
+}

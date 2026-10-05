@@ -1,0 +1,4 @@
+# Operations of spec_file.edda that do not follow the naming rule.
+links:
+  check: "tools/check.py::check"
+  notes: "tools/check.py::notes"
