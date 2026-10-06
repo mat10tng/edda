@@ -1,6 +1,6 @@
 # Edda: language reference
 
-Revision 75, 5 Oct 2026. Replaces revision 74. Decisions behind it:
+Revision 76, 6 Oct 2026. Replaces revision 75. Decisions behind it:
 kb:9378274, rounds 1 to 4 (entries 1 to 46) and later entries (the
 shrink: entry 138; the naming pass: entry 136; `TODAY` returns: entry
 139; examples run against real code: decision EE, the vision
@@ -25,8 +25,8 @@ Astra's round 91, kb:9380698, item 1, and the build Plan's phase
 2794; the host contract: operator decision KK, 5 Oct 2026, the
 findings kb:9380940, and task 2894; every story run against
 Edda's own code: operator decisions LL and MM, 5 Oct 2026, and task
-2905), and Astra's review
-rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
+2905; a generated run that is its seed's alone: task 2906), and
+Astra's review rounds. The skeleton is YAML; the words are keys; the logic is Python expressions in a whitelisted subset. Everything here is mirrored
 by `language/schema.json` (the keys of a `.edda` file),
 `language/vc-schema.json` (the keys of a `.edda.vc` file),
 `language/command.schema.json` (the `--json` document, section 13),
@@ -1241,11 +1241,23 @@ line is followed by one more, its generated cases
    story has one rule, `of the rule it shows:` when it has more), so
    the pasted example checks; it then fails at the same rule. The
    failure prints the full command that replays it, `--seed` included.
-   Replay holds only with the same command, settings, spec, code,
-   Python and Hypothesis versions, and a binding whose state is the
-   same each run; not across entry points (`tools/run.py` from the
-   shell, a test calling its `main`). The pasted example is the lasting
-   reproduction.
+   A run depends only on the seed, the settings, the spec and what the
+   code does: no value is drawn from the source of the modules loaded
+   (Hypothesis would draw the literals it finds there), so replay holds
+   in another process, from another entry point (`tools/run.py` from
+   the shell, a test calling its `main`), under another
+   `PYTHONHASHSEED`, and after an edit to code the story does not run.
+   It needs the same Python and Hypothesis versions and a binding whose
+   state is the same each run. One exception: shrinking a failure stops
+   on Hypothesis's time limit (300 seconds in Hypothesis 6.141.1); a
+   replay then still fails, but may end on a different example. When
+   shrinking stopped there, the failure says so on the line after the
+   replay: `    shrinking stopped on its time limit; replay may end on
+   a different example`. The pasted example is the lasting
+   reproduction. Whatever a generated run sets for the whole process
+   (Hypothesis's home folder and source constants, the clock, the
+   runner's flags) is set back as it was when the run ends, however it
+   ends, even when setting one of them back fails.
 
 An operation that reads the clock, as section 8 counts it for
 examples, runs on a clock stopped at the project's `clock_start:`,
@@ -2450,7 +2462,31 @@ the running of examples and the rule wrapping round every call are
 begun (sections 6 and 9: Edda's own `check`); the rest of the done
 computation gets its own stories.
 
-## 15. Changes from revision 74
+## 15. Changes from revision 75
+
+Task 2906: a generated run depends only on its seed, the spec and what
+the code does.
+
+- Generated cases draw no value from the source of the modules loaded
+  (9). Hypothesis draws, now and then, a literal it finds in the source
+  of any module loaded; so an edit to code no story runs, such as a
+  new function in the binding, or one more module imported, changed
+  the run a seed gave, and its counts. The values the spec names are
+  still favoured, as before. The same seed now gives the same run in
+  another process, from another entry point and under another
+  `PYTHONHASHSEED`; the counts of generated calls differ from revision
+  75's, once. The one exception is a shrink cut short by Hypothesis's
+  time limit; the failure then says so (9).
+- What a generated run sets for the whole process is set back as it
+  was however the run ends: a failure while the run was set up, while
+  it ran or while it was set back no longer leaves Hypothesis drawing
+  no source constants, or the clock stopped, for whatever runs next in
+  that process (9).
+- Edda's own `edda.yaml` pins `edda: 76`; `edda check` and `edda run`
+  print what they did in revision 75 (Edda's own generated cases are
+  off).
+
+## 16. Changes from revision 74
 
 Operator decisions LL and MM (5 Oct 2026), task 2905: every story runs
 against Edda's own code.
@@ -2477,7 +2513,7 @@ against Edda's own code.
   print what they did in revision 74, but for the stories now run and
   the new fixture.
 
-## 16. Changes from revision 73
+## 17. Changes from revision 73
 
 Operator decision KK (5 Oct 2026), from the findings kb:9380940, task
 2894: the host contract.
@@ -2505,7 +2541,7 @@ Operator decision KK (5 Oct 2026), from the findings kb:9380940, task
 - Edda's own `edda.yaml` pins `edda: 74`; `edda check` and `edda run`
   print what they did in revision 73.
 
-## 17. Changes from revision 72
+## 18. Changes from revision 72
 
 Build Plan kb:9379223, phase 2794, from Astra's round 91 (kb:9380698,
 item 1): the root opened without following a link.
@@ -2520,7 +2556,7 @@ item 1): the root opened without following a link.
 - Edda's own `edda.yaml` pins `edda: 73`; `edda check` and `edda run`
   print what they did in revision 72.
 
-## 18. Changes from revision 71
+## 19. Changes from revision 71
 
 Build Plan kb:9379223, phase 2793, from Astra's round 80 (kb:9380659,
 item 2): a read inside a generated step's rule.
@@ -2548,7 +2584,7 @@ item 2): a read inside a generated step's rule.
 - Edda's own `edda.yaml` pins `edda: 72`; `edda check` and `edda run`
   print what they did in revision 71.
 
-## 19. Changes from revision 70
+## 20. Changes from revision 70
 
 Build Plan kb:9379223, phase 2728, part 1, and decisions EE and FF
 (kb:9380368 section 3): client functions.
@@ -2606,7 +2642,7 @@ Build Plan kb:9379223, phase 2728, part 1, and decisions EE and FF
   its fixture report, and the line numbers of its link flags on the
   changed tools move; `edda run` prints what it did in revision 70.
 
-## 20. Changes from revision 69
+## 21. Changes from revision 69
 
 Build Plan kb:9379223, phase 2727, and decision FF (entry 138,
 kb:9380368 section 2), with decisions Z and GG: the frozen clock in
@@ -2659,7 +2695,7 @@ examples.
   in revision 69. `edda check` adds the three new fixtures to its
   fixture report.
 
-## 21. Changes from revision 68
+## 22. Changes from revision 68
 
 Build Plan kb:9379223, phase 2809, and decisions HH (entry 140) and AA
 (entry 132): the problem log is opt-in, and one `edda` command.
@@ -2711,7 +2747,7 @@ Build Plan kb:9379223, phase 2809, and decisions HH (entry 140) and AA
 - The guide and the README name the `edda` command; the guide is
   regenerated. No block's text changes.
 
-## 22. Changes from revision 67
+## 23. Changes from revision 67
 
 Build Plan kb:9379223, phase 2657, and decisions W and X (kb:9380137):
 the import contract.
@@ -2766,7 +2802,7 @@ the import contract.
   `edda.yaml`, so its checker's run, its runner and its model are
   unchanged; the model's `revision` stays 63. No block's text changes.
 
-## 23. Changes from revision 66
+## 24. Changes from revision 66
 
 Build Plan kb:9379223, phase 2649, and decision U (kb:9379257,
 questions 4 to 6): every problem carries six dimensions, and problems
@@ -2800,7 +2836,7 @@ are counted and logged.
   `tools/test_dimensions.py` tests them. The model's `revision` stays
   63, and no block's text changes.
 
-## 24. Changes from revision 65
+## 25. Changes from revision 65
 
 Build Plan kb:9379223, phase 2648, and decision U (kb:9379257,
 questions 1 to 3): the analyser, four flags found from the spec alone.
@@ -2833,7 +2869,7 @@ questions 1 to 3): the analyser, four flags found from the spec alone.
   and the model are unchanged, the model's `revision` stays 63, and
   no block's text changes.
 
-## 25. Changes from revision 64
+## 26. Changes from revision 64
 
 Build Plan kb:9379223, phase 2636, and decision T (kb:9379252):
 generated cases, off by default.
@@ -2911,7 +2947,7 @@ generated cases, off by default.
   run, the checker's run and the model are unchanged; the model's
   `revision` stays 63. No block's text changes.
 
-## 26. Changes from revision 63
+## 27. Changes from revision 63
 
 Build Plan kb:9379223, phase 2623, and decision N (kb:9379218, Q6):
 every operation is linked to the code that does it.
@@ -2984,7 +3020,7 @@ every operation is linked to the code that does it.
   the model's `revision` stays 63, as nothing in it changed (9). No
   block's text changes, so nothing needs re-approval.
 
-## 27. Changes from revision 62
+## 28. Changes from revision 62
 
 Build Plan kb:9379223, phase 2622: the read view, built.
 
@@ -3087,7 +3123,7 @@ Build Plan kb:9379223, phase 2622: the read view, built.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 28. Changes from revision 61
+## 29. Changes from revision 61
 
 Build Plan kb:9379223, phase 2621, and decision N (kb:9379218, Q7): one
 versioned JSON model of the whole spec, the graphs in it as data.
@@ -3124,7 +3160,7 @@ versioned JSON model of the whole spec, the graphs in it as data.
 - The checker's plain run is unchanged. No block's text changes, so
   nothing needs re-approval.
 
-## 29. Changes from revision 60
+## 30. Changes from revision 60
 
 Build Plan kb:9379223, phase 2625: every bound operation is held to its
 contract, on every call the runner makes.
@@ -3161,7 +3197,7 @@ contract, on every call the runner makes.
   wrapping as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 30. Changes from revision 59
+## 31. Changes from revision 59
 
 Decision EE (the vision kb:9378618): one story checked end to end
 against real code, a deliberately broken implementation failing it,
@@ -3202,7 +3238,7 @@ before any new language feature. Build Plan kb:9379223, phase 2624.
   lists the running of examples as not begun.
 - No block's text changes, so nothing needs re-approval.
 
-## 31. Changes from revision 58
+## 32. Changes from revision 58
 
 Operator decision GG (kb:9378274 entry 139), from Astra's round 42
 (kb:9380388, finding 2): revision 58 removed `TODAY`, and with it the
@@ -3220,7 +3256,7 @@ way to state a calendar-day contract (`due == TODAY`).
 - The read view reads `TODAY` as "today" (12).
 - No block's text changes, so nothing needs re-approval.
 
-## 32. Changes from revision 57
+## 33. Changes from revision 57
 
 Operator decision FF (kb:9378274 entry 138; design kb:9380368, part 1),
 from the shrink audits kb:9380362 and kb:9380363. The first of two
@@ -3307,7 +3343,7 @@ naming audit kb:9380258): one word for one thing.
   subset", matching `yaml_feature`. `problem` and EDDA-001 need
   re-approval, as after pass 1.
 
-## 33. Changes from revision 56
+## 34. Changes from revision 56
 
 Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
 
@@ -3326,7 +3362,7 @@ Operator decision BB (kb:9378274 entry 134; tasks 2563 and 2565):
   the meaning is unchanged. The approved snapshots keep the old name,
   so the blocks that changed are drafts until re-approved.
 
-## 34. Changes from revision 55
+## 35. Changes from revision 55
 
 Operator decisions for the build (task 2568):
 
@@ -3350,7 +3386,7 @@ Operator decisions for the build (task 2568):
   alone; `approved_at` is the host's local time, taken as the business
   zone; `story.blocks` says which types of a dot path count.
 
-## 35. Changes from revision 54
+## 36. Changes from revision 54
 
 Operator decisions for the build (task 2567, kb:9379093 item 5):
 
@@ -3365,7 +3401,7 @@ Operator decisions for the build (task 2567, kb:9379093 item 5):
   history's refusals say why. The version shown is `version`,
   `len(versions)`, not the newest entry's number (kb:9379121).
 
-## 36. Changes from revision 53
+## 37. Changes from revision 53
 
 Operator decisions after the review on Fable (kb:9379090) and its
 removal audit (kb:9379093):
@@ -3400,7 +3436,7 @@ removal audit (kb:9379093):
 - `wording_drift` "fact changed, means did not" is anchored at the
   fact's own line, not at its list item.
 
-## 37. Changes from revision 52
+## 38. Changes from revision 52
 
 - From Astra's round 30, findings 1 and 2, the wording decided by the
   operator: EDDA-001's `i_want` is "every fault that stops a file from
@@ -3416,7 +3452,7 @@ removal audit (kb:9379093):
 - A new fixture, `wrapped_title`, and its EDDA-001 example, "an
   example title wrapped over two lines is refused", under rule 3.
 
-## 38. Changes from revision 51
+## 39. Changes from revision 51
 
 - The rules layer, Gherkin's `Rule:` with one check (decision
   kb:9378274 entry 100): a story may carry `rules:`, each item a
@@ -3438,7 +3474,7 @@ removal audit (kb:9379093):
   seven fixtures; the entity `problem`'s `rule` list gains `no_rule`,
   and the entity `sentence`'s `kind` list gains `rule`.
 
-## 39. Changes from revision 50
+## 40. Changes from revision 50
 
 - From Astra's round 28: a join waits until both its lists are
   known, so a computed property joined from properties declared after
@@ -3448,7 +3484,7 @@ removal audit (kb:9379093):
   and `values[1] == 1` refused in either order, and a read operation
   returning it the same.
 
-## 40. Changes from revision 49
+## 41. Changes from revision 49
 
 - From Astra's round 27: a computed property, an operation's result
   and `RESULT` keep the literal markers of their expression, so with
@@ -3457,14 +3493,14 @@ removal audit (kb:9379093):
   operation returning it compares and passes as an input the same
   way; naming a calculation changes nothing.
 
-## 41. Changes from revision 48
+## 42. Changes from revision 48
 
 - From Astra's round 26: `min` and `max` keep what the elements they
   choose from may be, literals included, so
   `min(d for d in days) == NOW` passes for `days` a comprehension of
   a time literal and `min(d for d in days) == 1` is refused.
 
-## 42. Changes from revision 47
+## 43. Changes from revision 47
 
 - From Astra's round 25: an index into a conditional of lists gives
   what each branch's element may be, a branch without literals
@@ -3474,7 +3510,7 @@ removal audit (kb:9379093):
   be, literals included, so `[d for d in days] == [NOW]` and
   `all(d == NOW for d in days)` pass.
 
-## 43. Changes from revision 46
+## 44. Changes from revision 46
 
 - From Astra's round 24: a join, a slice with a variable bound and an
   index that is not a constant keep what a list's elements may be,
@@ -3483,7 +3519,7 @@ removal audit (kb:9379093):
   pass as inputs like `days` itself, an optional value among the
   elements still standing only where `None` fits.
 
-## 44. Changes from revision 45
+## 45. Changes from revision 45
 
 - From Astra's round 23: a flow mapping or list left open at a line's
   end keeps a block open until it closes, in the checker's normaliser
@@ -3493,7 +3529,7 @@ removal audit (kb:9379093):
   holding one compares, indexes and passes as an input like a list
   of such literals.
 
-## 45. Changes from revision 44
+## 46. Changes from revision 44
 
 - From Astra's round 22: `ordered_by` accepts a `returns` that is a
   conditional of lists, each branch ordered, and its expressions see
@@ -3502,7 +3538,7 @@ removal audit (kb:9379093):
   `order.days[0] == NOW`; the keys table names a `refuse` item's
   `when:` and `reason:`, so the registry holds every key.
 
-## 46. Changes from revision 43
+## 47. Changes from revision 43
 
 - From Astra's round 21: a slice, a join and a constant index apply to
   each branch of a conditional of written-out lists on its own, so
@@ -3511,7 +3547,7 @@ removal audit (kb:9379093):
   `values[0] + 1 == 2` pass, and `values[0]` is optional only when
   the position picked is.
 
-## 47. Changes from revision 42
+## 48. Changes from revision 42
 
 - From Astra's round 20: a conditional of two written-out lists keeps
   each branch's positions when they cannot be merged, so a computed
@@ -3522,7 +3558,7 @@ removal audit (kb:9379093):
   an optional value among them still standing only where `None`
   fits.
 
-## 48. Changes from revision 41
+## 49. Changes from revision 41
 
 - From Astra's round 19: a `None` picked out of a list by a constant
   index still stands only where `None` fits, so a required input
@@ -3531,21 +3567,21 @@ removal audit (kb:9379093):
   `["2026-10-03" if flag else "2026-10-04"]` compares like the
   literals.
 
-## 49. Changes from revision 40
+## 50. Changes from revision 40
 
 - From Astra's round 18: a text literal's position in a list remembers
   that it may stand for a time, so a computed property's literals
   compare and pass as inputs like the literals themselves; an input
   argument picked out by a constant index is checked as written.
 
-## 50. Changes from revision 39
+## 51. Changes from revision 39
 
 - From Astra's round 17: a constant index gives the element as
   written, so a time literal picked out of a list still reads as a
   time; `approved_by` is a name, checked as one; an unknown role on a
   who-line is anchored at the `role` line.
 
-## 51. Changes from revision 38
+## 52. Changes from revision 38
 
 - From Astra's round 16: a negative whole-number index or bound
   (`-1`) keeps a list's known positions, as `list[-1]` promised; a
@@ -3553,7 +3589,7 @@ removal audit (kb:9379093):
   `in` over it sees the right types; a bad role-list item is named as
   written (`true`, `FALSE`).
 
-## 52. Changes from revision 37
+## 53. Changes from revision 37
 
 - From Astra's round 15: a snapshot passes the shape layer too, so a
   keyword or bad name, a wrong key or a duplicate given name inside a
@@ -3562,7 +3598,7 @@ removal audit (kb:9379093):
   mixed list compares with itself and `[1, "x"][:1] == [1]` stands; a
   key that is `True` or `False` is `bad_name`, as written.
 
-## 53. Changes from revision 36
+## 54. Changes from revision 36
 
 - From Astra's round 14: a snapshot's quoting and names are checked
   too, so an unquoted text or a quoted name in a snapshot is
@@ -3573,7 +3609,7 @@ removal audit (kb:9379093):
   name form is one `bad_name`, and the outcome message belongs to
   `then` alone.
 
-## 54. Changes from revision 35
+## 55. Changes from revision 35
 
 - From Astra's round 13: a block's versions live in the history
   beside its file, an entry elsewhere is `bad_version` and a pin sees
@@ -3586,7 +3622,7 @@ removal audit (kb:9379093):
   item under a `when` that is neither `DONE` nor `refused` gets its
   own message.
 
-## 55. Changes from revision 34
+## 56. Changes from revision 34
 
 - From Astra's round 12: every `.vc` of a project is checked, with or
   without a `.edda` beside it, so an unchecked history can no longer
@@ -3599,7 +3635,7 @@ removal audit (kb:9379093):
   and misplaced-`DONE` messages are in the `yaml_feature` row; the
   validator's own description names the history checks.
 
-## 56. Changes from revision 33
+## 57. Changes from revision 33
 
 - From Astra's round 11: `bad_pin` and `bad_snapshot` are checked, as
   section 10 states them, with their messages named and two fixtures
@@ -3615,7 +3651,7 @@ removal audit (kb:9379093):
   message is named; the comparison rows say which part is Python and
   which is Edda's type rule.
 
-## 57. Changes from revision 32
+## 58. Changes from revision 32
 
 - From Astra's round 10: a comparison types its operands (`==` two
   values of one kind, `in` an element of a list or a text in a text,
@@ -3633,7 +3669,7 @@ removal audit (kb:9379093):
   `bad_name` in the shape layer; a quoted `DONE` as the first `then`
   item is `bad_name`.
 
-## 58. Changes from revision 31
+## 59. Changes from revision 31
 
 - From Astra's round 9: a malformed shape never stops the shape
   layer; `None` stays an alternative, so an optional value stands only
@@ -3652,7 +3688,7 @@ removal audit (kb:9379093):
   in file order; the pin message is named; the schemas and the
   registry carry the revision from this file.
 
-## 59. Changes from revision 30
+## 60. Changes from revision 30
 
 - From Astra's round 8: `wrong_file` tests the file's name against the
   `about` entity's home; a value of two possible types stands only
@@ -3673,7 +3709,7 @@ removal audit (kb:9379093):
   checker: `not_ordered` through ordered list types, and `bad_version`
   as the first rule of the history layer.
 
-## 60. Changes from revision 29
+## 61. Changes from revision 29
 
 - From Astra's round 7: every style rewrite is built from the
   expression tree, so brackets survive; the prefix rewrite needs a text
@@ -3694,7 +3730,7 @@ removal audit (kb:9379093):
   `unknown_status`, `wrong_file`, `role_cycle`, `wider_than_entity`
   and `derived_in_given` are checked.
 
-## 61. Changes from revision 28
+## 62. Changes from revision 28
 
 - From Astra's round 6: a story entry's pins are its own record from
   approval time, verified for targets and duplicates, never recomputed;
@@ -3711,7 +3747,7 @@ removal audit (kb:9379093):
   suppression, checks every key's style, and matches type phrases on
   ASCII digits and escaped quotes.
 
-## 62. Changes from revision 27
+## 63. Changes from revision 27
 
 - From Astra's round 5: `INTEGER` beside `NUMBER`, and indices and
   bounds are INTEGER-valued expressions; the `DEFAULT` productions
@@ -3733,7 +3769,7 @@ removal audit (kb:9379093):
   at the story's key line; the registry labels say "Python syntax,
   Edda meaning" where that is the truth.
 
-## 63. Changes from revision 26
+## 64. Changes from revision 26
 
 - Expressions are Python (decision 46): one `ast` expression per slot,
   a whitelist of forms (7.1), a style rule (7.2), the fixed names

@@ -29,7 +29,15 @@ it as before; a later refuse condition that holds is still due, and a
 reason no condition gives still fails; optional and
 MANY inputs with nothing to point at do not block an operation; edge
 values read a literal with its sign; a failure prints its full replay
-command. With the setting off, or no edda.yaml, the runner never imports
+command, which, run as printed or as ./edda run, gives the same run,
+failed or passed, in another process under another PYTHONHASHSEED; a
+shrink cut short by its time limit says so; whatever fails at a run's
+setup, in it or at its cleanup, Hypothesis's source constants, the
+clock and the runner's flags are left as they were. A run is its
+seed's, spec's and code's alone: code loaded that no story runs leaves
+it as it was, so the counts of calls below move only when the seed,
+the spec or what the code does moves.
+With the setting off, or no edda.yaml, the runner never imports
 Hypothesis and runs without it; with the setting on and Hypothesis
 missing it exits 3 with one line. A settings file that breaks its
 shape, its root no mapping or a count no whole number of at least 1,
@@ -39,15 +47,21 @@ import contextlib
 import datetime
 import io
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["EDDA_LOG"] = "off"     # the tools and their children never write the log (section 11)
 import edda_binding as binding   # noqa: E402
 import run                       # noqa: E402
+import generate                  # noqa: E402
+from hypothesis import configuration                                 # noqa: E402
+from hypothesis.internal.conjecture import engine, providers         # noqa: E402
+from hypothesis.internal.constants_ast import Constants              # noqa: E402
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 RUN = os.path.relpath(os.path.join(TOOLS, "run.py"))    # as the replay command names it
@@ -175,6 +189,24 @@ def put_off_by_one(actor, box, n):     # refuses 10, which the spec allows
 
 ON = "generated_cases: {on: true, runs: 30, steps: 6}\n"
 
+BOUND = """\
+import sys
+sys.path.insert(0, {tools!r})
+import edda_binding as binding
+
+
+def put(actor, box, n):
+    if n <= 0:
+        raise binding.Refused("nothing to put")
+    if n {over} 10:
+        raise binding.Refused("too many at once")
+    box.count += n
+
+
+binding.ENTITIES["box"] = lambda name, values, workdir: binding.Thing("box", values)
+binding.OPERATIONS.update({{"put": put, "size": lambda actor, box: box.count}})
+"""     # sitecustomize.py for a child process: the box binding, put kept (>) or off by one (>=)
+
 RULES = """\
     rules:
       - rule: "a put adds the parts it is given"
@@ -213,7 +245,7 @@ class GeneratedTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.splitlines(), [
             "BOX-001: examples passed: all 1",
-            "BOX-001: generated cases: 30 runs passed; calls: put 101, size 77; skipped stamp: no binding for stamp"])
+            "BOX-001: generated cases: 30 runs passed; calls: put 101, size 76; skipped stamp: no binding for stamp"])
 
     def test_an_edge_value_that_breaks_a_refusal_is_found_and_shrunk(self):
         binding.OPERATIONS["put"] = put_off_by_one
@@ -241,6 +273,123 @@ class GeneratedTest(unittest.TestCase):
     def test_the_seed_replays_the_same_run(self):
         binding.OPERATIONS["put"] = put_off_by_one
         self.assertEqual(self.main("--seed", "11"), self.main("--seed", "11"))
+
+    def runs(self):
+        """a failed run, as printed, and passed ones, with their counts;
+        seed 5's moved with the code loaded before revision 76"""
+        binding.OPERATIONS["put"] = put_off_by_one
+        failed = self.main("--seed", "11")
+        binding.OPERATIONS["put"] = put
+        return failed, self.main("--seed", "3"), self.main("--seed", "5")
+
+    def test_an_unrelated_edit_leaves_the_run_as_it_was(self):
+        before = self.runs()
+        with tempfile.TemporaryDirectory() as d:     # code no story runs, full of literals, loaded with the binding
+            with open(os.path.join(d, "unrelated_code.py"), "w") as f:
+                f.write("".join(f"def unused_{i}(n):\n"
+                                f"    return n * {i * 37 % 2001 - 1000} + len({'abc '[i % 4] * (i % 4)!r})\n"
+                                for i in range(60)))
+            sys.path.insert(0, d)
+            try:
+                import unrelated_code
+                binding.unused = unrelated_code
+                after = self.runs()
+            finally:
+                sys.path.remove(d)
+                del sys.modules["unrelated_code"], binding.unused
+        self.assertIn("generated cases: failed (seed 11)", before[0][1])
+        self.assertEqual(before, after)
+
+    def child(self, argv, over, hash_seed):
+        """(exit code, output) of the real command argv in a fresh process
+        under hash_seed, with the box binding loaded first, put kept (>)
+        or off by one (>=)"""
+        with tempfile.TemporaryDirectory() as site:
+            with open(os.path.join(site, "sitecustomize.py"), "w") as f:
+                f.write(BOUND.format(tools=TOOLS, over=over))
+            p = subprocess.run([sys.executable, *argv], capture_output=True, text=True,
+                               env=dict(os.environ, PYTHONPATH=site, PYTHONHASHSEED=hash_seed))
+        self.assertEqual(p.stderr, "")
+        return p.returncode, p.stdout
+
+    def test_the_printed_replay_gives_the_same_run_in_another_process(self):
+        binding.OPERATIONS["put"] = put_off_by_one
+        failed = self.main("--seed", "11")
+        binding.OPERATIONS["put"] = put
+        passed = self.main("--seed", "3")
+        replay = next(line for line in failed[1].splitlines() if line.startswith("    replay: "))
+        printed = shlex.split(replay[len("    replay: "):])
+        self.assertEqual(printed[0], "python3")
+        edda = [os.path.join(os.path.dirname(TOOLS), "edda"), "run", "--project", self.dir.name]
+        for hash_seed in ("0", "4242"):
+            self.assertEqual(self.child(printed[1:], ">=", hash_seed), failed)
+            self.assertEqual(self.child(edda + ["--seed", "11"], ">=", hash_seed), failed)
+            self.assertEqual(self.child(edda + ["--seed", "3"], ">", hash_seed), passed)
+
+    def state(self):
+        """what a generated run changes for the whole process"""
+        return (providers._get_local_constants, run.NOW[0], run.UNSET_ENDS[0], run.REAL_FUNCTIONS[0],
+                list(run.GIVENS), list(run.REAL_CALLS), getattr(configuration, "__hypothesis_home_directory"))
+
+    def test_what_a_run_changes_is_undone_whatever_fails(self):
+        seen, home = [], []
+
+        def watched(*args):
+            before = self.state()
+            try:
+                return cases(*args)
+            finally:
+                seen.append((before, self.state()))
+        cases = generate.cases
+
+        def clock_at(when):     # the clock hook, failing at the setup (call 1) or the reset (2) of a generated run
+            calls = []
+
+            def hook(now):
+                if run.UNSET_ENDS[0]:
+                    calls.append(now)
+                    if len(calls) == when:
+                        raise RuntimeError(f"clock call {when}")
+            return hook
+
+        class Folder(tempfile.TemporaryDirectory):   # the first made is Hypothesis's home
+            def __init__(self):
+                super().__init__()
+                home.append(self)
+
+            def cleanup(self):
+                super().cleanup()
+                if self is home[0]:
+                    raise OSError("cleanup")
+
+        def crash(actor, box, n):     # in a generated run only: the example keeps passing
+            if run.UNSET_ENDS[0]:
+                raise run.EddaError("body")
+            put(actor, box, n)
+        faults = {"clock setup": (RuntimeError, mock.patch.object(binding, "clock", clock_at(1))),
+                  "body": (None, mock.patch.dict(binding.OPERATIONS, put=crash)),
+                  "clock reset": (RuntimeError, mock.patch.object(binding, "clock", clock_at(2))),
+                  "folder cleanup": (OSError, mock.patch.object(generate, "tempfile",
+                                                                mock.Mock(TemporaryDirectory=Folder)))}
+        for name, (raised, fault) in faults.items():
+            with self.subTest(name), mock.patch.object(generate, "cases", watched), fault:
+                seen.clear()
+                home.clear()
+                if raised:
+                    self.assertRaises(raised, self.main, "--seed", "3")
+                else:
+                    self.assertEqual(self.main("--seed", "3")[0], 3)
+                self.assertEqual(len(seen), 1)
+                self.assertEqual(seen[0][1], seen[0][0])
+        self.assertIsNot(providers._get_local_constants, Constants)
+
+    def test_a_shrink_cut_short_by_its_time_limit_says_so(self):
+        binding.OPERATIONS["put"] = put_off_by_one
+        with mock.patch.object(engine, "MAX_SHRINKING_SECONDS", 0):
+            code, out = self.main("--seed", "3")
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines()[3],
+                         "    shrinking stopped on its time limit; replay may end on a different example")
 
     def test_a_world_that_breaks_an_always_rule_is_thrown_away(self):
         seen = []
@@ -324,7 +473,7 @@ class GeneratedTest(unittest.TestCase):
         try:
             self.write("box.edda", BOX.replace("label: TEXT, OPTIONAL", "label: TEXT"))
             self.assertEqual(self.main("--seed", "3"), (0, "BOX-001: examples passed: all 1\n"
-                             "BOX-001: generated cases: 30 runs passed; calls: put 43; "
+                             "BOX-001: generated cases: 30 runs passed; calls: put 34; "
                              "skipped stamp: no binding for stamp; skipped size: box_1.label is unset\n"))
         finally:
             del binding.VALUES["box"]
@@ -351,7 +500,7 @@ class GeneratedTest(unittest.TestCase):
         try:
             self.write("box.edda", LABELLED)
             self.assertEqual(self.main("--seed", "3"), (0, "BOX-001: examples passed: all 1\n"
-                             "BOX-001: generated cases: 30 runs passed; calls: put 59, size 58; "
+                             "BOX-001: generated cases: 30 runs passed; calls: put 61, size 48; "
                              "skipped stamp: no binding for stamp; skipped put: box.label is unset\n"))
         finally:
             del binding.VALUES["box"]
@@ -417,7 +566,7 @@ class GeneratedTest(unittest.TestCase):
             raise binding.Refused("too heavy")
         self.assertEqual(self.weighed(put_heavy, refuse=HEAVY)[:2], (0, [
             "BOX-001: not run: no binding for box.weight",
-            "BOX-001: generated cases: 30 runs passed; calls: size 6; "
+            "BOX-001: generated cases: 30 runs passed; calls: size 19; "
             "skipped stamp: no binding for stamp; skipped put: no binding for box.weight"]))
 
     def taxed(self, put_code, total="subtotal + tax"):
@@ -620,7 +769,7 @@ class GeneratedTest(unittest.TestCase):
         binding.OPERATIONS["tag"] = lambda actor, box, notes, note=None: None
         try:
             self.assertEqual(self.main("--seed", "3"), (0, "BOX-001: examples passed: all 1\n"
-                             "BOX-001: generated cases: 30 runs passed; calls: put 85, size 34, tag 41; "
+                             "BOX-001: generated cases: 30 runs passed; calls: put 84, size 39, tag 33; "
                              "skipped stamp: no binding for stamp\n"))
         finally:
             del binding.OPERATIONS["tag"]
@@ -863,7 +1012,7 @@ class WorldTest(unittest.TestCase):
         self.bind(binding.OPERATIONS, label_of=lambda actor, node: node.label)
         self.assertEqual(self.project("node.edda", NODE), (0, [
             "NODE-001: examples passed: all 1",
-            "NODE-001: generated cases: 30 runs passed; calls: label_of 170; "
+            "NODE-001: generated cases: 30 runs passed; calls: label_of 169; "
             "skipped entity ring: nothing to fill its required next"]))
 
     def test_a_date_only_time_is_a_time(self):
@@ -871,7 +1020,7 @@ class WorldTest(unittest.TestCase):
         self.bind(binding.OPERATIONS, move=move)
         self.assertEqual(self.project("task.edda", TASK), (0, [
             "TASK-001: examples passed: all 1",
-            "TASK-001: generated cases: 30 runs passed; calls: move 166"]))
+            "TASK-001: generated cases: 30 runs passed; calls: move 168"]))
 
 
 HIDDEN = """\

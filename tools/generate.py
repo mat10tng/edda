@@ -13,7 +13,13 @@ one of the story's bound operations, an actor its who-lines name,
 inputs from the records that exist, the givens and what their
 properties reach at any depth; the call goes through the runner's
 run_operation, the rule wrapping of section 6, the only oracle. Up to
-`runs` runs, under one seed. An operation that reads the clock runs on
+`runs` runs, under one seed, and nothing else: Hypothesis would also
+draw the literals it finds in the source of every module loaded, so an
+edit to code no story runs would change the run; here it draws none,
+and the same seed, spec and code behaviour give the same run in any
+process, unless shrinking stops on Hypothesis's time limit, which the
+failure then says. What a run sets for the whole process is set back
+however it ends (isolate). An operation that reads the clock runs on
 a clock stopped at the project's clock_start (edda.yaml), never moved
 and never the machine's. A client function is the client's bound
 function, whose rows edda run checks first; an operation that makes one
@@ -30,6 +36,7 @@ With nothing failed, met in the starting world the story is not run, met
 in a step the run ends there and the operation is skipped.
 """
 import ast
+import contextlib
 import datetime
 import json
 import re
@@ -38,9 +45,14 @@ import tempfile
 
 from hypothesis import HealthCheck, Phase, Verbosity, assume, seed as use_seed, settings as Settings, \
     strategies as st
+from hypothesis import configuration
 from hypothesis.configuration import set_hypothesis_home_dir
 from hypothesis.errors import Flaky, Unsatisfiable
+from hypothesis.internal.conjecture import providers
+from hypothesis.internal.conjecture.engine import ExitReason
+from hypothesis.internal.constants_ast import Constants
 from hypothesis.stateful import RuleBasedStateMachine, initialize, rule, run_state_machine_as_test
+from hypothesis.statistics import collector
 
 R = None    # the runner module, set by cases(): run.py may be __main__, not "run"
 
@@ -547,31 +559,23 @@ def cases(runner, sid, story, runs, steps, seed, replay):
     if not plan.ops:
         return [f"{sid}: generated cases: not run: " + (skips(plan)[2:] or "no operations")], False
     Cases = use_seed(seed)(machine(plan))
-    home = tempfile.TemporaryDirectory()    # Hypothesis's caches, never in the project
-    set_hypothesis_home_dir(home.name)
-    R.UNSET_ENDS[0] = True
-    R.REAL_FUNCTIONS[0] = True      # a client function is the client's code here, its rows passed (Plan)
-    P = R.PROJECT[0]        # the clock, stopped at the project's start for every run
-    R.set_clock(R.checker.resolved(R.checker.parse_time(P.clock_start), P.zone) if P.clock_start else None)
-    try:
-        run_state_machine_as_test(Cases, settings=Settings(
-            max_examples=runs, stateful_step_count=steps + 1, database=None, deadline=None,
-            derandomize=False, print_blob=False, report_multiple_bugs=False, verbosity=Verbosity.quiet,
-            phases=[Phase.generate, Phase.shrink], suppress_health_check=list(HealthCheck)))
-    except Broken as e:
-        return failure(sid, story, e, seed, replay, skips(plan)), True
-    except Cannot as e:
-        return [f"{sid}: generated cases: not run: {e}{skips(plan)}"], False
-    except Unsatisfiable:
-        return [f"{sid}: generated cases: not run: no starting world keeps every always-rule" + skips(plan)], False
-    except Flaky as e:
-        return [f"{sid}: generated cases: failed once, and not again on replay (seed {seed}){skips(plan)}: {e}"], True
-    finally:
-        R.UNSET_ENDS[0] = False
-        R.REAL_FUNCTIONS[0] = False
-        R.set_clock(None)
-        set_hypothesis_home_dir(None)
-        home.cleanup()
+    stopped = []    # why Hypothesis stopped, from its statistics
+    with contextlib.ExitStack() as undo:    # every process-wide change made for the run, undone whatever fails
+        isolate(undo)
+        undo.enter_context(collector.with_value(lambda stats: stopped.append(stats.get("stopped-because"))))
+        try:
+            run_state_machine_as_test(Cases, settings=Settings(
+                max_examples=runs, stateful_step_count=steps + 1, database=None, deadline=None,
+                derandomize=False, print_blob=False, report_multiple_bugs=False, verbosity=Verbosity.quiet,
+                phases=[Phase.generate, Phase.shrink], suppress_health_check=list(HealthCheck)))
+        except Broken as e:
+            return failure(sid, story, e, seed, replay, skips(plan), SLOW_SHRINK in stopped), True
+        except Cannot as e:
+            return [f"{sid}: generated cases: not run: {e}{skips(plan)}"], False
+        except Unsatisfiable:
+            return [f"{sid}: generated cases: not run: no starting world keeps every always-rule" + skips(plan)], False
+        except Flaky as e:
+            return [f"{sid}: generated cases: failed once, and not again on replay (seed {seed}){skips(plan)}: {e}"], True
     if not any(plan.calls.values()):
         why = [f"{o} never had a record for each input" for o in plan.ops if o not in plan.ready]
         return [f"{sid}: generated cases: not run: no call ran in {plan.runs} runs"
@@ -582,6 +586,36 @@ def cases(runner, sid, story, runs, steps, seed, replay):
     return [f"{sid}: generated cases: {plan.runs} runs passed; calls: {calls}" + skips(plan)], False
 
 
+SLOW_SHRINK = ExitReason.very_slow_shrinking.value     # shrinking stopped on its time limit, not on a smallest run
+
+
+def isolate(undo):
+    """make the process-wide changes a run needs, each with its undo put on
+    undo (an ExitStack) before the change is made, so each is undone,
+    whatever fails and even when an undo before it fails: Hypothesis's
+    home folder, a temporary one, never in the project, made and removed;
+    its source constants, none, so a run is the seed's alone, and the
+    cache it keeps of them, emptied on the way in and out; the runner's
+    flags, GIVENS and REAL_CALLS, as they were; the clock, stopped at the
+    project's start, then back as it was"""
+    home = tempfile.TemporaryDirectory()
+    undo.callback(home.cleanup)
+    undo.callback(set_hypothesis_home_dir, getattr(configuration, "__hypothesis_home_directory"))
+    set_hypothesis_home_dir(home.name)
+    undo.callback(providers.CONSTANTS_CACHE.cache.clear)
+    undo.callback(setattr, providers, "_get_local_constants", providers._get_local_constants)
+    providers._get_local_constants = Constants
+    providers.CONSTANTS_CACHE.cache.clear()
+    for flag in (R.UNSET_ENDS, R.REAL_FUNCTIONS):   # REAL_FUNCTIONS: a client function is the client's code (Plan)
+        undo.callback(flag.__setitem__, 0, flag[0])
+        flag[0] = True
+    for kept in (R.GIVENS, R.REAL_CALLS):
+        undo.callback(kept.__setitem__, slice(None), list(kept))
+    undo.callback(R.set_clock, R.NOW[0])
+    P = R.PROJECT[0]
+    R.set_clock(R.checker.resolved(R.checker.parse_time(P.clock_start), P.zone) if P.clock_start else None)
+
+
 def skips(plan):
     """"; skipped <what>: <why>" for each thing skipped, once, with the first why"""
     first = {}
@@ -590,14 +624,17 @@ def skips(plan):
     return "".join(f"; skipped {o}: {why}" for o, why in first.items())
 
 
-def failure(sid, story, e, seed, replay, skipped):
+def failure(sid, story, e, seed, replay, skipped, slow=False):
     """a shrunk failure: the seed, what was skipped, the command that
-    replays it, the broken rule, and
+    replays it, a word when shrinking stopped on its time limit (slow),
+    the broken rule, and
     the run as an example ready to paste under the story's examples:,
     with, for a story with rules:, the line its rule's shown_by: needs"""
     name = re.match(r"[a-z_0-9]+", e.steps[-1][1]).group() if e.steps else "the starting world"
     title = f"generated: {name} breaks a rule"
     out = [f"{sid}: generated cases: failed (seed {seed}){skipped}", f"    replay: {replay}"]
+    if slow:
+        out.append("    shrinking stopped on its time limit; replay may end on a different example")
     out += [f"    {f}" for f in e.found]
     out.append("    as an example:")
     out.append(f"      {json.dumps(title)}:")

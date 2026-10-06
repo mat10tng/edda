@@ -660,7 +660,7 @@ class GeneratedTest(Clocked):
         self.assertRegex(line, r"^CLK-001: generated cases: 10 runs passed; calls: .*stamp \d+")
         self.assertNotIn("skipped stamp", line)
         told = [t and check.clock_words(t) for t in self.seen[4:]]  # after the example's start and three at:
-        self.assertEqual(told, ["2026-10-01 09:00", None])         # the generated runs' start, then no clock
+        self.assertEqual(told, ["2026-10-01 09:00", "2026-10-07 12:30"])   # their start, then the example's time back
 
     def test_without_one_they_are_skipped(self):
         code, line = self.generated("")
